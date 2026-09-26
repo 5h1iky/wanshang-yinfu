@@ -54,6 +54,9 @@ feedcap-*.log
 
 /tools/bili-src/
 
-# �Ự cookie ������������ֵ���������ض���ʵ�飩
+# �Ự cookie �����������ֵ���������ض���ʵ�飩
 tools/_session_cookie.txt
 tools/_session.xml
+
+# 提交信息临时文件（写完就删，别进库）
+commit-*.txt

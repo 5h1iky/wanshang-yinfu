@@ -26,12 +26,14 @@ import java.util.List;
 
 public class FeedAdapter extends PagerAdapter {
 
-    /** 互动回调（点赞/评论/收藏/分享） */
+    /** 互动回调（点赞/评论/收藏/分享/进作者主页） */
     public interface ActionListener {
         void onLike(FeedVideo video, ViewHolder holder);
         void onComment(FeedVideo video);
         void onCollect(FeedVideo video, ViewHolder holder);
         void onShare(FeedVideo video);
+        /** 点作者头像 → 进主页（只读，走原生 API） */
+        void onAvatar(FeedVideo video);
     }
 
     /** View 缓存池：从 ViewPager 移除的 item 存这里复用（沿用 demo 方案） */
@@ -128,6 +130,15 @@ public class FeedAdapter extends PagerAdapter {
                 if (mActionListener != null) mActionListener.onShare(item);
             }
         });
+        // 点头像进作者主页（只读接口，风控宽松）
+        if (viewHolder.mIvAvatar != null) {
+            viewHolder.mIvAvatar.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mActionListener != null) mActionListener.onAvatar(item);
+                }
+            });
+        }
         container.addView(view);
         return view;
     }
@@ -175,6 +186,8 @@ public class FeedAdapter extends PagerAdapter {
         public FrameLayout mPlayerContainer;
         public View mBtnLike, mBtnComment, mBtnCollect, mBtnShare;
         public ImageView mIvLike, mIvCollect;
+        /** 作者头像（点了进主页） */
+        public ImageView mIvAvatar;
         public TextView mTvLikeCount, mTvCommentCount, mTvCollectCount;
 
         ViewHolder(View itemView) {
@@ -188,6 +201,7 @@ public class FeedAdapter extends PagerAdapter {
             mBtnShare = mTikTokView.findViewById(R.id.btn_share);
             mIvLike = mTikTokView.findViewById(R.id.iv_like);
             mIvCollect = mTikTokView.findViewById(R.id.iv_collect);
+            mIvAvatar = mTikTokView.findViewById(R.id.iv_avatar);
             mTvLikeCount = mTikTokView.findViewById(R.id.tv_like_count);
             mTvCommentCount = mTikTokView.findViewById(R.id.tv_comment_count);
             mTvCollectCount = mTikTokView.findViewById(R.id.tv_collect_count);

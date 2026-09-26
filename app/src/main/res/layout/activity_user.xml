@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  作者主页：头部信息（昵称/粉丝/作品数）+ 作品列表。
+  纯只读（/aweme/post/ + /user/profile/other/），走原生 API 直连。
+
+  手表小屏：头部压成两行，别用大卡片占掉半屏——列表才是主角。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base"
+    android:orientation="vertical">
+
+    <include layout="@layout/include_header" />
+
+    <!-- 头部：昵称 + 统计（加载完由代码填） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
+        android:orientation="vertical"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2">
+
+        <TextView
+            android:id="@+id/tv_user_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_body"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_user_stats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/text_muted"
+            android:textSize="@dimen/t_caption" />
+    </LinearLayout>
+
+    <!-- 四态反馈：只在加载/空/失败时出现 -->
+    <TextView
+        android:id="@+id/tv_user_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
+
+    <com.dywatch.app.ui.RotaryRecyclerView
+        android:id="@+id/rv_user"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:padding="@dimen/s3"
+        android:scrollbars="none" />
+
+</LinearLayout>

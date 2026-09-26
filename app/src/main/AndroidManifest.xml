@@ -74,6 +74,13 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="portrait" />
 
+        <!-- 作者主页：作品列表 + 用户信息（纯只读，原生 API 直连） -->
+        <activity
+            android:name=".ui.UserActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
         <!-- 设置页：全局缩放 / 屏形 / 画质 / 常亮 / 清账本 / 诊断 -->
         <activity
             android:name=".ui.SettingsActivity"

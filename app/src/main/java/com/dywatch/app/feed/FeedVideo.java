@@ -17,6 +17,8 @@ public class FeedVideo implements java.io.Serializable {
     public final String coverUrl;
     public final String awemeId;
     public final String authorName;
+    /** 作者 sec_uid（进作者主页要用；不是 final——解析后置填，避免改构造函数签名） */
+    public String authorSecUid = "";
     public long diggCount;
     public long commentCount;
     public long collectCount;

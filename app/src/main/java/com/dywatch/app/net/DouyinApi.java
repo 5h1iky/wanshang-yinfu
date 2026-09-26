@@ -160,6 +160,167 @@ public final class DouyinApi {
     }
 
     /**
+     * 拉某个作者的主页作品列表（只读，直连）。
+     *
+     * 实测（2026-09-26）：HTTP 200 + status_code=0 + 5 条，含 statistics。
+     * ⚠️ 这个接口有自己特有的版本号 version_code=290100（不是主站通用的 170400），
+     *    cv-cat 注释明确警告写错会少字段。
+     */
+    public List<FeedVideo> fetchUserPosts(String secUid, long cursor) throws IOException {
+        ensureTtwid();
+        String query = buildUserPostsQuery(secUid, cursor);
+        Request req = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/post/?" + query)
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/user/" + (secUid == null ? "" : secUid))
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            String body = resp.body().string();
+            List<FeedVideo> list = parseFeed(body);
+            if (list.isEmpty()) {
+                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(body);
+                int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
+                if (code != 0) throw new IOException("作品列表 status=" + code);
+            }
+            return list;
+        }
+    }
+
+    /** 构造 aweme/post query；纯函数（除签名外无副作用） */
+    String buildUserPostsQuery(String secUid, long cursor) {
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("device_platform", "webapp");
+        p.put("aid", "6383");
+        p.put("channel", "channel_pc_web");
+        p.put("sec_user_id", secUid == null ? "" : secUid);
+        p.put("max_cursor", String.valueOf(cursor));
+        p.put("locate_query", "false");
+        p.put("show_live_replay_strategy", "1");
+        p.put("need_time_list", "1");
+        p.put("time_list_query", "0");
+        p.put("whale_cut_token", "");
+        p.put("cut_version", "1");
+        p.put("count", "18");
+        p.put("publish_video_strategy_type", "2");
+        p.put("from_user_page", "1");          // 看别人的主页
+        // ⚠️ 该接口特有版本号，写通用的 170400 会少字段
+        p.put("update_version_code", "290100");
+        p.put("pc_client_type", "1");
+        p.put("pc_libra_divert", "Windows");
+        p.put("support_h265", "1");
+        p.put("support_dash", "1");
+        p.put("version_code", "290100");
+        p.put("version_name", "29.1.0");
+        p.put("cookie_enabled", "true");
+        p.put("screen_width", "2560");
+        p.put("screen_height", "1440");
+        p.put("browser_language", "zh-CN");
+        p.put("browser_platform", "Win32");
+        p.put("browser_name", "Chrome");
+        p.put("browser_version", "135.0.0.0");
+        p.put("browser_online", "true");
+        p.put("engine_name", "Blink");
+        p.put("engine_version", "135.0.0.0");
+        p.put("os_name", "Windows");
+        p.put("os_version", "10");
+        p.put("cpu_core_num", "20");
+        p.put("device_memory", "8");
+        p.put("platform", "PC");
+        p.put("downlink", "0.55");
+        p.put("effective_type", "3g");
+        p.put("round_trip_time", "0");
+        StringBuilder q = new StringBuilder();
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(e.getKey()).append('=').append(e.getValue());
+        }
+        return q + "&a_bogus=" + urlEncode(signer.makeABogus(q.toString()));
+    }
+
+    /** 作者信息（昵称/粉丝数/作品数等），给主页头部用 */
+    public static class UserInfo {
+        public String nickname = "";
+        public String signature = "";
+        public String avatarUrl = "";
+        public long followerCount;
+        public long totalFavorited;
+        public long awemeCount;
+    }
+
+    public UserInfo fetchUserInfo(String secUid) throws IOException {
+        ensureTtwid();
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("device_platform", "webapp");
+        p.put("aid", "6383");
+        p.put("channel", "channel_pc_web");
+        p.put("sec_user_id", secUid == null ? "" : secUid);
+        p.put("publish_video_strategy_type", "2");
+        p.put("source", "channel_pc_web");
+        p.put("personal_center_strategy", "1");
+        p.put("profile_other_record_enable", "1");
+        p.put("land_to", "1");
+        p.put("update_version_code", "170400");
+        p.put("pc_client_type", "1");
+        p.put("pc_libra_divert", "Windows");
+        p.put("support_h265", "1");
+        p.put("support_dash", "1");
+        p.put("version_code", "170400");
+        p.put("version_name", "17.4.0");
+        p.put("cookie_enabled", "true");
+        p.put("screen_width", "2560");
+        p.put("screen_height", "1440");
+        p.put("browser_language", "zh-CN");
+        p.put("browser_platform", "Win32");
+        p.put("browser_name", "Chrome");
+        p.put("browser_version", "135.0.0.0");
+        p.put("browser_online", "true");
+        p.put("engine_name", "Blink");
+        p.put("engine_version", "135.0.0.0");
+        p.put("os_name", "Windows");
+        p.put("os_version", "10");
+        p.put("cpu_core_num", "20");
+        p.put("device_memory", "8");
+        p.put("platform", "PC");
+        p.put("downlink", "0.55");
+        p.put("effective_type", "3g");
+        p.put("round_trip_time", "0");
+        StringBuilder q = new StringBuilder();
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(e.getKey()).append('=').append(e.getValue());
+        }
+        Request req = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/user/profile/other/?" + q
+                        + "&a_bogus=" + urlEncode(signer.makeABogus(q.toString())))
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/user/" + (secUid == null ? "" : secUid))
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            com.google.gson.JsonElement el =
+                    com.google.gson.JsonParser.parseString(resp.body().string());
+            if (!el.isJsonObject()) throw new IOException("profile/other 非 JSON");
+            com.google.gson.JsonObject u = objOf(el.getAsJsonObject(), "user");
+            if (u == null) throw new IOException("profile/other 无 user");
+            UserInfo info = new UserInfo();
+            info.nickname = optString(u, "nickname");
+            info.signature = optString(u, "signature");
+            info.followerCount = u.has("follower_count") ? u.get("follower_count").getAsLong() : 0L;
+            info.totalFavorited = u.has("total_favorited") ? u.get("total_favorited").getAsLong() : 0L;
+            info.awemeCount = u.has("aweme_count") ? u.get("aweme_count").getAsLong() : 0L;
+            com.google.gson.JsonObject av = objOf(u, "avatar_thumb");
+            if (av != null) {
+                com.google.gson.JsonArray l = arrOf(av, "url_list");
+                if (l != null && l.size() > 0) info.avatarUrl = l.get(0).getAsString();
+            }
+            return info;
+        }
+    }
+
+    /**
      * 拉评论列表（只读，直连）。
      *
      * 实测（2026-09-26，tools/probe-readonly-apis2.js）：www-hj 域 + 仅 3 个参数
@@ -196,11 +357,13 @@ public final class DouyinApi {
             lastCommentHasMore = o.has("has_more") && o.get("has_more").getAsInt() == 1;
             lastCommentCursor = o.has("cursor") ? o.get("cursor").getAsLong() : 0L;
             List<com.dywatch.app.chat.model.Comment> out = new ArrayList<>();
-            com.google.gson.JsonArray arr = o.getAsJsonArray("comments");
+            com.google.gson.JsonArray arr = arrOf(o, "comments");
             if (arr == null) return out;
             for (int i = 0; i < arr.size(); i++) {
-                com.google.gson.JsonObject c = arr.get(i).getAsJsonObject();
-                com.google.gson.JsonObject u = c.getAsJsonObject("user");
+                com.google.gson.JsonElement ce = arr.get(i);
+                if (!ce.isJsonObject()) continue;
+                com.google.gson.JsonObject c = ce.getAsJsonObject();
+                com.google.gson.JsonObject u = objOf(c, "user");
                 String name = u == null ? "" : optString(u, "nickname");
                 long digg = c.has("digg_count") ? c.get("digg_count").getAsLong() : 0L;
                 long ts = c.has("create_time") ? c.get("create_time").getAsLong() : 0L;
@@ -286,7 +449,7 @@ public final class DouyinApi {
             com.google.gson.JsonElement el =
                     com.google.gson.JsonParser.parseString(resp.body().string());
             if (!el.isJsonObject()) throw new IOException("profile/self 非 JSON");
-            com.google.gson.JsonObject user = el.getAsJsonObject().getAsJsonObject("user");
+            com.google.gson.JsonObject user = objOf(el.getAsJsonObject(), "user");
             if (user == null) throw new IOException("profile/self 无 user（未登录？）");
             return optString(user, "sec_uid");
         }
@@ -391,7 +554,7 @@ public final class DouyinApi {
         JsonElement rootEl = JsonParser.parseString(json);
         if (!rootEl.isJsonObject()) return out;
         JsonObject root = rootEl.getAsJsonObject();
-        JsonArray arr = root.getAsJsonArray("aweme_list");
+        JsonArray arr = arrOf(root, "aweme_list");
         if (arr == null) return out;
         for (JsonElement el : arr) {
             if (!el.isJsonObject()) continue;
@@ -406,10 +569,15 @@ public final class DouyinApi {
         String awemeId = optString(item, "aweme_id");
         String title = optString(item, "desc");
         String author = "";
-        JsonObject authorObj = item.getAsJsonObject("author");
-        if (authorObj != null) author = optString(authorObj, "nickname");
+        String authorSecUid = "";
+        JsonObject authorObj = objOf(item, "author");
+        if (authorObj != null) {
+            author = optString(authorObj, "nickname");
+            // 进作者主页要用 sec_uid（profile/other 与 aweme/post 都靠它定位）
+            authorSecUid = optString(authorObj, "sec_uid");
+        }
         long digg = 0, comment = 0, collect = 0;
-        JsonObject stats = item.getAsJsonObject("statistics");
+        JsonObject stats = objOf(item, "statistics");
         if (stats != null) {
             digg = optLong(stats, "digg_count");
             comment = optLong(stats, "comment_count");
@@ -417,7 +585,7 @@ public final class DouyinApi {
         }
         String playUrl = "";
         String coverUrl = "";
-        JsonObject video = item.getAsJsonObject("video");
+        JsonObject video = objOf(item, "video");
         if (video != null) {
             playUrl = pickGearUrl(video, awemeId);
             if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr", awemeId);
@@ -426,7 +594,28 @@ public final class DouyinApi {
             if (coverUrl.isEmpty()) coverUrl = firstUrl(video, "origin_cover", awemeId);
         }
         if (playUrl.isEmpty()) return null;
-        return new FeedVideo(title, playUrl, coverUrl, awemeId, author, digg, comment, collect);
+        FeedVideo v = new FeedVideo(title, playUrl, coverUrl, awemeId, author, digg, comment, collect);
+        v.authorSecUid = authorSecUid;
+        return v;
+    }
+
+    /**
+     * 安全取对象：字段缺失、为 null（JsonNull）或不是对象时一律返回 null。
+     * ⚠️ 不能直接用 getAsJsonObject(key)：字段存在但值是 null 时它会抛
+     *    ClassCastException（JsonNull cannot be cast to JsonObject）。真机踩过——
+     *    带上登录态后会拉到图文贴，它们的 video 字段就是 null。
+     */
+    private static JsonObject objOf(JsonObject o, String key) {
+        if (o == null) return null;
+        JsonElement e = o.get(key);
+        return (e != null && e.isJsonObject()) ? e.getAsJsonObject() : null;
+    }
+
+    /** 安全取数组：同上，非数组/缺失/null 一律返回 null */
+    private static JsonArray arrOf(JsonObject o, String key) {
+        if (o == null) return null;
+        JsonElement e = o.get(key);
+        return (e != null && e.isJsonArray()) ? e.getAsJsonArray() : null;
     }
 
     private static long optLong(JsonObject o, String key) {
@@ -440,7 +629,7 @@ public final class DouyinApi {
     }
 
     private static String firstUrl(JsonObject video, String key, String awemeId) {
-        JsonObject addr = video.getAsJsonObject(key);
+        JsonObject addr = objOf(video, key);
         if (addr == null) return "";
         return urlFromAddr(addr, awemeId);
     }
@@ -470,7 +659,7 @@ public final class DouyinApi {
      * MediaPlayer 单 URL 播它＝有画面没声音。
      */
     static String pickGearUrl(JsonObject video, String awemeId) {
-        JsonArray gears = video.getAsJsonArray("bit_rate");
+        JsonArray gears = arrOf(video, "bit_rate");
         if (gears == null || gears.size() == 0) return "";
         String bestUrl = "";
         int bestRank = 0;
@@ -478,9 +667,10 @@ public final class DouyinApi {
         String bestGear = "";
         for (JsonElement el : gears) {
             if (!el.isJsonObject()) continue;
+            if (!el.isJsonObject()) continue;
             JsonObject g = el.getAsJsonObject();
             if (optInt(g, "is_h265") != 0 || optInt(g, "is_bytevc1") != 0) continue;
-            JsonObject addr = g.getAsJsonObject("play_addr");
+            JsonObject addr = objOf(g, "play_addr");
             if (addr == null) continue;
             String url = urlFromAddr(addr, awemeId);
             if (url.isEmpty() || url.contains("/play/dash/")) continue;
@@ -502,7 +692,7 @@ public final class DouyinApi {
     }
 
     private static String urlFromAddr(JsonObject addr, String awemeId) {
-        JsonArray list = addr.getAsJsonArray("url_list");
+        JsonArray list = arrOf(addr, "url_list");
         if (list == null || list.size() == 0) return "";
         // ⚠️ 真机取证（2026-09-25，url-test.js 实测）：url_list 里直连 CDN 候选（v*-web*.douyinvod.com）
         // 一律 403（带任何请求头/Cookie 均拒），只有 www.douyin.com 的跳转候选（302→douyinvod 206 video/mp4）

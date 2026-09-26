@@ -483,6 +483,24 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     }
 
     /**
+     * 点作者头像 → 进主页。作者主页是纯只读（作品列表 + 用户信息），
+     * 走原生 API 直连，不动 WebView 引擎。
+     */
+    @Override
+    public void onAvatar(FeedVideo video) {
+        if (video.authorSecUid == null || video.authorSecUid.isEmpty()) {
+            android.widget.Toast.makeText(this, "拿不到作者信息（示例视频不支持）",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent it = new Intent(this, com.dywatch.app.ui.UserActivity.class);
+        it.putExtra(com.dywatch.app.ui.UserActivity.EXTRA_SEC_UID, video.authorSecUid);
+        it.putExtra(com.dywatch.app.ui.UserActivity.EXTRA_NAME, video.authorName);
+        startActivity(it);
+        AppLog.i("feed", "进作者主页 " + video.authorName);
+    }
+
+    /**
      * 同一条视频的同一个互动在途时不接受第二次。必须在"乐观翻转"之前拦：翻转发生在
      * 调用 engineAction 之前，拦在里面会留下翻了却没人回滚的 UI（桥侧 __inFlight
      * 只挡 JS 那层，挡不住这里已经翻掉的显示）。
