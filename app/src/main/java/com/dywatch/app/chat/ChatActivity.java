@@ -79,18 +79,14 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         });
 
         // 手表快捷回复（输入层自研部分：先给常用短语，语音后补）
-        int[] quickIds = {R.id.qr1, R.id.qr2, R.id.qr3, R.id.qr4};
-        final String[] quickTexts = {"好", "在忙", "稍等", "😂"};
-        for (int i = 0; i < quickIds.length; i++) {
-            final String t = quickTexts[i];
-            findViewById(quickIds[i]).setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    safeSend(t);
-                    addBubble(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
-                }
-            });
-        }
+        com.dywatch.app.ui.QuickReply.wire(findViewById(R.id.quick_reply_bar),
+                new String[]{"好", "在忙", "稍等", "😂"}, new com.dywatch.app.ui.QuickReply.Pick() {
+                    @Override
+                    public void onPick(String t) {
+                        safeSend(t);
+                        addBubble(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
+                    }
+                });
 
         AppLog.i("chat", "聊天页打开");
     }

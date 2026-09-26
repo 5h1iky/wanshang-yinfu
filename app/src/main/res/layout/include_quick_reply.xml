@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  快捷回复条（手表输入层）：屏幕上打字对手表是最难受的输入方式，
+  高频短语必须一键可发。聊天页与评论页共用这一份。
+  文案由代码 QuickReply.wire() 注入，所以这里不写死 text。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/quick_reply_bar"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingStart="@dimen/s3"
+    android:paddingEnd="@dimen/s3">
+
+    <Button
+        android:id="@+id/qr1"
+        style="?android:attr/buttonBarButtonStyle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:minHeight="@dimen/ctrl_min"
+        android:singleLine="true"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_body" />
+
+    <Button
+        android:id="@+id/qr2"
+        style="?android:attr/buttonBarButtonStyle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:minHeight="@dimen/ctrl_min"
+        android:singleLine="true"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_body" />
+
+    <Button
+        android:id="@+id/qr3"
+        style="?android:attr/buttonBarButtonStyle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:minHeight="@dimen/ctrl_min"
+        android:singleLine="true"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_body" />
+
+    <Button
+        android:id="@+id/qr4"
+        style="?android:attr/buttonBarButtonStyle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:minHeight="@dimen/ctrl_min"
+        android:singleLine="true"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_body" />
+</LinearLayout>

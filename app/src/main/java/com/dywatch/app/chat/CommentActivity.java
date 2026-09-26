@@ -98,6 +98,22 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
             }
         });
 
+        com.dywatch.app.ui.QuickReply.wire(findViewById(R.id.quick_reply_bar),
+                new String[]{"好看！", "求BGM", "赞了", "哈哈哈"},
+                new com.dywatch.app.ui.QuickReply.Pick() {
+                    @Override
+                    public void onPick(String t) {
+                        // 只填入、不直发：评论是公开发到别人视频下的，误触代价和聊天不对等
+                        mInput.setText(t);
+                        mInput.setSelection(t.length());
+                        mInput.requestFocus();
+                        // 用 Toast 而不是状态行：render() 每来一批就会把提示行收掉，
+                        // 写在那儿会被下一次自动加载冲掉（真机实测到就是这个现象）。
+                        android.widget.Toast.makeText(CommentActivity.this,
+                                "已填入，按发送发布", android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                });
+
         mMoreBtn = findViewById(R.id.btn_comments_more);
         mMoreBtn.setVisibility(View.GONE);
         mMoreBtn.setOnClickListener(new View.OnClickListener() {

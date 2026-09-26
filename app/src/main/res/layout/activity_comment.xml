@@ -40,6 +40,13 @@
             android:padding="@dimen/s3" />
     </com.dywatch.app.ui.RotaryScrollView>
 
+    <!--
+      快捷回复：手表上打字最费劲，先给常用短语。
+      与聊天页不同——评论是公开发到别人视频下的，误触代价不对等，
+      所以点一下只「填入输入框」，仍要按发送确认。
+    -->
+    <include layout="@layout/include_quick_reply" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
