@@ -113,21 +113,39 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     }
 
     private void addBubble(ChatMessage msg) {
-        TextView tv = new TextView(this);
-        String time = (msg.timeText != null && !msg.timeText.isEmpty())
-                ? msg.timeText : "";
-        tv.setText((msg.direction == ChatMessage.OUT ? "我 " : "对方 ") + time
-                + "\n" + msg.text);
-        tv.setTextSize(14);
-        tv.setPadding(16, 12, 16, 12);
+        boolean out = msg.direction == ChatMessage.OUT;
+        int dp_ = com.dywatch.app.ui.Rows.dp(this, 1);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(msg.direction == ChatMessage.OUT ? 80 : 8, 8,
-                msg.direction == ChatMessage.OUT ? 8 : 80, 8);
-        tv.setLayoutParams(lp);
-        tv.setBackgroundResource(msg.direction == ChatMessage.OUT
-                ? R.drawable.bg_bubble_out : R.drawable.bg_bubble_in);
-        mMessages.addView(tv);
+        // 我方靠右、对方靠左，靠外侧留白做出对话轴向
+        lp.setMargins(out ? dp_ * 80 : dp_ * 8, dp_ * 8, out ? dp_ * 8 : dp_ * 80, dp_ * 8);
+        lp.gravity = out ? android.view.Gravity.END : android.view.Gravity.START;
+        col.setLayoutParams(lp);
+
+        // ⚠️ 必须显式给文字颜色：主题是 Material3.DayNight，浅色模式下默认字色是深色，
+        // 配我们这套深色气泡会几乎看不见——以前只是恰好没在浅色模式下试过。
+        TextView meta = new TextView(this);
+        meta.setText((out ? "我" : "对方")
+                + (msg.timeText == null || msg.timeText.isEmpty() ? "" : (" · " + msg.timeText)));
+        meta.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.t_caption));
+        meta.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_muted));
+        meta.setGravity(out ? android.view.Gravity.END : android.view.Gravity.START);
+        col.addView(meta);
+
+        TextView tv = new TextView(this);
+        tv.setText(msg.text);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.t_body));
+        tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_primary));
+        tv.setPadding(dp_ * 12, dp_ * 9, dp_ * 12, dp_ * 9);
+        tv.setBackgroundResource(out ? R.drawable.bg_bubble_out : R.drawable.bg_bubble_in);
+        col.addView(tv);
+
+        mMessages.addView(col);
     }
 
     // ---- ChatEngine.Listener ----

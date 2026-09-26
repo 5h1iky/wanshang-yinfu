@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 手表风格：深色底、无 ActionBar；圆屏/表冠适配 M2/M3 再细化 -->
+    <!--
+      全站深色。Material3 默认 colorPrimary 是薰衣草紫，会把 Button/控件染成
+      与深蓝配色冲突的淡紫（真机实测：发送键、快捷回复都变紫）——这里统一换成我们的 accent。
+    -->
     <style name="Theme.Dywatch" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="android:windowBackground">#101418</item>
+        <item name="android:windowBackground">@color/bg_base</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnPrimary">@color/bg_base</item>
+        <item name="colorSecondary">@color/accent</item>
+        <item name="colorOnSecondary">@color/bg_base</item>
+        <item name="colorSurface">@color/bg_surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:statusBarColor">@color/bg_base</item>
     </style>
 </resources>

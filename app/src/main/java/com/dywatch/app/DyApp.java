@@ -11,6 +11,10 @@ public class DyApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        // 全站配色按深色设计（bg_base #0E1418 等），主题是 Material3.DayNight——
+        // 跟随系统会在浅色模式下把默认字色换成深色，配深色背景直接看不见。固定夜间。
+        androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES);
         AppLog.init(this);
         CrashShield.install(this);
         // 会话 cookie 回写 WebView CookieStore（进程重启丢 cookie 的修复，见 LoginManager v2 注释）
