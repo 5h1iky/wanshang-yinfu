@@ -72,8 +72,12 @@
     // ⚠️ 类名是拼接式单词（wrapper/rowArea1/title 互为子串），必须用 [class~=] 整词匹配，
     // 否则行内元素全被当会话行捞出来（真机实测踩过：子串匹配→名字全空→列表为空）
     fetchConversations: function () {
-      try {
-        var items = [];
+      var self = this;
+      // SPA 先把 uid 当昵称渲染、随后才换成真昵称（实测 18:39:04 全是 768941… / 18:39:05 变回 5h1iky）。
+      // DOM 里没有第二个地方存真昵称，所以只能在"还有纯数字占位名"时继续在页内等，
+      // 而不是把中间态吐给原生——那会让列表闪一下数字。
+      var collect = function () {
+        var items = [], pending = 0;
         var rows = document.querySelectorAll('[class~="conversationConversationItemwrapper"]');
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
@@ -85,15 +89,30 @@
           var desc = descEl ? (descEl.textContent || '') : '';
           name = name.replace(/\s+/g, ' ').trim();
           if (!name) continue;
+          if (/^\d{6,}$/.test(name)) pending++;
           // ⚠️ 实测：描述位会被"在线状态"覆盖（😂 → 昨天在线 / 60分钟内在线）→ 认出后丢弃，别当最近消息显示
           desc = desc.replace(/\s+/g, ' ').trim();
           if (/^(刚刚|[\d一二两三四五六七十半]+分钟内在线|[\d]+\s?(小时|天|周)内在线|昨天在线|在线|离线|对方[：:].*)$/.test(desc)) desc = '';
           items.push({ key: String(i), name: name, lastMsg: desc, time: time.trim() });
         }
-        post({ type: 'conversations', items: items });
-      } catch (e) {
-        post({ type: 'error', message: String(e) });
-      }
+        return { items: items, pending: pending, rows: rows.length };
+      };
+      var tries = 0;
+      var step = function () {
+        tries++;
+        try {
+          var r = collect();
+          if ((r.rows > 0 && r.pending === 0) || tries > 14) {
+            post({ type: 'conversations', items: r.items });
+            return;
+          }
+        } catch (e) {
+          post({ type: 'error', message: String(e) });
+          return;
+        }
+        setTimeout(step, 500);
+      };
+      step();
     },
 
     // 进入指定会话（按名字匹配会话行点击；name 为空=保持当前）
@@ -342,6 +361,29 @@
           if (mt) { time = mt[1]; continue; }
           if (t.length > text.length) text = t;
         }
+        // 正文兜底：真机见过某些行昵称/时间/赞数都在、正文却空（图片评论，或正文挂在更深层级
+        // 而不是 col 的直接子节点）。先往深层再找一次最长文本，仍拿不到就标图片，
+        // 两头都空的行直接丢掉——给用户一张只有名字的空白卡片比少一行更糟。
+        if (!text) {
+          var deepest = '';
+          col.querySelectorAll('div,span,p').forEach(function (e) {
+            if (e.children.length) return;
+            // 排除昵称列与赞/分享/回复那一列的后代（否则会把"2.1万分享回复"当正文）
+            if (wrap.contains(e) || e.contains(wrap)) return;
+            var statsCol = col.querySelector('[class*="comment-item-stats-container"]');
+            if (statsCol && statsCol.contains(e)) return;
+            var s = (e.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!s) return;
+            if (/^(刚刚|\d+\s?(秒|分钟|小时|天|周|月|年)前|\d{1,2}-\d{1,2})/.test(s)) return;
+            if (/^\d+(\.\d+)?[万千]?$/.test(s)) return;         // 纯赞数
+            if (/(分享|回复)$/.test(s) && s.length < 12) return; // 操作按钮文本
+            if (s.length > deepest.length) deepest = s;
+          });
+          text = deepest;
+        }
+        if (!text && col.querySelector('img[src*="aweme-image"], img[src*="tos-cn"], img[class*="comment"]')) {
+          text = '［图片］';
+        }
         if (name || text) items.push({ name: name, text: text, time: time, likes: likes });
       }
       return items;
@@ -582,6 +624,10 @@
       }
     }
   };
+
+  // 文档令牌：只在桥真正启动成功的那一份文档里生成。原生侧用它区分
+  // "同一个文档的重复 onPageFinished"和"真的换页/刷新了"，避免重复通知导致同一批数据回多份。
+  window.__dywatch_doc = String(Date.now()) + '-' + String(Math.random()).slice(2, 9);
 
   post({ type: 'ready' });
 

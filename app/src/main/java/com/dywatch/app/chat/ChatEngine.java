@@ -100,6 +100,8 @@ public class ChatEngine {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private WebView mWebView;
     private boolean mReady;
+    /** 桥在文档里生成的令牌；同一个文档的重复 onPageFinished 靠它判重 */
+    private String mDocToken = "";
     /** 未就绪期间暂存的一次性动作（就绪后补发一次；跨页续跑由桥 sessionStorage 负责） */
     private volatile String mPendingJs;
 
@@ -116,14 +118,29 @@ public class ChatEngine {
         mWebView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
-                injectBridge();
                 mReady = true;
-                AppLog.i("engine", "私信页加载完成: " + url);
-                if (mListener != null) mListener.onEngineReady();
-                // 登录墙检测：页面出"扫码登录"= 会话没生效（cookie 丢失/过期），明确报错而不是装死
-                runJs("ChatBridge.checkAuth();");
-                // 未就绪期间暂存的动作补发（跨页续跑由桥 sessionStorage 自续，勿重复）
-                tryRunPending();
+                injectBridge();
+                // SPA 换路由会让同一个文档反复回调 onPageFinished；桥自带重入保护，但原生侧
+                // 若照样跑完整流程，就会重复通知 onEngineReady → 各页重复拉数据、auth 连发多条。
+                // 用桥生成的文档令牌判重：同文档只处理一次，真换页/刷新令牌必然变。
+                mWebView.evaluateJavascript("window.__dywatch_doc||''", new android.webkit.ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String raw) {
+                        String token = raw == null ? "" : raw.replace("\"", "");
+                        if (token.isEmpty()) return;   // 桥没起来（异常页/登录墙），不做无意义的通知
+                        if (token.equals(mDocToken)) {
+                            AppLog.i("engine", "同文档重复 onPageFinished，忽略");
+                            return;
+                        }
+                        mDocToken = token;
+                        AppLog.i("engine", "页面加载完成: " + url);
+                        if (mListener != null) mListener.onEngineReady();
+                        // 登录墙检测：页面出"扫码登录"= 会话没生效（cookie 丢失/过期），明确报错而不是装死
+                        runJs("ChatBridge.checkAuth();");
+                        // 未就绪期间暂存的动作补发（跨页续跑由桥 sessionStorage 自续，勿重复）
+                        tryRunPending();
+                    }
+                });
             }
         });
         // 载入前把备份会话 cookie 回写 CookieStore（幂等，只补缺失键）
@@ -404,6 +421,7 @@ public class ChatEngine {
 
     public void destroy() {
         mReady = false;
+        mDocToken = "";
         mListener = null;
         detachFromView();
         mHost = null;
