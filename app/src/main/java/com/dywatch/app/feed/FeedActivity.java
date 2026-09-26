@@ -34,6 +34,14 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
 
     /** 当前播放位置 */
     private int mCurPos;
+    /**
+     * 外部直接塞一批视频来播（「我的」页点喜欢/看过条目时用）。
+     * 传了就不自己拉 feed——那批就是本次要刷的全部内容。
+     */
+    public static final String EXTRA_VIDEO_LIST = "video_list";
+    public static final String EXTRA_START_INDEX = "start_index";
+    /** 预置列表模式：不再自动拉流、翻页（列表就是这么多） */
+    private boolean mPresetMode;
     /** 应用级缓存：重进页面直接放上次刷到的视频（固件只在真冷启动垫场，杜绝"每次进来都是那 2 条老视频"） */
     private static final List<FeedVideo> sCache = new ArrayList<>();
     private com.dywatch.app.net.DouyinApi mApi;
@@ -53,22 +61,47 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         initVideoView();
         mPreloadManager = PreloadManager.getInstance(this);
 
+        // 「我的」页可能直接塞一批视频来播（喜欢/看过列表点进来）
+        @SuppressWarnings("unchecked")
+        java.io.Serializable extra = getIntent().getSerializableExtra(EXTRA_VIDEO_LIST);
+        if (extra instanceof java.util.ArrayList) {
+            java.util.List<FeedVideo> preset = (java.util.List<FeedVideo>) extra;
+            if (!preset.isEmpty()) {
+                mPresetMode = true;
+                mVideoList.clear();
+                mVideoList.addAll(preset);
+                mAdapter.notifyDataSetChanged();
+                final int start = Math.max(0, Math.min(
+                        getIntent().getIntExtra(EXTRA_START_INDEX, 0), preset.size() - 1));
+                mViewPager.setCurrentItem(start, false);
+                com.dywatch.app.util.AppLog.i("feed", "预置列表播放 " + preset.size()
+                        + " 条，从 #" + start + " 开始");
+                startPlay(start);
+                wireBack();
+                return;
+            }
+        }
+
         loadFixtureOrCache(); // 冷启动=固件垫场；有缓存=直接放上次的视频（不闪老面孔）
         // 四态反馈：先给"加载中"。首屏要等 Rhino 签名 + 拉流，手表上几秒纯黑屏
         // 会被当成坏了——旧版只有失败/没有更多两态，加载过程没有任何交代。
         showHint("正在拉取视频…");
         loadFeed();           // 主源：原生 tab/feed（实测 2026-09-26：PC 推荐页换条时调的就是这个 endpoint，10 屏 55 条零重复）
-        // 手表硬件适配 §10：可见返回键
-        findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                finish();
-            }
-        });
+        wireBack();
         mViewPager.post(new Runnable() {
             @Override
             public void run() {
                 startPlay(0);
+            }
+        });
+    }
+
+    /** 手表硬件适配 §10：可见返回键（无手势/无按键设备可回主屏） */
+    private void wireBack() {
+        findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                finish();
             }
         });
     }
@@ -112,6 +145,8 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     }
 
     private void loadMore(final boolean first) {
+        // 预置列表模式：列表就是这么多，不去拉流（拉了反而把人家的喜欢列表冲掉）
+        if (mPresetMode) return;
         if (mLoading) return;
         mLoading = true;
         com.dywatch.app.util.AppLog.i("feed", "拉取下一页（已 " + mVideoList.size() + " 条）");
@@ -239,7 +274,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     }
                 });
                 // 快到底时预取下一页
-                if (position >= mVideoList.size() - 2) {
+                if (!mPresetMode && position >= mVideoList.size() - 2) {
                     loadMore(false);
                 }
             }
@@ -283,6 +318,9 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 // 播放即记账（真正的"看过"信号，喂给 SeenStore 做跨会话去重）
                 if (video.awemeId != null && !video.awemeId.isEmpty()) {
                     SeenStore.markSeen(this, java.util.Collections.singletonList(video.awemeId));
+                    // 同一件事的第二个用途：给「我的」页的"看过"列表留一份可读记录
+                    // （去重账本只存 id，显示要标题和封面，所以另存一份）
+                    HistoryStore.mark(this, video.awemeId, video.title, video.coverUrl);
                 }
                 String playUrl = mPreloadManager.getPlayUrl(video.playUrl);
                 mVideoView.setUrl(playUrl, com.dywatch.app.net.DouyinApi.playHeaders());

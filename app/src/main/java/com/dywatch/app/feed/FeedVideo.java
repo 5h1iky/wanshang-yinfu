@@ -7,7 +7,10 @@ package com.dywatch.app.feed;
  * statistics → 赞/评/藏计数（数据位设计参考 DKVideoPlayer demo 的 TiktokBean.likeCount）。
  * liked/collected 为本地互动状态（乐观更新）。
  */
-public class FeedVideo {
+public class FeedVideo implements java.io.Serializable {
+
+    /** 「我的」页把列表传给播放页用；加个显式 id 免得反序列化告警 */
+    private static final long serialVersionUID = 1L;
 
     public final String title;
     public final String playUrl;

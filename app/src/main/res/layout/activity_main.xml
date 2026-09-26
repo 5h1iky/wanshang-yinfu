@@ -67,7 +67,11 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- 一级功能：登录 / 设置 -->
+        <!--
+          一级功能：我的 / 设置
+          （登录从一级卡降为底部状态行——它是低频操作，让位给「我的」；
+           且状态行能直接显示"已登录/需重登/未登录"，比一个图标更说明问题）
+        -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -75,16 +79,13 @@
             android:orientation="horizontal">
 
             <LinearLayout
-                android:id="@+id/btn_login"
+                android:id="@+id/btn_mine"
                 style="@style/EntryCard"
                 android:layout_marginRight="@dimen/s3">
 
-                <ImageView style="@style/EntryCardIcon" android:src="@drawable/ic_avatar" />
+                <ImageView style="@style/EntryCardIcon" android:src="@drawable/ic_heart" />
 
-                <TextView
-                    android:id="@+id/lbl_login"
-                    style="@style/EntryCardLabel"
-                    android:text="登录" />
+                <TextView style="@style/EntryCardLabel" android:text="我的" />
             </LinearLayout>
 
             <LinearLayout
@@ -95,6 +96,44 @@
 
                 <TextView style="@style/EntryCardLabel" android:text="设置" />
             </LinearLayout>
+        </LinearLayout>
+
+        <!--
+          次要动作：登录状态 + 退出。
+          原先登录占一格一级位，但它低频且状态多变（已登录/需重登/未登录），
+          做成细行既能显示状态又不占一级位。退出必须显式存在（方案 §10：手表无手势无按键）。
+        -->
+        <LinearLayout
+            android:id="@+id/btn_login"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_marginTop="@dimen/s3"
+            android:background="@drawable/bg_settings_row"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/s4">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_avatar" />
+
+            <TextView
+                android:id="@+id/lbl_login"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/s3"
+                android:layout_weight="1"
+                android:text="登录"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/t_body" />
+
+            <TextView
+                android:id="@+id/lbl_login_state"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_muted"
+                android:textSize="@dimen/t_caption" />
         </LinearLayout>
 
         <!--

@@ -61,6 +61,13 @@ public class MainActivity extends UiActivity {
             }
         });
 
+        findViewById(R.id.btn_mine).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, com.dywatch.app.ui.MineActivity.class));
+            }
+        });
+
         // 手表硬件适配 §10：显式退出（无手势/无按键设备不靠返回键循环退出）
         findViewById(R.id.btn_exit).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -126,15 +133,19 @@ public class MainActivity extends UiActivity {
         // 登录入口要反映状态：原先无论登录与否都写"登录"，点了才知道已经登过，
         // 主屏那行小字承担了本该由入口自己说明的信息。
         TextView login = findViewById(R.id.lbl_login);
+        TextView loginState = findViewById(R.id.lbl_login_state);
+        String state;
         if (LoginManager.hasSession(this) && LoginManager.isVerified(this)) {
             status.setText("已登录（会话存本机）");
-            if (login != null) login.setText("已登录");
+            state = "已登录";
         } else if (LoginManager.hasSession(this)) {
             status.setText("有会话但未验证/可能失效——建议重新扫码登录");
-            if (login != null) login.setText("需重登");
+            state = "需重登";
         } else {
             status.setText("未登录——点上方“登录”扫码");
-            if (login != null) login.setText("登录");
+            state = "未登录";
         }
+        if (login != null) login.setText("登录");
+        if (loginState != null) loginState.setText(state);
     }
 }

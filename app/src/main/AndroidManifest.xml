@@ -67,6 +67,13 @@
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- 「我的」页：喜欢（服务端只读）+ 看过（本地账本） -->
+        <activity
+            android:name=".ui.MineActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
         <!-- 设置页：全局缩放 / 屏形 / 画质 / 常亮 / 清账本 / 诊断 -->
         <activity
             android:name=".ui.SettingsActivity"

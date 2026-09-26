@@ -76,6 +76,148 @@ public final class DouyinApi {
         }
     }
 
+    // ---- 只读扩展（2026-09-26 实测：只读接口风控宽松，可直连）----
+
+    /**
+     * 拉自己的「喜欢」列表（点赞历史）。
+     *
+     * 实测（tools/probe-readonly-apis.js，2026-09-26）：HTTP 200 + status_code=0 + 13 条真数据。
+     * ⚠️ 与参考源码 cv-cat 的注释不符：它称此接口在 secsdk webSign 保护表内、
+     *    必须追加 timestamp + x-secsdk-web-signature；实测只带通用参数 + a_bogus 即可通。
+     *
+     * @param secUid 自己的 sec_uid（由 fetchSelfSecUid 取）
+     * @param cursor 翻页游标，首页传 0
+     */
+    public List<FeedVideo> fetchFavorite(String secUid, long cursor) throws IOException {
+        ensureTtwid();
+        String query = buildFavoriteQuery(secUid, cursor);
+        Request req = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/favorite/?" + query)
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/user/"
+                        + (secUid == null ? "" : secUid) + "?showTab=like")
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            String body = resp.body().string();
+            List<FeedVideo> list = parseFeed(body);
+            if (list.isEmpty()) {
+                // 空也可能是真没喜欢过；用 status_code 区分"接口没通"和"确实没数据"
+                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(body);
+                int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
+                if (code != 0) throw new IOException("喜欢列表 status=" + code);
+            }
+            return list;
+        }
+    }
+
+    /** 构造 favorite query（参数族照实测探针）；纯函数（除签名外无副作用） */
+    String buildFavoriteQuery(String secUid, long cursor) {
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("device_platform", "webapp");
+        p.put("aid", "6383");
+        p.put("channel", "channel_pc_web");
+        p.put("sec_user_id", secUid == null ? "" : secUid);
+        p.put("max_cursor", String.valueOf(cursor));
+        p.put("min_cursor", "0");
+        p.put("whale_cut_token", "");       // 空值字段，浏览器确实发
+        p.put("cut_version", "1");
+        p.put("count", "18");
+        p.put("publish_video_strategy_type", "2");
+        p.put("update_version_code", "170400");
+        p.put("pc_client_type", "1");
+        p.put("pc_libra_divert", "Windows");
+        p.put("support_h265", "1");
+        p.put("support_dash", "1");
+        p.put("version_code", "170400");
+        p.put("version_name", "17.4.0");
+        p.put("cookie_enabled", "true");
+        p.put("screen_width", "2560");
+        p.put("screen_height", "1440");
+        p.put("browser_language", "zh-CN");
+        p.put("browser_platform", "Win32");
+        p.put("browser_name", "Chrome");
+        p.put("browser_version", "135.0.0.0");
+        p.put("browser_online", "true");
+        p.put("engine_name", "Blink");
+        p.put("engine_version", "135.0.0.0");
+        p.put("os_name", "Windows");
+        p.put("os_version", "10");
+        p.put("cpu_core_num", "20");
+        p.put("device_memory", "8");
+        p.put("platform", "PC");
+        p.put("downlink", "0.55");
+        p.put("effective_type", "3g");
+        p.put("round_trip_time", "0");
+        StringBuilder q = new StringBuilder();
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(e.getKey()).append('=').append(e.getValue());
+        }
+        String ab = signer.makeABogus(q.toString());
+        return q + "&a_bogus=" + urlEncode(ab);
+    }
+
+    /**
+     * 取自己的 sec_uid（拉喜欢列表要用）。
+     * ⚠️ 主站 /user/self 页面已改客户端渲染、HTML 里没有 secUid（cv-cat 2026-08 复核）；
+     *    但实测 profile/self 这个 JSON 接口的 user.sec_uid 仍然给，直接用它。
+     */
+    public String fetchSelfSecUid() throws IOException {
+        StringBuilder q = new StringBuilder();
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("device_platform", "webapp");
+        p.put("aid", "6383");
+        p.put("channel", "channel_pc_web");
+        p.put("update_version_code", "170400");
+        p.put("pc_client_type", "1");
+        p.put("pc_libra_divert", "Windows");
+        p.put("support_h265", "1");
+        p.put("support_dash", "1");
+        p.put("version_code", "170400");
+        p.put("version_name", "17.4.0");
+        p.put("cookie_enabled", "true");
+        p.put("screen_width", "2560");
+        p.put("screen_height", "1440");
+        p.put("browser_language", "zh-CN");
+        p.put("browser_platform", "Win32");
+        p.put("browser_name", "Chrome");
+        p.put("browser_version", "135.0.0.0");
+        p.put("browser_online", "true");
+        p.put("engine_name", "Blink");
+        p.put("engine_version", "135.0.0.0");
+        p.put("os_name", "Windows");
+        p.put("os_version", "10");
+        p.put("cpu_core_num", "20");
+        p.put("device_memory", "8");
+        p.put("platform", "PC");
+        p.put("downlink", "0.55");
+        p.put("effective_type", "3g");
+        p.put("round_trip_time", "0");
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(e.getKey()).append('=').append(e.getValue());
+        }
+        String ab = signer.makeABogus(q.toString());
+        Request req = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/user/profile/self/?" + q
+                        + "&a_bogus=" + urlEncode(ab))
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/")
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            com.google.gson.JsonElement el =
+                    com.google.gson.JsonParser.parseString(resp.body().string());
+            if (!el.isJsonObject()) throw new IOException("profile/self 非 JSON");
+            com.google.gson.JsonObject user = el.getAsJsonObject().getAsJsonObject("user");
+            if (user == null) throw new IOException("profile/self 无 user（未登录？）");
+            return optString(user, "sec_uid");
+        }
+    }
+
     /**
      * 拉推荐视频流（带登录态拉本人推荐）。每次调用自动递增 refresh_index 翻页。
      *
