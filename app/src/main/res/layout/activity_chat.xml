@@ -8,7 +8,7 @@
     <!-- 单行页头：返回箭头兼热区 + 页名 + 时钟（§10 可见返回键，不依赖系统手势/按键） -->
     <include layout="@layout/include_header" />
 
-    <!-- 四态反馈：只在加载/空/失败时占位，通道正常就收起来 -->
+    <!-- 四态反馈文字：只在加载/空/失败时占位，通道正常就收起来 -->
     <TextView
         android:id="@+id/tv_chat_hint"
         android:layout_width="match_parent"
@@ -20,46 +20,75 @@
         android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
-    <!-- 表冠可滚（默认关）：与评论页、会话页共用同一份实现 -->
-    <com.dywatch.app.ui.RotaryRecyclerView
-        android:id="@+id/rv_messages"
+    <!-- 列表 + 加载小圆圈（覆盖在列表上，中心显示；不占高度、不引起跳动） -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:padding="@dimen/s3"
-        android:scrollbars="none" />
+        android:layout_weight="1">
 
-    <!-- 快捷回复条：与评论页共用一份 include（等分权重，4 个永远都看得见，不需要横向滚） -->
+        <!-- 表冠可滚（默认关）：与评论页、会话页共用同一份实现 -->
+        <com.dywatch.app.ui.RotaryRecyclerView
+            android:id="@+id/rv_messages"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="@dimen/s3"
+            android:scrollbars="none" />
+
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
+
+    <!-- 快捷回复条：与评论页共用一份 include（2026-09-27 压成 28dp 细胶囊条，横向可滚） -->
     <include layout="@layout/include_quick_reply" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/bg_surface"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingHorizontal="@dimen/s3"
         android:paddingVertical="@dimen/s2">
 
+        <!--
+          输入框：2026-09-27 修 —— 旧版是固定 42dp 高却写了 maxLines="2"，
+          第二行文字直接被裁掉（自相矛盾的写法）；字号调大时更会切字。
+          现在 wrap_content + 最小高度，行数交给 maxLines，输入框随内容/字号长高。
+        -->
         <EditText
             android:id="@+id/et_input"
             android:layout_width="0dp"
-            android:layout_height="@dimen/ctrl_min"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
             android:background="@drawable/bg_pill"
+            android:gravity="center_vertical"
             android:hint="说点什么…"
-            android:inputType="text"
-            android:maxLines="2"
-            android:paddingHorizontal="@dimen/s5"
+            android:inputType="textMultiLine|textCapSentences"
+            android:maxLines="3"
+            android:minHeight="@dimen/input_min_h"
+            android:paddingStart="@dimen/s5"
+            android:paddingEnd="@dimen/s5"
+            android:paddingTop="@dimen/s2"
+            android:paddingBottom="@dimen/s2"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_muted"
             android:textSize="@dimen/t_body" />
 
+        <!-- 发送键：显式 backgroundTint=@null —— Material3 的 Button 默认会拿
+             colorPrimary 去染背景，自定义背景会被染成浅蓝（真机实测） -->
         <Button
             android:id="@+id/btn_send"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="发送" />
+            android:layout_height="@dimen/input_min_h"
+            android:layout_marginStart="@dimen/s2"
+            android:background="@drawable/bg_pill"
+            android:backgroundTint="@null"
+            android:minWidth="@dimen/ctrl_min"
+            android:paddingStart="@dimen/s4"
+            android:paddingEnd="@dimen/s4"
+            android:text="发送"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_body" />
     </LinearLayout>
 
 </LinearLayout>

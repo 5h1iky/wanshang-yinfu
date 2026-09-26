@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 全局色板。此前色值散落在 xml 与 Java（0xFF1A222C、#101418…）里，改一处要翻八个文件。 -->
+<!--
+  全局色板 —— 2026-09-27 起改为**单色（monochrome）方案**。
+  理由（用户提出）：这是给手表用的，1.4 寸小屏 + 多数是 AMOLED，
+  彩色装饰不携带任何信息量，只会让界面显脏、还费电。
+  所以全站只用「亮度层次」表达层级与状态，**不用色相**。
+
+  ⚠️ 想恢复某一处彩色：只改这里的值即可（原彩色值都标在注释里），
+     禁止在布局 XML / Java 里写死色值——那是这个文件存在的意义。
+-->
 <resources>
     <color name="bg_base">#0E141B</color>        <!-- 页面底 -->
     <color name="bg_surface">#161C22</color>     <!-- 顶栏/底栏 -->
@@ -12,15 +20,36 @@
     <color name="text_secondary">#9AA7B4</color>
     <color name="text_muted">#6B7684</color>
     <color name="text_faint">#4A5560</color>
-    <color name="accent">#7CC4FF</color>
-    <color name="accent_dim">#3A4A5C</color>
-    <color name="danger">#FF8A8A</color>
-    <color name="ok">#7BE0A0</color>
+
+    <!-- 强调 = 更亮的一档灰（原 #7CC4FF 浅蓝）。全站所有 textColor/描边都走它 -->
+    <color name="accent">#C8D2DC</color>
+    <color name="accent_dim">#333C46</color>     <!-- 原 #3A4A5C -->
+
+    <!-- 危险动作（退出登录等）：原 #FF8A8A 淡红。
+         单色方案下用「更暗」而不是「红」来表达——文字本身已说明后果，
+         红色在这里是冗余信息（用户明确要求去掉不必要的颜色）。 -->
+    <color name="danger">#C8D2DC</color>
+    <color name="ok">#C8D2DC</color>
 
     <!-- 视频画面上的文字：白色 + 半透明黑描边，否则浅色视频上会糊成一片 -->
     <color name="on_video_text">#FFFFFF</color>
     <color name="on_video_shadow">#80000000</color>
-    <!-- 已点赞/已收藏的强调色（旧版写死在 FeedAdapter 里） -->
-    <color name="liked">#FFFF3B5C</color>
-    <color name="collected">#FFFFC107</color>
+
+    <!-- 视频操作栏的激活态：用**亮度**代替色相。
+         原彩色值：liked #FFFF3B5C（红心）/ collected #FFFFC107（黄星）。
+         恢复彩色只需把下面两行改回原值，其余代码无需改动。 -->
+    <color name="liked">#FFFFFFFF</color>
+    <color name="collected">#FFFFFFFF</color>
+    <!-- 未激活态（45% 白）：与激活态形成可辨的亮度差 -->
+    <color name="state_off">#73FFFFFF</color>
+
+    <!-- 主屏一级入口图标：四个图标统一同一档亮度，不再一个蓝一个白一个灰 -->
+    <color name="icon_on_surface">#E6EAEE</color>
+
+    <!-- 聊天气泡：我方=较亮的实底，对方=较暗的实底（原我方是 #2E6BE6 蓝色） -->
+    <color name="bubble_out">#3A4553</color>
+    <color name="bubble_in">#2A3540</color>
+
+    <!-- 加载小圆圈（原用 accent 蓝） -->
+    <color name="spinner">#9AA7B4</color>
 </resources>

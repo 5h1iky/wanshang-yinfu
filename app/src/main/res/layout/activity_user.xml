@@ -55,13 +55,21 @@
         android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
-    <com.dywatch.app.ui.RotaryRecyclerView
-        android:id="@+id/rv_user"
+    <!-- 作品列表 + 加载小圆圈（覆盖在列表中心） -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:padding="@dimen/s3"
-        android:scrollbars="none" />
+        android:layout_weight="1">
+
+        <com.dywatch.app.ui.RotaryRecyclerView
+            android:id="@+id/rv_user"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="@dimen/s3"
+            android:scrollbars="none" />
+
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
 
 </LinearLayout>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  视频评论页：收 = DOM 抓取，发 = 引擎注入。
+  视频评论页：收 = 只读接口直连（DOM 抓取降为兜底），发 = 引擎注入。
   版式参考 BiliClient 的单行页头：原先 40dp 顶栏 + 常驻提示行 + 42dp 输入 + 文字按钮，
   光 chrome 就吃掉约 90dp；现在页头 22dp、提示行只在加载/空/失败时出现，省下的都换成评论内容。
 -->
@@ -29,15 +29,23 @@
       原先这里是 RotaryScrollView + LinearLayout，评论一多就全量重建视图；
       换成 RV 后由 RotaryRecyclerView 接管表冠——它不带表冠逻辑的话，
       换了列表实现就等于把手表上最省力的滚动方式弄丢了。
+      + 加载小圆圈覆盖在列表中心（2026-09-27：此前"没加载出来"只有顶部一行字，看不出在转还是死了）
     -->
-    <com.dywatch.app.ui.RotaryRecyclerView
-        android:id="@+id/rv_comments"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:padding="@dimen/s3"
-        android:scrollbars="none" />
+        android:layout_weight="1">
+
+        <com.dywatch.app.ui.RotaryRecyclerView
+            android:id="@+id/rv_comments"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="@dimen/s3"
+            android:scrollbars="none" />
+
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
 
     <!-- 列表尾部提示（加载中 / 已经到底了）：RV 时代不再往列表里塞视图 -->
     <TextView
@@ -54,6 +62,7 @@
       快捷回复：手表上打字最费劲，先给常用短语。
       与聊天页不同——评论是公开发到别人视频下的，误触代价不对等，
       所以点一下只「填入输入框」，仍要按发送确认。
+      2026-09-27：压成 28dp 细胶囊条（原 42dp 等宽四格），也可在设置里整条关掉。
     -->
     <include layout="@layout/include_quick_reply" />
 
@@ -66,24 +75,31 @@
         android:paddingHorizontal="@dimen/s3"
         android:paddingVertical="@dimen/s2">
 
+        <!-- 输入框：同聊天页，去掉固定高度（原 42dp 固定 → 字号调大即切字） -->
         <EditText
             android:id="@+id/et_comment"
             android:layout_width="0dp"
-            android:layout_height="@dimen/ctrl_min"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
             android:background="@drawable/bg_pill"
+            android:gravity="center_vertical"
             android:hint="说点什么…"
             android:imeOptions="actionSend"
-            android:inputType="text"
-            android:paddingHorizontal="@dimen/s5"
+            android:inputType="textMultiLine|textCapSentences"
+            android:maxLines="3"
+            android:minHeight="@dimen/input_min_h"
+            android:paddingStart="@dimen/s5"
+            android:paddingEnd="@dimen/s5"
+            android:paddingTop="@dimen/s2"
+            android:paddingBottom="@dimen/s2"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_muted"
             android:textSize="@dimen/t_body" />
 
         <ImageButton
             android:id="@+id/btn_send_comment"
-            android:layout_width="@dimen/ctrl_min"
-            android:layout_height="@dimen/ctrl_min"
+            android:layout_width="@dimen/input_min_h"
+            android:layout_height="@dimen/input_min_h"
             android:layout_marginStart="@dimen/s2"
             android:background="@drawable/bg_pill"
             android:contentDescription="发送评论"
@@ -91,7 +107,8 @@
             android:src="@drawable/ic_share" />
     </LinearLayout>
 
-    <!-- 关掉「评论自动续拉」时才露出的手动兜底 -->
+    <!-- 关掉「评论自动续拉」时才露出的手动兜底。
+         backgroundTint=@null：Material3 的 Button 会用 colorPrimary 染自定义背景（真机实测变浅蓝） -->
     <Button
         android:id="@+id/btn_comments_more"
         android:layout_width="match_parent"
@@ -99,6 +116,7 @@
         android:layout_marginHorizontal="@dimen/s3"
         android:layout_marginBottom="@dimen/s2"
         android:background="@drawable/bg_settings_row"
+        android:backgroundTint="@null"
         android:text="加载更多评论"
         android:textColor="@color/accent"
         android:textSize="@dimen/t_body"

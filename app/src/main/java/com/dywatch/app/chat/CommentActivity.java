@@ -114,7 +114,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
             }
         });
 
-        com.dywatch.app.ui.QuickReply.wire(findViewById(R.id.quick_reply_bar),
+        com.dywatch.app.ui.QuickReply.wire(this,
                 new String[]{"好看！", "求BGM", "赞了", "哈哈哈"},
                 new com.dywatch.app.ui.QuickReply.Pick() {
                     @Override
@@ -195,6 +195,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
             // （直连是同步返回的，空只可能是真没评论或刚进来还没到，重试一次够）
             if (!mAtEnd && mEmptyRetries < 4) {
                 mEmptyRetries++;
+                com.dywatch.app.ui.Loading.show(this, true);   // 还在重试 = 仍在加载，圆圈继续转
                 mList.postDelayed(new Runnable() {
                     @Override
                     public void run() {
@@ -209,12 +210,14 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
                 }, 3000);
             } else {
                 hint("暂无评论");
+                com.dywatch.app.ui.Loading.show(this, false);
             }
         } else {
             mEmptyRetries = 0;
             // 页名兼当计数条：有内容就不占独立一行提示，把手表那点高度全留给评论
             setPageTitle("评论 " + mAll.size());
             clearHint();
+            com.dywatch.app.ui.Loading.show(this, false);
         }
         setFooter(mAtEnd ? "已经到底了" : (mLoadingMore ? "正在加载更多…" : "继续下滑加载更多"));
         boolean auto = com.dywatch.app.ui.Settings.commentAutoLoad(this);
@@ -288,6 +291,9 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         if (mApiLoading) return;
         mApiLoading = true;
         hint(append ? "正在加载更多…" : "正在拉取评论…");
+        // 只在首屏（列表还空着）时转圈：翻页时列表已有内容，居中大转圈反而挡视线，
+        // 那一步的进度由 footer 的"正在加载更多…"表达。
+        if (!append) com.dywatch.app.ui.Loading.show(this, true);
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -328,6 +334,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
                                 mEngine.fetchComments(mAwemeId);
                             } else {
                                 hint("评论加载失败: " + e.getMessage());
+                                com.dywatch.app.ui.Loading.show(CommentActivity.this, false);
                             }
                         }
                     });
@@ -440,13 +447,17 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     @Override
     public void onAuth(boolean ok, String message) {
         if (!ok) {
-            mHint.setText("⚠ " + message);
+            // ⚠️ 2026-09-27 修：原来只 mHint.setText() 没置 VISIBLE —— 提示行默认是 GONE 的，
+            //    于是"登录失效"这种情况下用户**什么都看不到**（页面上没有任何反馈）。
+            hint("⚠ " + message);
+            com.dywatch.app.ui.Loading.show(this, false);
         }
     }
 
     @Override
     public void onEngineError(String err) {
-        mHint.setText("通道异常: " + err);
+        hint("通道异常: " + err);   // 同上：必须走 hint() 才会真的显示出来
+        com.dywatch.app.ui.Loading.show(this, false);
         AppLog.i("chat", "评论页异常: " + err);
     }
 

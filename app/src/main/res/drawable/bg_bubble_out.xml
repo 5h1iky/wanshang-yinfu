@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 我方气泡底：单色方案下用「更亮的一档实底」，不用蓝色（原 #2E6BE6）。色值走色板 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#2E6BE6" />
+    <solid android:color="@color/bubble_out" />
     <corners android:radius="12dp" />
 </shape>

@@ -6,7 +6,6 @@ package com.dywatch.app.feed;
 // License: Apache-2.0（见 lib/LICENSE-DKVideoPlayer.txt）
 
 import android.content.Context;
-import android.graphics.Color;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -100,7 +99,25 @@ public class FeedAdapter extends PagerAdapter {
         Glide.with(context)
                 .load(item.coverUrl)
                 .placeholder(android.R.color.black)
+                .listener(imageLog("封面", item.awemeId))
                 .into(viewHolder.mThumb);
+        // 作者头像（2026-09-27 修）：此前这里只加载了封面，一行代码都没给 iv_avatar 加载过图，
+        // 所以视频页的头像永远是布局里那张静态占位矢量图 = 用户报的"头像一直没加载出来"。
+        // 头像 URL 来自 author.avatar_thumb（douyinpic.com，实测裸链可取而无需 Referer）。
+        // circleCrop：抖音头像本身是方的，不裁圆在圆屏上很硬。
+        if (viewHolder.mIvAvatar != null) {
+            if (item.authorAvatar == null || item.authorAvatar.isEmpty()) {
+                viewHolder.mIvAvatar.setImageResource(R.drawable.ic_avatar);
+            } else {
+                Glide.with(context)
+                        .load(item.authorAvatar)
+                        .circleCrop()
+                        .placeholder(R.drawable.ic_avatar)
+                        .error(R.drawable.ic_avatar)
+                        .listener(imageLog("头像", item.awemeId))
+                        .into(viewHolder.mIvAvatar);
+            }
+        }
         viewHolder.mTitle.setText(item.title);
         viewHolder.mPosition = pos;
         viewHolder.mItem = item;
@@ -145,17 +162,53 @@ public class FeedAdapter extends PagerAdapter {
 
     /** 绑定操作栏数据与互动状态（互动回调后可局部刷新复用） */
     public static void bindActions(ViewHolder h, FeedVideo v) {
-        Context c = h.mTvLikeCount.getContext();
         h.mTvLikeCount.setText(FeedVideo.formatCount(v.diggCount));
         h.mTvCommentCount.setText(FeedVideo.formatCount(v.commentCount));
         h.mTvCollectCount.setText(v.collected ? "已藏" : "收藏");
-        // 强调色走色板：旧版 Color.parseColor 写死在代码里，与 colors.xml 里那一套是两套颜色
-        h.mIvLike.setColorFilter(v.liked
-                ? androidx.core.content.ContextCompat.getColor(c, R.color.liked)
-                : Color.WHITE);
-        h.mIvCollect.setColorFilter(v.collected
-                ? androidx.core.content.ContextCompat.getColor(c, R.color.collected)
-                : Color.WHITE);
+        // 激活态：2026-09-27 起改为「亮度」表达，不再用红心/黄星（单色方案，见 colors.xml）。
+        // 注意**不能用 setColorFilter + 半透明白**去表达未激活：setColorFilter 走 SRC_ATOP，
+        // 结果 = src + dst*(1-srcAlpha)，叠在已经很亮的图标上几乎看不出变暗（试过，等于没区分）。
+        // setImageAlpha 是直接改视图 alpha，亮度差是真的。
+        h.mIvLike.setImageAlpha(v.liked ? STATE_ON : STATE_OFF);
+        h.mIvCollect.setImageAlpha(v.collected ? STATE_ON : STATE_OFF);
+    }
+
+    /** 激活/未激活的 alpha（未激活 45%：与激活态形成明显但仍柔和的亮度差） */
+    private static final int STATE_ON = 255;
+    private static final int STATE_OFF = 115;
+
+    /**
+     * 图片加载的成功/失败回调，只为了**能在日志里取证**。
+     *
+     * 为什么必须记：封面与头像这两个字段历史上都是坏的（封面被拼成播放端点、头像压根没解析），
+     * 而"没有报错"并不等于"加载成功"——Glide 加载失败是静默的，界面上看起来只是"没图"。
+     * 不落日志就只剩截图一条证据，而截图对本项目是二等证据（见交接文档）。
+     */
+    private static com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable>
+    imageLog(final String what, final String awemeId) {
+        return new com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable>() {
+            @Override
+            public boolean onLoadFailed(@androidx.annotation.Nullable
+                                        com.bumptech.glide.load.engine.GlideException e,
+                                        Object model,
+                                        @NonNull com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable> target,
+                                        boolean isFirstResource) {
+                com.dywatch.app.util.AppLog.i("feed", what + "加载失败 aweme=" + awemeId
+                        + " err=" + (e == null ? "?" : e.getMessage()));
+                return false;   // 交回 Glide 继续走 error 占位图
+            }
+
+            @Override
+            public boolean onResourceReady(android.graphics.drawable.Drawable resource,
+                                           Object model,
+                                           @NonNull com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable> target,
+                                           @NonNull com.bumptech.glide.load.DataSource dataSource,
+                                           boolean isFirstResource) {
+                com.dywatch.app.util.AppLog.i("feed", what + "加载成功 aweme=" + awemeId
+                        + " from=" + dataSource);
+                return false;
+            }
+        };
     }
 
     @Override

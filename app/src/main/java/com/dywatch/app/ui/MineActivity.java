@@ -106,16 +106,21 @@ public class MineActivity extends UiActivity {
         if (mLoading) return;
         mLoading = true;
         hint("正在拉取喜欢…");
+        Loading.show(this, true);
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    final List<FeedVideo> list = ensureApi().fetchFavorite(
-                            ensureApi().fetchSelfSecUid(), 0);
+                    // 顺带修：原来写成 ensureApi().fetchFavorite(ensureApi().fetchSelfSecUid(), 0)，
+                    // 同一个 api 对象取两遍（第一次还要读 3 个 assets 建签名器），没必要
+                    final DouyinApi api = ensureApi();
+                    final List<FeedVideo> list = api.fetchFavorite(api.fetchSelfSecUid(), 0);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             mLoading = false;
+                            // 成功路径也落一行：只记失败的话，"列表是空的"到底是没数据还是没拉到就分不清
+                            AppLog.i("mine", "喜欢列表拉到 " + list.size() + " 条");
                             show(list, "还没有喜欢过的视频");
                         }
                     });
@@ -125,6 +130,7 @@ public class MineActivity extends UiActivity {
                         @Override
                         public void run() {
                             mLoading = false;
+                            Loading.show(MineActivity.this, false);
                             hint("拉取失败: " + e.getMessage());
                         }
                     });
@@ -136,6 +142,8 @@ public class MineActivity extends UiActivity {
     // ---- 看过：本地账本 ----
 
     private void loadHistory() {
+        // 本地账本，没有网络等待 → 不需要转圈（上一段的圈要确保收掉）
+        Loading.show(this, false);
         List<FeedVideo> out = new ArrayList<>();
         for (HistoryStore.Entry e : HistoryStore.read(this)) {
             // 看过只有 id/标题/封面，没有播放地址——点击后要去换址，
@@ -157,6 +165,7 @@ public class MineActivity extends UiActivity {
                     v.title.isEmpty() ? "(无标题)" : v.title, meta, "", i));
         }
         mAdapter.submitList(items);
+        Loading.show(this, false);
         if (list.isEmpty()) {
             // 空态也要把页名切过来，否则上一段的"喜欢 13"会一直挂着，看着像切了 tab 没生效
             setPageTitle(mTab == TAB_LIKE ? "喜欢" : "看过");

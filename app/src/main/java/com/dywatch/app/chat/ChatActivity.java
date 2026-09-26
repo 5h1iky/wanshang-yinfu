@@ -62,6 +62,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
             mEngine = ChatEngine.getInstance(this, this);
             hint(mConvName == null ? "聊天通道启动中…" : ("打开会话: " + mConvName + "…"));
+            com.dywatch.app.ui.Loading.show(this, true);
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再开会话）
             mEngine.ensureImHome();
         } else {
@@ -85,7 +86,9 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         });
 
         // 手表快捷回复（输入层自研部分：先给常用短语，语音后补）
-        com.dywatch.app.ui.QuickReply.wire(findViewById(R.id.quick_reply_bar),
+        // ⚠️ 传页面根（this）而不是 bar 自己：wire() 里要按 id 找 bar 来控制整条显隐，
+        //    传 bar 时靠"findViewById 命中自身"这条边角行为才能work，太脆。
+        com.dywatch.app.ui.QuickReply.wire(this,
                 new String[]{"好", "在忙", "稍等", "😂"}, new com.dywatch.app.ui.QuickReply.Pick() {
                     @Override
                     public void onPick(String t) {
@@ -183,6 +186,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         for (int i = list.size() - 1; i >= 0; i--) ordered.add(list.get(i));
         mAdapter.submitList(ordered);
         clearHint();
+        com.dywatch.app.ui.Loading.show(this, false);   // 拿到消息了 → 停转圈
         scrollToBottomIfGrew(ordered.size());
     }
 
@@ -206,12 +210,16 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     public void onAuth(boolean ok, String message) {
         AppLog.i("chat", "登录态: ok=" + ok + " " + message);
         // 登录正常不占提示行；只有异常才提示（旧版一律写一行，白吃手表高度）
-        if (!ok) hint("⚠ " + message);
+        if (!ok) {
+            hint("⚠ " + message);
+            com.dywatch.app.ui.Loading.show(this, false);
+        }
     }
 
     @Override
     public void onEngineError(String err) {
         hint("通道异常: " + err);
+        com.dywatch.app.ui.Loading.show(this, false);
         AppLog.i("chat", "通道异常: " + err);
     }
 

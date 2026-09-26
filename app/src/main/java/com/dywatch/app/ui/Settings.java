@@ -31,6 +31,38 @@ public final class Settings {
         sp(c).edit().putFloat("ui_scale", v).apply();
     }
 
+    /**
+     * 字号缩放（2026-09-27 新增，用户要求"能调字体大小"）。
+     *
+     * 与「界面缩放」的分工（两者可叠加，互不干扰）：
+     *   - 界面缩放 = 改逻辑密度 → dp 和 sp **一起**变大（整体变大，控件也变大）
+     *   - 字体大小 = 只改 Configuration.fontScale → **只有 sp 文字**变大，控件尺寸不动
+     * 所以"字看不清但控件够大"时调这个，"整页都太小"时调界面缩放。
+     * 上限 1.6：再大 11sp 的小字会挤成两行，手表上反而更难读。
+     */
+    public static float fontScale(Context c) {
+        float v = sp(c).getFloat("font_scale", 1.0f);
+        if (v < 0.7f || v > 1.6f) return 1.0f;   // 脏数据兜底（改坏了不至于起不来）
+        return v;
+    }
+
+    public static void setFontScale(Context c, float v) {
+        sp(c).edit().putFloat("font_scale", v).apply();
+    }
+
+    /**
+     * 快捷回复条是否显示（2026-09-27 新增）。
+     * 用户反馈"快捷回复不需要太占位置"——已经把它压成 28dp 细条，
+     * 再给一个总开关：嫌占地方就整条收掉，输入框独占那一行。
+     */
+    public static boolean quickReplyVisible(Context c) {
+        return sp(c).getBoolean("quick_reply_visible", true);
+    }
+
+    public static void setQuickReplyVisible(Context c, boolean v) {
+        sp(c).edit().putBoolean("quick_reply_visible", v).apply();
+    }
+
     public static int shapeMode(Context c) {
         return sp(c).getInt("shape_mode", SHAPE_AUTO);
     }

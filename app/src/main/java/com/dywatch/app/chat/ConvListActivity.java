@@ -61,6 +61,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
             mEngine = ChatEngine.getInstance(this, this);
             hint("正在加载会话…");
+            setLoading(true);
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再拉）
             mEngine.ensureImHome();
         } else {
@@ -69,6 +70,14 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         }
 
         AppLog.i("chat", "会话列表页打开");
+    }
+
+    /**
+     * 加载小圆圈：转 = "正在取数据且还没结果"；一旦给出错误/终态提示就停，
+     * 免得界面永远在转（用户看不出到底还在等还是已经失败）。
+     */
+    private void setLoading(boolean on) {
+        com.dywatch.app.ui.Loading.show(this, on);
     }
 
     @Override
@@ -105,6 +114,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     private void render(List<Conversation> list) {
         if (list.isEmpty()) {
             hint("正在等待会话数据…（自动重试）");
+            setLoading(true);   // 还在自动重试 = 仍在加载，圆圈继续转
             // IM 数据异步渲染，页面刚就绪时常为空 → 自动重试
             if (mEmptyRetries < 8) {
                 mEmptyRetries++;
@@ -116,10 +126,12 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
                 }, 2500);
             } else {
                 hint("没有会话（可下拉重进或稍后再试）");
+                setLoading(false);
             }
             return;
         }
         mEmptyRetries = 0;
+        setLoading(false);
         // 计数折进页名，省掉常驻提示行——手表那点高度要留给会话本身
         setPageTitle("会话 " + list.size());
         clearHint();
@@ -169,6 +181,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     public void onAuth(boolean ok, String message) {
         if (!ok) {
             hint("⚠ " + message);
+            setLoading(false);   // 已给出明确失败提示 → 停止转圈
             if (mEngine != null) mEngine.fetchConversations();
         }
     }
@@ -176,6 +189,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     @Override
     public void onEngineError(String err) {
         hint("通道异常: " + err);
+        setLoading(false);       // 同上：有明确提示就不再转
         AppLog.i("chat", "会话列表异常: " + err);
         // 页面可能未就绪，稍后自动重试
         mConvs.postDelayed(new Runnable() {

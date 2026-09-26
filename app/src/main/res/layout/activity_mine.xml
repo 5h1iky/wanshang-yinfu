@@ -5,6 +5,8 @@
   实测（2026-09-26）只读接口风控宽松，直连即可。
 
   切换用顶部两个按钮而不是 TabLayout：手表小屏，两个 42dp 按钮比一排 tab 好点。
+  ⚠️ 两个 Button 都要 backgroundTint=@null：Material3 会用 colorPrimary 染自定义背景，
+     否则未选中的那个 tab 会被染成亮色（真机实测，"退出应用"就是这么变蓝的）。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -28,6 +30,7 @@
             android:layout_height="@dimen/ctrl_min"
             android:layout_weight="1"
             android:background="@drawable/bg_settings_row"
+            android:backgroundTint="@null"
             android:text="喜欢"
             android:textColor="@color/text_primary"
             android:textSize="@dimen/t_body" />
@@ -39,6 +42,7 @@
             android:layout_marginStart="@dimen/s2"
             android:layout_weight="1"
             android:background="@drawable/bg_settings_row"
+            android:backgroundTint="@null"
             android:text="看过"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/t_body" />
@@ -56,13 +60,21 @@
         android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
-    <com.dywatch.app.ui.RotaryRecyclerView
-        android:id="@+id/rv_mine"
+    <!-- 列表 + 加载小圆圈（覆盖在列表中心；封面/喜欢都要走网络，等的时候得让用户看见在转） -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:padding="@dimen/s3"
-        android:scrollbars="none" />
+        android:layout_weight="1">
+
+        <com.dywatch.app.ui.RotaryRecyclerView
+            android:id="@+id/rv_mine"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="@dimen/s3"
+            android:scrollbars="none" />
+
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
 
 </LinearLayout>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  加载小圆圈（2026-09-27 用户提出）：此前"页面没加载出来"只有顶部一行文字提示，
+  内容区是纯空的——用户看不出是在加载还是卡死了。现在在内容区正中放一个转圈指示器。
+  用法：把它 include 进一个 FrameLayout，与列表同级（覆盖在列表上），
+       代码里 showLoading(true/false) 即可，不占布局高度、不引起跳动。
+  颜色走色板 spinner（单色方案：不用 accent 蓝）。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/loading_overlay"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="false"
+    android:focusable="false"
+    android:visibility="gone">
+
+    <com.google.android.material.progressindicator.CircularProgressIndicator
+        android:id="@+id/loading_spinner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        app:indicatorColor="@color/spinner"
+        app:indicatorSize="@dimen/spinner_size"
+        app:trackThickness="@dimen/spinner_thickness" />
+</FrameLayout>

@@ -38,6 +38,20 @@
     <dimen name="feed_bar_margin">6dp</dimen>
     <dimen name="feed_count_text">10sp</dimen>
 
+    <!-- 加载小圆圈（内容区正中的转圈指示器） -->
+    <dimen name="spinner_size">32dp</dimen>
+    <dimen name="spinner_thickness">3dp</dimen>
+
+    <!-- 快捷回复条：手表上它只是"省打字"的辅助，不该跟聊天内容抢高度。
+         2026-09-27 用户反馈"太占位置"：原来 4 个按钮等宽铺满（各 minHeight=42dp），
+         现在压成一条细的横向滚动胶囊条，高度只有 28dp。 -->
+    <dimen name="qr_height">28dp</dimen>
+    <dimen name="qr_text">12sp</dimen>
+
+    <!-- 输入框：原为固定 42dp（chat 里还写了 maxLines=2，第二行直接被裁掉）。
+         现在 wrap_content + 这个最小值，字号调大时输入框会跟着长。 -->
+    <dimen name="input_min_h">42dp</dimen>
+
     <!-- 圆屏内缩不在这里：由 UiActivity 按设置里的百分比统一施加到 DecorView，
          因为每块表的圆形裁切深度不同，固定值收不住。 -->
 </resources>

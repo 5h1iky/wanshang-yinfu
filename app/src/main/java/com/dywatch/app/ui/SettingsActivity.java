@@ -25,6 +25,13 @@ public class SettingsActivity extends UiActivity {
 
     private static final float[] SCALES = {0.85f, 1.0f, 1.15f, 1.3f};
     private static final String[] SCALE_NAMES = {"小", "标准", "大", "特大"};
+    /**
+     * 字号档（2026-09-27 新增）：只放大 sp 文字，不动控件尺寸。
+     * 与「界面缩放」是两件事——缩放会把控件一起放大，字号只让字变大，
+     * 所以"控件够大但字小"时应该调这个（手表上最常见的诉求）。
+     */
+    private static final float[] FONT_SCALES = {0.85f, 1.0f, 1.15f, 1.3f, 1.5f};
+    private static final String[] FONT_NAMES = {"小", "标准", "大", "特大", "超大"};
     private static final String[] SHAPE_NAMES = {"自动", "圆屏", "方屏"};
     private static final String[] QUALITY_NAMES = {"省流量", "平衡", "清晰"};
 
@@ -54,8 +61,25 @@ public class SettingsActivity extends UiActivity {
                 recreate();   // 密度改了要重建才生效
             }
         });
-        row("屏幕形状", SHAPE_NAMES[Settings.shapeMode(this)], new Runnable() {
+        // 字号：只放大文字（sp），控件尺寸不变 —— 与上面「界面缩放」互补
+        row("字体大小", FONT_NAMES[index(FONT_SCALES, Settings.fontScale(this))], new Runnable() {
             @Override public void run() {
+                int i = (index(FONT_SCALES, Settings.fontScale(SettingsActivity.this)) + 1) % FONT_SCALES.length;
+                Settings.setFontScale(SettingsActivity.this, FONT_SCALES[i]);
+                toast("字体大小：" + FONT_NAMES[i]);
+                recreate();   // 字号改了同样要重建才生效
+            }
+        });
+        // 快捷回复条：压成 28dp 细条之后仍给一个总开关（用户反馈"太占位置"）
+        row("快捷回复条", onOff(Settings.quickReplyVisible(this)), new Runnable() {
+            @Override public void run() {
+                boolean v = !Settings.quickReplyVisible(SettingsActivity.this);
+                Settings.setQuickReplyVisible(SettingsActivity.this, v);
+                toast("快捷回复条：" + onOff(v));
+                buildRows();
+            }
+        });
+        row("屏幕形状", SHAPE_NAMES[Settings.shapeMode(this)], new Runnable() {            @Override public void run() {
                 int next = (Settings.shapeMode(SettingsActivity.this) + 1) % 3;
                 Settings.setShapeMode(SettingsActivity.this, next);
                 toast("屏幕形状：" + SHAPE_NAMES[next]
@@ -161,6 +185,7 @@ public class SettingsActivity extends UiActivity {
         actionRow("恢复默认", "缩放/屏形/边距/画质全部回到初始值", new Runnable() {
             @Override public void run() {
                 Settings.setScale(SettingsActivity.this, 1.0f);
+                Settings.setFontScale(SettingsActivity.this, 1.0f);
                 Settings.setShapeMode(SettingsActivity.this, Settings.SHAPE_AUTO);
                 Settings.setPaddingPercent(SettingsActivity.this, 0, 0);
                 Settings.setQualityMode(SettingsActivity.this, Settings.Q_SAVE);
@@ -168,12 +193,25 @@ public class SettingsActivity extends UiActivity {
                 Settings.setKeepScreenOn(SettingsActivity.this, true);
                 Settings.setRotaryEnabled(SettingsActivity.this, false);
                 Settings.setRotarySensitivity(SettingsActivity.this, 1.0f);
+                Settings.setQuickReplyVisible(SettingsActivity.this, true);
                 DouyinApi.sQuality = Settings.Q_SAVE;
                 toast("已恢复默认");
                 recreate();
             }
         });
-        infoRow("腕上音符 v0.1.0\n与抖音官方无关 · 仅供个人学习 · 风险自负");
+        // 版本号从包信息读 —— 原来这里硬编码 "v0.1.0"，而主屏那行早就改成读包版本了，
+        // 于是设置页一直挂着 0.1.0（正是主屏注释里说要避免的"手写值随发版漂移"）。
+        infoRow("腕上音符 v" + versionName()
+                + "\n与抖音官方无关 · 仅供个人学习 · 风险自负");
+    }
+
+    /** 读本机包版本号（与 MainActivity.versionName 同一口径：都以包信息为准） */
+    private String versionName() {
+        try {
+            return String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
+        } catch (Exception e) {
+            return "0.0.0";
+        }
     }
 
     /** WebView 运行时版本：拉流/渲染类问题第一手要看的（原先只在主屏诊断里有） */

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 聊天（自绘）。色值走色板：原为写死的 #7CC4FF 浅蓝，单色方案下统一走 icon_on_surface。
+     气泡内那两条"文字线"仍是底色（深色），在浅色气泡上才看得见。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24"
-    android:tint="#7CC4FF">
+    android:tint="@color/icon_on_surface">
     <path android:fillColor="#FFFFFFFF"
         android:pathData="M4,4 L20,4 A2,2 0 0,1 22,6 L22,14 A2,2 0 0,1 20,16 L10,16 L5,20 L5,16 L4,16 A2,2 0 0,1 2,14 L2,6 A2,2 0 0,1 4,4 Z" />
     <path android:fillColor="#FF0E141B"

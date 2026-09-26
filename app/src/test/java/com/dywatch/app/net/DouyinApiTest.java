@@ -43,6 +43,26 @@ public class DouyinApiTest {
         assertNotNull(v.playUrl);
         assertTrue("playUrl 异常: " + v.playUrl, v.playUrl.startsWith("http"));
         assertTrue("coverUrl 异常: " + v.coverUrl, v.coverUrl.startsWith("http"));
+
+        // ⚠️ 2026-09-27 加严：上面那条 startsWith("http") 是**不合格的断言**——
+        // 封面的 bug 版本拼出的是 https://www.douyin.com/aweme/v1/play/?video_id=<封面uri>，
+        // 也以 http 开头，于是 bug 在测里完全隐身（真机上表现为封面永远黑屏）。
+        // 现在对**整批真实样本**断言：封面一律是图床直链、一律不是播放端点。
+        int withCover = 0, withAvatar = 0;
+        for (FeedVideo it : list) {
+            if (!it.coverUrl.isEmpty()) {
+                withCover++;
+                assertFalse("封面不能是播放端点: " + it.coverUrl, it.coverUrl.contains("/aweme/v1/play/"));
+                assertTrue("封面应来自图床: " + it.coverUrl, it.coverUrl.contains("douyinpic.com"));
+            }
+            if (!it.authorAvatar.isEmpty()) {
+                withAvatar++;
+                assertFalse("头像不能是播放端点: " + it.authorAvatar, it.authorAvatar.contains("/aweme/v1/play/"));
+                assertTrue("头像应来自图床: " + it.authorAvatar, it.authorAvatar.contains("douyinpic.com"));
+            }
+        }
+        assertTrue("真实样本里应至少有 1 条带封面（否则解析其实没生效）", withCover > 0);
+        assertTrue("真实样本里应至少有 1 条带头像（用户报的 bug 就是这里）", withAvatar > 0);
     }
 
     @Test

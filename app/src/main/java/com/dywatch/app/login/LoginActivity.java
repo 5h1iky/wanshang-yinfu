@@ -187,6 +187,7 @@ public class LoginActivity extends UiActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 AppLog.i("login", "页面加载完成: " + url);
+                com.dywatch.app.ui.Loading.show(LoginActivity.this, false);   // 页面出来了 → 停转圈
                 if (!mWarmed && url.contains("douyin.com") && !url.contains("sso.")) {
                     // 预热完成 → 进登录页
                     mWarmed = true;
@@ -203,6 +204,7 @@ public class LoginActivity extends UiActivity {
         });
 
         setHint("正在预热设备环境…");
+        com.dywatch.app.ui.Loading.show(this, true);
         mWebView.loadUrl(WARM_URL);
 
         // 手表硬件适配 §10：可见返回键

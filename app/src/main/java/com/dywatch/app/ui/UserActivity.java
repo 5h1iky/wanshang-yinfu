@@ -78,6 +78,7 @@ public class UserActivity extends UiActivity {
 
     private void load() {
         hint("正在拉取作品…");
+        com.dywatch.app.ui.Loading.show(this, true);
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -115,6 +116,7 @@ public class UserActivity extends UiActivity {
                         public void run() {
                             if (isFinishing()) return;
                             hint("拉取失败: " + e.getMessage());
+                            com.dywatch.app.ui.Loading.show(UserActivity.this, false);
                         }
                     });
                 }
@@ -133,6 +135,7 @@ public class UserActivity extends UiActivity {
                     v.title.isEmpty() ? "(无标题)" : v.title, meta, "", i));
         }
         mAdapter.submitList(items);
+        com.dywatch.app.ui.Loading.show(this, false);
         if (list.isEmpty()) {
             hint("这个作者没有作品（或接口没返回）");
         } else {

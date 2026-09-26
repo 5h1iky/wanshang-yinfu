@@ -1,0 +1,15 @@
+﻿feat(ui): 用户 8 项反馈落地 —— 单色方案/头像封面修复/输入框适配/分享/加载圈/字号设置
+
+- 修作者头像从不加载（此前连字段都没解析）；连带修掉封面真凶：
+  urlFromAddr 误用于图片，把 cover.uri 拼成播放端点（弱断言 startsWith("http") 长期掩盖）
+- ic_gear 重生成为严格对称齿轮（纵横比 1.0000，原 path 纵向拉长 28% 且偏心）
+- 单色方案：colors.xml 全灰阶化，激活态改 setImageAlpha；修 Material3 按钮被
+  colorPrimary 染色（退出应用曾是亮蓝）
+- 输入框 wrap_content+minHeight（原固定 42dp + maxLines=2 自相矛盾切字）；
+  快捷回复条压成 28dp 胶囊 + 总开关
+- 分享补做（复制链接到剪贴板）；加载小圆圈七页接线
+- 设置新增字体大小（fontScale）与快捷回复开关；设置页版本号改读包信息
+- 代码审查：DouyinApi 5 份设备参数块收拢（键值零改动）；互动在途锁改按 key
+  记账防互踩；评论页 onAuth/onEngineError 提示不可见的真 bug
+
+35 项单测全绿（新增 5 项可证伪断言并验证能红）；真机全链路回归通过

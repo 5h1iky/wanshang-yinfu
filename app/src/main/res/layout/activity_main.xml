@@ -140,6 +140,8 @@
           次要动作：只留退出。原先这里还有个「诊断」，但诊断已经收进设置页
           （且比主屏版更全，多了缩放/屏形/边距/看过条数），同一功能两个入口白占一格一级位。
           手表无手势无按键，退出必须显式存在（方案 §10）。
+          ⚠️ backgroundTint=@null 必须保留：Material3 的 Button 默认拿 colorPrimary
+             去染背景，自定义的深色卡会被染成浅蓝（真机实测，"退出应用"曾是一块亮蓝）。
         -->
         <Button
             android:id="@+id/btn_exit"
@@ -147,6 +149,7 @@
             android:layout_height="@dimen/ctrl_min"
             android:layout_marginTop="@dimen/s3"
             android:background="@drawable/bg_settings_row"
+            android:backgroundTint="@null"
             android:text="退出应用"
             android:textColor="@color/danger"
             android:textSize="@dimen/t_body" />

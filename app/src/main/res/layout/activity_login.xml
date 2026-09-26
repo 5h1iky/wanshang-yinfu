@@ -18,6 +18,10 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top" />
 
+    <!-- 加载小圆圈：预热 www.douyin.com / 打开登录页期间 WebView 是白屏，
+         光靠顶部一行字看不出进度（2026-09-27 加；onPageFinished 时收掉） -->
+    <include layout="@layout/include_loading" />
+
     <!-- 登录状态提示（拍照排障用） -->
     <TextView
         android:id="@+id/tv_login_hint"

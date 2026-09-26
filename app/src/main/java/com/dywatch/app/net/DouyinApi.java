@@ -112,26 +112,26 @@ public final class DouyinApi {
         }
     }
 
-    /** 构造 favorite query（参数族照实测探针）；纯函数（除签名外无副作用） */
-    String buildFavoriteQuery(String secUid, long cursor) {
+    // ---- 通用 query 构建 ----
+    //
+    // 这里原先有 5 份几乎一字不差的 30 行"设备参数块"（favorite/post/profile/self/profile/other/feed），
+    // 每份 ~150 行重复。2026-09-27 收拢成 baseDeviceParams + joinAndSign：
+    // ⚠️ 键值**一字未改**（含 aweme/post 特有的 version_code=290100 这种坑），只是不再抄五遍——
+    //    以后抖音改参数族，改一处五处全生效，不会再出现"改了 feed 忘了 favorite"。
+
+    /** 各只读接口共用的设备/浏览器指纹参数（照实测探针抄，勿凭感觉改） */
+    private static Map<String, String> baseDeviceParams(String versionCode, String versionName) {
         Map<String, String> p = new LinkedHashMap<>();
         p.put("device_platform", "webapp");
         p.put("aid", "6383");
         p.put("channel", "channel_pc_web");
-        p.put("sec_user_id", secUid == null ? "" : secUid);
-        p.put("max_cursor", String.valueOf(cursor));
-        p.put("min_cursor", "0");
-        p.put("whale_cut_token", "");       // 空值字段，浏览器确实发
-        p.put("cut_version", "1");
-        p.put("count", "18");
-        p.put("publish_video_strategy_type", "2");
-        p.put("update_version_code", "170400");
+        p.put("update_version_code", versionCode);
         p.put("pc_client_type", "1");
         p.put("pc_libra_divert", "Windows");
         p.put("support_h265", "1");
         p.put("support_dash", "1");
-        p.put("version_code", "170400");
-        p.put("version_name", "17.4.0");
+        p.put("version_code", versionCode);
+        p.put("version_name", versionName);
         p.put("cookie_enabled", "true");
         p.put("screen_width", "2560");
         p.put("screen_height", "1440");
@@ -150,13 +150,35 @@ public final class DouyinApi {
         p.put("downlink", "0.55");
         p.put("effective_type", "3g");
         p.put("round_trip_time", "0");
+        return p;
+    }
+
+    /** 通用版本参数族 */
+    private static final String VER_COMMON_CODE = "170400", VER_COMMON_NAME = "17.4.0";
+    /** aweme/post 特有版本号（写通用的 170400 会少字段，实测结论） */
+    private static final String VER_POST_CODE = "290100", VER_POST_NAME = "29.1.0";
+
+    /** 拼 query 并签名（LinkedHashMap 保序：a_bogus 必须对最终串算） */
+    private String joinAndSign(Map<String, String> p) {
         StringBuilder q = new StringBuilder();
         for (Map.Entry<String, String> e : p.entrySet()) {
             if (q.length() > 0) q.append('&');
             q.append(e.getKey()).append('=').append(e.getValue());
         }
-        String ab = signer.makeABogus(q.toString());
-        return q + "&a_bogus=" + urlEncode(ab);
+        return q + "&a_bogus=" + urlEncode(signer.makeABogus(q.toString()));
+    }
+
+    /** 构造 favorite query（参数族照实测探针）；纯函数（除签名外无副作用） */
+    String buildFavoriteQuery(String secUid, long cursor) {
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("sec_user_id", secUid == null ? "" : secUid);
+        p.put("max_cursor", String.valueOf(cursor));
+        p.put("min_cursor", "0");
+        p.put("whale_cut_token", "");       // 空值字段，浏览器确实发
+        p.put("cut_version", "1");
+        p.put("count", "18");
+        p.put("publish_video_strategy_type", "2");
+        return joinAndSign(p);
     }
 
     /**
@@ -190,10 +212,7 @@ public final class DouyinApi {
 
     /** 构造 aweme/post query；纯函数（除签名外无副作用） */
     String buildUserPostsQuery(String secUid, long cursor) {
-        Map<String, String> p = new LinkedHashMap<>();
-        p.put("device_platform", "webapp");
-        p.put("aid", "6383");
-        p.put("channel", "channel_pc_web");
+        Map<String, String> p = baseDeviceParams(VER_POST_CODE, VER_POST_NAME);
         p.put("sec_user_id", secUid == null ? "" : secUid);
         p.put("max_cursor", String.valueOf(cursor));
         p.put("locate_query", "false");
@@ -205,38 +224,7 @@ public final class DouyinApi {
         p.put("count", "18");
         p.put("publish_video_strategy_type", "2");
         p.put("from_user_page", "1");          // 看别人的主页
-        // ⚠️ 该接口特有版本号，写通用的 170400 会少字段
-        p.put("update_version_code", "290100");
-        p.put("pc_client_type", "1");
-        p.put("pc_libra_divert", "Windows");
-        p.put("support_h265", "1");
-        p.put("support_dash", "1");
-        p.put("version_code", "290100");
-        p.put("version_name", "29.1.0");
-        p.put("cookie_enabled", "true");
-        p.put("screen_width", "2560");
-        p.put("screen_height", "1440");
-        p.put("browser_language", "zh-CN");
-        p.put("browser_platform", "Win32");
-        p.put("browser_name", "Chrome");
-        p.put("browser_version", "135.0.0.0");
-        p.put("browser_online", "true");
-        p.put("engine_name", "Blink");
-        p.put("engine_version", "135.0.0.0");
-        p.put("os_name", "Windows");
-        p.put("os_version", "10");
-        p.put("cpu_core_num", "20");
-        p.put("device_memory", "8");
-        p.put("platform", "PC");
-        p.put("downlink", "0.55");
-        p.put("effective_type", "3g");
-        p.put("round_trip_time", "0");
-        StringBuilder q = new StringBuilder();
-        for (Map.Entry<String, String> e : p.entrySet()) {
-            if (q.length() > 0) q.append('&');
-            q.append(e.getKey()).append('=').append(e.getValue());
-        }
-        return q + "&a_bogus=" + urlEncode(signer.makeABogus(q.toString()));
+        return joinAndSign(p);
     }
 
     /** 作者信息（昵称/粉丝数/作品数等），给主页头部用 */
@@ -251,49 +239,16 @@ public final class DouyinApi {
 
     public UserInfo fetchUserInfo(String secUid) throws IOException {
         ensureTtwid();
-        Map<String, String> p = new LinkedHashMap<>();
-        p.put("device_platform", "webapp");
-        p.put("aid", "6383");
-        p.put("channel", "channel_pc_web");
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
         p.put("sec_user_id", secUid == null ? "" : secUid);
         p.put("publish_video_strategy_type", "2");
         p.put("source", "channel_pc_web");
         p.put("personal_center_strategy", "1");
         p.put("profile_other_record_enable", "1");
         p.put("land_to", "1");
-        p.put("update_version_code", "170400");
-        p.put("pc_client_type", "1");
-        p.put("pc_libra_divert", "Windows");
-        p.put("support_h265", "1");
-        p.put("support_dash", "1");
-        p.put("version_code", "170400");
-        p.put("version_name", "17.4.0");
-        p.put("cookie_enabled", "true");
-        p.put("screen_width", "2560");
-        p.put("screen_height", "1440");
-        p.put("browser_language", "zh-CN");
-        p.put("browser_platform", "Win32");
-        p.put("browser_name", "Chrome");
-        p.put("browser_version", "135.0.0.0");
-        p.put("browser_online", "true");
-        p.put("engine_name", "Blink");
-        p.put("engine_version", "135.0.0.0");
-        p.put("os_name", "Windows");
-        p.put("os_version", "10");
-        p.put("cpu_core_num", "20");
-        p.put("device_memory", "8");
-        p.put("platform", "PC");
-        p.put("downlink", "0.55");
-        p.put("effective_type", "3g");
-        p.put("round_trip_time", "0");
-        StringBuilder q = new StringBuilder();
-        for (Map.Entry<String, String> e : p.entrySet()) {
-            if (q.length() > 0) q.append('&');
-            q.append(e.getKey()).append('=').append(e.getValue());
-        }
+        String q = joinAndSign(p);
         Request req = new Request.Builder()
-                .url("https://www.douyin.com/aweme/v1/web/user/profile/other/?" + q
-                        + "&a_bogus=" + urlEncode(signer.makeABogus(q.toString())))
+                .url("https://www.douyin.com/aweme/v1/web/user/profile/other/?" + q)
                 .header("User-Agent", UA)
                 .header("Referer", "https://www.douyin.com/user/" + (secUid == null ? "" : secUid))
                 .header("Cookie", fullCookie())
@@ -402,44 +357,9 @@ public final class DouyinApi {
      *    但实测 profile/self 这个 JSON 接口的 user.sec_uid 仍然给，直接用它。
      */
     public String fetchSelfSecUid() throws IOException {
-        StringBuilder q = new StringBuilder();
-        Map<String, String> p = new LinkedHashMap<>();
-        p.put("device_platform", "webapp");
-        p.put("aid", "6383");
-        p.put("channel", "channel_pc_web");
-        p.put("update_version_code", "170400");
-        p.put("pc_client_type", "1");
-        p.put("pc_libra_divert", "Windows");
-        p.put("support_h265", "1");
-        p.put("support_dash", "1");
-        p.put("version_code", "170400");
-        p.put("version_name", "17.4.0");
-        p.put("cookie_enabled", "true");
-        p.put("screen_width", "2560");
-        p.put("screen_height", "1440");
-        p.put("browser_language", "zh-CN");
-        p.put("browser_platform", "Win32");
-        p.put("browser_name", "Chrome");
-        p.put("browser_version", "135.0.0.0");
-        p.put("browser_online", "true");
-        p.put("engine_name", "Blink");
-        p.put("engine_version", "135.0.0.0");
-        p.put("os_name", "Windows");
-        p.put("os_version", "10");
-        p.put("cpu_core_num", "20");
-        p.put("device_memory", "8");
-        p.put("platform", "PC");
-        p.put("downlink", "0.55");
-        p.put("effective_type", "3g");
-        p.put("round_trip_time", "0");
-        for (Map.Entry<String, String> e : p.entrySet()) {
-            if (q.length() > 0) q.append('&');
-            q.append(e.getKey()).append('=').append(e.getValue());
-        }
-        String ab = signer.makeABogus(q.toString());
+        String q = joinAndSign(baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME));
         Request req = new Request.Builder()
-                .url("https://www.douyin.com/aweme/v1/web/user/profile/self/?" + q
-                        + "&a_bogus=" + urlEncode(ab))
+                .url("https://www.douyin.com/aweme/v1/web/user/profile/self/?" + q)
                 .header("User-Agent", UA)
                 .header("Referer", "https://www.douyin.com/")
                 .header("Cookie", fullCookie())
@@ -507,35 +427,8 @@ public final class DouyinApi {
 
     /** 构造 feed query（含 a_bogus 与翻页游标）；纯函数 */
     public static String buildFeedQuery(int count, int refreshIndex, Signer signer) {
-        Map<String, String> p = new LinkedHashMap<>();
-        p.put("device_platform", "webapp");
-        p.put("aid", "6383");
-        p.put("channel", "channel_pc_web");
-        p.put("update_version_code", "170400");
-        p.put("pc_client_type", "1");
-        p.put("pc_libra_divert", "Windows");
-        p.put("support_h265", "1");
-        p.put("support_dash", "1");
-        p.put("version_code", "170400");
-        p.put("version_name", "17.4.0");
-        p.put("cookie_enabled", "true");
-        p.put("screen_width", "2560");
-        p.put("screen_height", "1440");
-        p.put("browser_language", "zh-CN");
-        p.put("browser_platform", "Win32");
-        p.put("browser_name", "Chrome");
-        p.put("browser_version", "135.0.0.0");
-        p.put("browser_online", "true");
-        p.put("engine_name", "Blink");
-        p.put("engine_version", "135.0.0.0");
-        p.put("os_name", "Windows");
-        p.put("os_version", "10");
-        p.put("cpu_core_num", "20");
-        p.put("device_memory", "8");
-        p.put("platform", "PC");
-        p.put("downlink", "0.55");
-        p.put("effective_type", "3g");
-        p.put("round_trip_time", "500");
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("round_trip_time", "500");     // feed 这个接口实测探针发的是 500，保持原值
         p.put("count", String.valueOf(count));
         p.put("refresh_index", String.valueOf(refreshIndex));
         p.put("tag_id", "");
@@ -570,11 +463,14 @@ public final class DouyinApi {
         String title = optString(item, "desc");
         String author = "";
         String authorSecUid = "";
+        String authorAvatar = "";
         JsonObject authorObj = objOf(item, "author");
         if (authorObj != null) {
             author = optString(authorObj, "nickname");
             // 进作者主页要用 sec_uid（profile/other 与 aweme/post 都靠它定位）
             authorSecUid = optString(authorObj, "sec_uid");
+            // 头像（2026-09-27 补）：字段是 author.avatar_thumb（实测 probe-avatar-cover.js）
+            authorAvatar = imageUrl(authorObj, "avatar_thumb");
         }
         long digg = 0, comment = 0, collect = 0;
         JsonObject stats = objOf(item, "statistics");
@@ -590,13 +486,42 @@ public final class DouyinApi {
             playUrl = pickGearUrl(video, awemeId);
             if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr", awemeId);
             if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr_lowbr", awemeId);
-            coverUrl = firstUrl(video, "cover", awemeId);
-            if (coverUrl.isEmpty()) coverUrl = firstUrl(video, "origin_cover", awemeId);
+            // ⚠️ 封面必须走 imageUrl，**不能**走 firstUrl/urlFromAddr：
+            //    后者是给播放地址用的，它见到 cover.uri 非空就会拼成
+            //    https://www.douyin.com/aweme/v1/play/?video_id=<封面uri>（拿播放端点当图床），
+            //    Glide 必然加载失败 → 封面永远是黑的（2026-09-27 实测确认）。
+            coverUrl = imageUrl(video, "cover");
+            if (coverUrl.isEmpty()) coverUrl = imageUrl(video, "origin_cover");
         }
         if (playUrl.isEmpty()) return null;
         FeedVideo v = new FeedVideo(title, playUrl, coverUrl, awemeId, author, digg, comment, collect);
         v.authorSecUid = authorSecUid;
+        v.authorAvatar = authorAvatar;
         return v;
+    }
+
+    /**
+     * 取「图片类」字段的直链：cover / origin_cover / avatar_thumb 这类对象的 url_list[0]。
+     *
+     * 实测（2026-09-27，tools/probe-avatar-cover.js，带登录态的真实 feed）：
+     *   - 头像 author.avatar_thumb.url_list[0] → https://p3-pc.douyinpic.com/...  HTTP 200 image/jpeg
+     *   - 封面 video.cover.url_list[0]        → https://p9-pc-sign.douyinpic.com/... HTTP 200 image/jpeg
+     *   - 两者**带不带 Referer 都能取到**，所以 Glide 直接加载即可，不需要挂请求头。
+     * 与 urlFromAddr 的区别见 itemToVideo 里的注释（那个是播放地址专用，会把图片 URL 拼坏）。
+     */
+    static String imageUrl(JsonObject holder, String key) {
+        if (holder == null) return "";
+        JsonObject addr = objOf(holder, key);
+        if (addr == null) return "";
+        JsonArray list = arrOf(addr, "url_list");
+        if (list == null || list.size() == 0) return "";
+        for (int i = 0; i < list.size(); i++) {
+            JsonElement e = list.get(i);
+            if (e == null || e.isJsonNull() || !e.isJsonPrimitive()) continue;
+            String u = e.getAsString();
+            if (u != null && u.startsWith("http")) return u;
+        }
+        return "";
     }
 
     /**

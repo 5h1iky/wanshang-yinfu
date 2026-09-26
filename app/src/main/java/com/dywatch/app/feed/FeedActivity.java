@@ -149,6 +149,8 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         if (mPresetMode) return;
         if (mLoading) return;
         mLoading = true;
+        // 首屏要等签名 + 拉流（手表上更久），内容区正中给个在转的圈
+        if (first) com.dywatch.app.ui.Loading.show(this, true);
         com.dywatch.app.util.AppLog.i("feed", "拉取下一页（已 " + mVideoList.size() + " 条）");
         new Thread(new Runnable() {
             @Override
@@ -160,6 +162,15 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                             .putInt("refresh_index", mApi.getRefreshIndex()).apply();
                     com.dywatch.app.util.AppLog.i("feed", "本页拿到 " + list.size() + " 条（游标="
                             + mApi.getRefreshIndex() + " 登录态=" + com.dywatch.app.login.LoginManager.hasSession(FeedActivity.this) + "）");
+                    // 封面/头像是否真的解析出来了：这两个字段以前都是坏的（封面被拼成播放端点、
+                    // 头像压根没解析），光看"拉到几条"完全看不出来——必须单独记账才能验证。
+                    int cov = 0, ava = 0;
+                    for (FeedVideo v : list) {
+                        if (v.coverUrl != null && !v.coverUrl.isEmpty()) cov++;
+                        if (v.authorAvatar != null && !v.authorAvatar.isEmpty()) ava++;
+                    }
+                    com.dywatch.app.util.AppLog.i("feed", "本页封面 " + cov + "/" + list.size()
+                            + " 条、作者头像 " + ava + "/" + list.size() + " 条");
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -177,6 +188,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                             startPlay(mViewPager.getCurrentItem());
                             if (list.isEmpty()) {
                                 showHint("没有更多了");
+                                com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
                             } else if (added == 0) {
                                 // 本页全是看过的内容 → 自动补拉下一页
                                 com.dywatch.app.util.AppLog.i("feed", "本页全为看过内容，自动补拉");
@@ -189,6 +201,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                             } else {
                                 // 有内容就不占画面（全屏刷视频，提示行压在画面上很碍事）
                                 clearHint();
+                                com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
                             }
                         }
                     });
@@ -199,6 +212,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                         @Override
                         public void run() {
                             mLoading = false;
+                            com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
                             if (first) loadFixtureOrCache();
                             showHint((first ? "网络加载失败，已回退内置数据。\n" : "翻页失败: ") + err);
                         }
@@ -477,9 +491,38 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         engineAction("collect", video, holder, target, false);
     }
 
+    /**
+     * 分享（2026-09-27 补做）。
+     *
+     * 实现取舍：手表上没有几个能接收 ACTION_SEND 的应用，弹系统分享面板大概率是
+     * "无应用可处理"——所以这里落成「复制作品链接到剪贴板」，这是手表上真正可用的分享路径：
+     * 复制后到手机上粘贴即可发给别人。零风控、零依赖、任何设备都成立。
+     * （若之后要"分享给私信好友"，那是另一件事：需要会话选择器 + 引擎发送，见工作日志待办。）
+     */
     @Override
     public void onShare(FeedVideo video) {
-        android.widget.Toast.makeText(this, "分享开发中", android.widget.Toast.LENGTH_SHORT).show();
+        if (video.awemeId == null || video.awemeId.isEmpty()) {
+            android.widget.Toast.makeText(this, "示例视频没有分享链接", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String url = "https://www.douyin.com/video/" + video.awemeId;
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            if (cm == null) {
+                android.widget.Toast.makeText(this, "本机没有剪贴板服务", android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("抖音作品链接", url));
+            // 手表屏窄，toast 只报结果，不把整条 URL 铺出来
+            android.widget.Toast.makeText(this, "链接已复制，去手机粘贴分享", android.widget.Toast.LENGTH_SHORT).show();
+            AppLog.i("feed", "分享=复制链接 aweme=" + video.awemeId + " url=" + url);
+        } catch (Throwable t) {
+            // 个别 ROM 的剪贴板服务会抛（权限/厂商改），不能让分享把页面搞崩
+            AppLog.i("feed", "分享失败：" + t);
+            android.widget.Toast.makeText(this, "复制失败：" + t.getClass().getSimpleName(),
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }
     }
 
     /**
@@ -504,17 +547,27 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      * 同一条视频的同一个互动在途时不接受第二次。必须在"乐观翻转"之前拦：翻转发生在
      * 调用 engineAction 之前，拦在里面会留下翻了却没人回滚的 UI（桥侧 __inFlight
      * 只挡 JS 那层，挡不住这里已经翻掉的显示）。
+     *
+     * ⚠️ 2026-09-27 修：原先是一个 String 单槽（mActionBusy = "like:xxx"），
+     * 于是「同一条视频先点赞、再收藏」会把槽覆盖成 "collect:xxx"，
+     * 而点赞那条的 30s 兜底定时器判的是 endsWith(":"+awemeId) —— 它会把**收藏**的
+     * 在途标记提前清掉，收藏就能被重复提交。改成按 key 独立记账。
      */
-    private String mActionBusy;
+    private final java.util.Set<String> mActionsInFlight = new java.util.HashSet<>();
 
     private boolean actionBusy(String kind, String awemeId) {
         String key = kind + ":" + awemeId;
-        if (key.equals(mActionBusy)) {
+        if (mActionsInFlight.contains(key)) {
             android.widget.Toast.makeText(this, "上一次操作还在进行中…", android.widget.Toast.LENGTH_SHORT).show();
             return true;
         }
-        mActionBusy = key;
+        mActionsInFlight.add(key);
         return false;
+    }
+
+    /** 互动结束（成功/失败/超时）统一从这里摘掉在途标记 */
+    private void actionDone(String kind, String awemeId) {
+        mActionsInFlight.remove(kind + ":" + awemeId);
     }
 
     /**
@@ -526,18 +579,23 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                               final boolean target, final boolean isLike) {
         final com.dywatch.app.chat.ChatEngine engine =
                 com.dywatch.app.chat.ChatEngine.getInstance(this, null);
-        // 桥没回音（页面异常/被吞）时不能把互动按钮永久锁死
+        final String awemeId = video.awemeId;
+        // 桥没回音（页面异常/被吞）时不能把互动按钮永久锁死。
+        // 只清自己这一条 key：原先清的是"任意以该 awemeId 结尾"的槽，会误清另一个互动的在途标记。
         mViewPager.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (mActionBusy != null && mActionBusy.endsWith(":" + video.awemeId)) mActionBusy = null;
+                if (mActionsInFlight.contains(kind + ":" + awemeId)) {
+                    AppLog.i("feed", "互动超时兜底解锁 " + kind + " aweme=" + awemeId);
+                    actionDone(kind, awemeId);
+                }
             }
         }, 30000);
         engine.setActionListener(new com.dywatch.app.chat.ChatEngine.ActionListener() {
             @Override
             public void onActionResult(String action, boolean ok, String detail) {
                 engine.setActionListener(null);
-                mActionBusy = null;
+                actionDone(kind, awemeId);
                 if (ok) {
                     android.widget.Toast.makeText(FeedActivity.this,
                             isLike ? (target ? "已点赞" : "已取消点赞") : (target ? "已收藏" : "已取消收藏"),

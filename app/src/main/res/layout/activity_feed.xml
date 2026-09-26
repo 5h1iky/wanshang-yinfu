@@ -26,7 +26,12 @@
         android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
-    <!-- 手表硬件适配 §10：可见返回键（无手势/无按键设备可回主屏） -->
+    <!-- 加载小圆圈：首屏要等签名+拉流（手表上更久），内容区正中给个在转的指示器，
+         比只有顶部一行字更让人确信"它没死"（2026-09-27 用户提出） -->
+    <include layout="@layout/include_loading" />
+
+    <!-- 手表硬件适配 §10：可见返回键（无手势/无按键设备可回主屏）。
+         backgroundTint=@null：Material3 默认用 colorPrimary 染自定义背景（真机实测会变亮） -->
     <Button
         android:id="@+id/btn_back"
         android:layout_width="wrap_content"
@@ -34,6 +39,7 @@
         android:layout_gravity="top|start"
         android:layout_margin="@dimen/s3"
         android:background="@drawable/bg_pill"
+        android:backgroundTint="@null"
         android:minWidth="@dimen/ctrl_min"
         android:paddingLeft="@dimen/s4"
         android:paddingRight="@dimen/s4"

@@ -19,6 +19,12 @@ public class FeedVideo implements java.io.Serializable {
     public final String authorName;
     /** 作者 sec_uid（进作者主页要用；不是 final——解析后置填，避免改构造函数签名） */
     public String authorSecUid = "";
+    /**
+     * 作者头像直链（2026-09-27 补）。
+     * 此前模型里根本没有这个字段，FeedAdapter 也从没给 iv_avatar 加载过任何图，
+     * 所以视频页的头像永远是那张静态占位矢量图 —— 用户报的"头像一直没加载出来"。
+     */
+    public String authorAvatar = "";
     public long diggCount;
     public long commentCount;
     public long collectCount;
