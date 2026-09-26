@@ -133,6 +133,37 @@
       } catch (e) { return false; }
     },
 
+    // ---- 推荐流数据源（用户 2026-09-26 定案：视频内容改从 PC 推荐页拿）----
+    // 实测发现：精选页卡片元素直接带 data-aweme-id（19 位），比抓 DOM 文本/认 hash 类名稳定得多；
+    // 且页面靠它自己跟服务器拿的推荐（同源 webid/设备指纹），就是我们原生 tab/feed 拿不到的那一路推荐。
+    JINGXUAN_URL: 'https://www.douyin.com/jingxuan',
+
+    // 拉一页推荐 id（scroll=true 时先滚到底触发加载再抓）
+    fetchRecommendFeed: function (scroll) {
+      var self = this;
+      if (location.pathname.indexOf('/jingxuan') !== 0) {
+        try {
+          sessionStorage.setItem('__dywatch_action', JSON.stringify({ kind: 'feed', awemeId: 'feed', payload: !!scroll }));
+        } catch (e) {}
+        location.href = this.JINGXUAN_URL;
+        post({ type: 'feed', phase: 'navigating' });
+        return;
+      }
+      var step = function () {
+        var els = document.querySelectorAll('[data-aweme-id]');
+        var ids = [], seen = {};
+        for (var i = 0; i < els.length; i++) {
+          var id = els[i].getAttribute('data-aweme-id');
+          if (!id || !/^\d{15,}$/.test(id) || seen[id]) continue;
+          seen[id] = 1; ids.push(id);
+        }
+        post({ type: 'feed', ids: ids, docH: document.documentElement.scrollHeight });
+      };
+      if (!scroll) { step(); return; }
+      try { window.scrollTo(0, document.documentElement.scrollHeight); } catch (e) {}
+      setTimeout(step, 2500);
+    },
+
     // ---- 视频互动（点赞/收藏）：复用本引擎开视频页，点页面自带按钮（页面 SDK 全包风控）----
     // data-e2e 语义锚点（2026-09-26 实探）：video-player-digg=点赞 feed-comment-icon=评论
     // video-player-collect=收藏 video-player-share=分享
@@ -254,6 +285,7 @@
       }
       if (kind === 'comments') return this.__scrapeComments();
       if (kind === 'sendComment') return this.__doSendComment(payload);
+      if (kind === 'feed') return this.fetchRecommendFeed(!!payload);
       var key = kind + ':' + awemeId;
       if (this.__inFlight[key]) {
         post({ type: 'action', action: kind, ok: false, skipped: true, detail: '上一次同动作仍在执行中，已忽略' });
@@ -506,6 +538,7 @@
           else if (a.kind === 'collect') ChatBridge.collectVideo(a.awemeId, a.payload);
           else if (a.kind === 'comments') ChatBridge.fetchComments(a.awemeId);
           else if (a.kind === 'sendComment') ChatBridge.sendComment(a.awemeId, a.payload);
+          else if (a.kind === 'feed') ChatBridge.fetchRecommendFeed(!!a.payload);
         }, 800);
       }
     }

@@ -250,41 +250,152 @@ public final class DouyinApi {
         if (arr == null) return out;
         for (JsonElement el : arr) {
             if (!el.isJsonObject()) continue;
-            JsonObject item = el.getAsJsonObject();
-            String title = optString(item, "desc");
-            String awemeId = optString(item, "aweme_id");
-            String author = "";
-            JsonObject authorObj = item.getAsJsonObject("author");
-            if (authorObj != null) author = optString(authorObj, "nickname");
-            long digg = 0, comment = 0, collect = 0;
-            JsonObject stats = item.getAsJsonObject("statistics");
-            if (stats != null) {
-                digg = optLong(stats, "digg_count");
-                comment = optLong(stats, "comment_count");
-                collect = optLong(stats, "collect_count");
-            }
-            String playUrl = "";
-            String coverUrl = "";
-            JsonObject video = item.getAsJsonObject("video");
-            if (video != null) {
-                playUrl = firstUrl(video, "play_addr");
-                if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr_lowbr");
-                coverUrl = firstUrl(video, "cover");
-                if (coverUrl.isEmpty()) coverUrl = firstUrl(video, "origin_cover");
-            }
-            if (!playUrl.isEmpty()) {
-                out.add(new FeedVideo(title, playUrl, coverUrl, awemeId, author, digg, comment, collect));
-            }
+            FeedVideo v = itemToVideo(el.getAsJsonObject());
+            if (v != null) out.add(v);
         }
         return out;
     }
+
+    /** 单条 aweme 对象 → FeedVideo（feed 与 detail 两个接口共用同一字段抽取）；纯函数 */
+    static FeedVideo itemToVideo(JsonObject item) {
+        String awemeId = optString(item, "aweme_id");
+        String title = optString(item, "desc");
+        String author = "";
+        JsonObject authorObj = item.getAsJsonObject("author");
+        if (authorObj != null) author = optString(authorObj, "nickname");
+        long digg = 0, comment = 0, collect = 0;
+        JsonObject stats = item.getAsJsonObject("statistics");
+        if (stats != null) {
+            digg = optLong(stats, "digg_count");
+            comment = optLong(stats, "comment_count");
+            collect = optLong(stats, "collect_count");
+        }
+        String playUrl = "";
+        String coverUrl = "";
+        JsonObject video = item.getAsJsonObject("video");
+        if (video != null) {
+            playUrl = firstUrl(video, "play_addr", awemeId);
+            if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr_lowbr", awemeId);
+            coverUrl = firstUrl(video, "cover", awemeId);
+            if (coverUrl.isEmpty()) coverUrl = firstUrl(video, "origin_cover", awemeId);
+        }
+        if (playUrl.isEmpty()) return null;
+        return new FeedVideo(title, playUrl, coverUrl, awemeId, author, digg, comment, collect);
+    }
+
+    /** 拉单条视频详情（推荐流只给 id，播放地址靠这里换） */
+    public FeedVideo fetchDetail(String awemeId) throws IOException {
+        ensureTtwid();
+        String query = buildDetailQuery(awemeId, signer);
+        Request req = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/detail/?" + query)
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/jingxuan")
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            String body = resp.body().string();
+            lastDiagnostics = describeCandidates(body); // 真机排"只显封面"要看候选主机列表
+            List<FeedVideo> list = parseDetail(body);
+            if (list.isEmpty()) throw new IOException("detail 为空/无可播地址 id=" + awemeId);
+            return list.get(0);
+        }
+    }
+
+    /** 上次 fetchDetail 的诊断信息：服务端给了哪些播放候选主机（纯函数，可在 JVM 测） */
+    public String lastDiagnostics = "";
+
+    static String describeCandidates(String json) {
+        try {
+            JsonElement el = JsonParser.parseString(json);
+            if (!el.isJsonObject()) return "非JSON:" + json.substring(0, Math.min(60, json.length()));
+            JsonObject d = el.getAsJsonObject().getAsJsonObject("aweme_detail");
+            JsonObject v = d == null ? null : d.getAsJsonObject("video");
+            if (v == null) return "无aweme_detail/video(status=" + optString(el.getAsJsonObject(), "status_code") + ")";
+            StringBuilder sb = new StringBuilder();
+            String[] keys = {"play_addr", "play_addr_h264", "download_addr"};
+            for (String k : keys) {
+                JsonObject a = v.getAsJsonObject(k);
+                if (a == null) continue;
+                JsonArray l = a.getAsJsonArray("url_list");
+                if (l == null) continue;
+                for (int i = 0; i < l.size(); i++) {
+                    String u = l.get(i).getAsString();
+                    int s = u.indexOf("//") + 2;
+                    int e = u.indexOf('/', s);
+                    sb.append(k).append('[').append(i).append("]=")
+                      .append(u.substring(s, e < 0 ? u.length() : e)).append(' ');
+                }
+            }
+            return sb.length() == 0 ? "无候选" : sb.toString().trim();
+        } catch (Exception e) {
+            return "err:" + e.getClass().getSimpleName();
+        }
+    }
+
+    /** 解析 detail JSON（{aweme_detail:{...}}）；纯函数 */
+    public static List<FeedVideo> parseDetail(String json) {
+        List<FeedVideo> out = new ArrayList<>();
+        JsonElement rootEl = JsonParser.parseString(json);
+        if (!rootEl.isJsonObject()) return out;
+        JsonObject d = rootEl.getAsJsonObject().getAsJsonObject("aweme_detail");
+        if (d == null) return out;
+        FeedVideo v = itemToVideo(d);
+        if (v != null) out.add(v);
+        return out;
+    }
+
+    /** 构造 detail query（参数族与 PC 页一致 + aweme_id）；含 a_bogus；纯函数 */
+    public static String buildDetailQuery(String awemeId, Signer signer) {
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("device_platform", "webapp");
+        p.put("aid", "6383");
+        p.put("channel", "channel_pc_web");
+        p.put("aweme_id", awemeId);
+        p.put("request_source", "1");
+        p.put("origin_type", "pc_feed");
+        p.put("update_version_code", "170400");
+        p.put("pc_client_type", "1");
+        p.put("pc_libra_divert", "Windows");
+        p.put("support_h265", "1");
+        p.put("support_dash", "1");
+        p.put("version_code", "170400");
+        p.put("version_name", "17.4.0");
+        p.put("cookie_enabled", "true");
+        p.put("screen_width", "2560");
+        p.put("screen_height", "1440");
+        p.put("browser_language", "zh-CN");
+        p.put("browser_platform", "Win32");
+        p.put("browser_name", "Chrome");
+        p.put("browser_version", "135.0.0.0");
+        p.put("browser_online", "true");
+        p.put("engine_name", "Blink");
+        p.put("engine_version", "135.0.0.0");
+        p.put("os_name", "Windows");
+        p.put("os_version", "10");
+        p.put("cpu_core_num", "20");
+        p.put("device_memory", "8");
+        p.put("platform", "PC");
+        p.put("downlink", "0.55");
+        p.put("effective_type", "3g");
+        p.put("round_trip_time", "500");
+        StringBuilder q = new StringBuilder();
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(e.getKey()).append('=').append(e.getValue());
+        }
+        String ab = signer.makeABogus(q.toString());
+        return q + "&a_bogus=" + urlEncode(ab);
+    }
+
 
     private static long optLong(JsonObject o, String key) {
         JsonElement e = o.get(key);
         return e == null || e.isJsonNull() ? 0 : e.getAsLong();
     }
 
-    private static String firstUrl(JsonObject video, String key) {
+    private static String firstUrl(JsonObject video, String key, String awemeId) {
         JsonObject addr = video.getAsJsonObject(key);
         if (addr == null) return "";
         JsonArray list = addr.getAsJsonArray("url_list");
@@ -296,7 +407,15 @@ public final class DouyinApi {
             String u = list.get(i).getAsString();
             if (u.startsWith("https://www.douyin.com/")) return u;
         }
-        return list.get(0).getAsString();
+        // 没给跳转候选时（实测登录态 feed 会只回 CDN 直连）：自己拼官方跳转式播放地址，
+        // 用 play_addr.uri（形如 v0200fg...）；不能再回退 list.get(0)——那是必 403 的直连 CDN（实测
+        // 2026-09-26 12:26 开始播放 v26-web-prime.douyinvod.com → 随即 IDLE，只显封面）。
+        String uri = optString(addr, "uri");
+        if (!uri.isEmpty()) {
+            return "https://www.douyin.com/aweme/v1/play/?video_id=" + uri
+                    + "&ratio=1080p&line=0" + (awemeId == null || awemeId.isEmpty() ? "" : "&item_id=" + awemeId);
+        }
+        return "";
     }
 
     private static String optString(JsonObject o, String key) {

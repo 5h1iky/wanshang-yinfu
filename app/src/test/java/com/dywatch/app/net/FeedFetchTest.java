@@ -32,4 +32,22 @@ public class FeedFetchTest {
         assertFalse("feed 为空", list.isEmpty());
         System.out.println("联网冒烟 OK，条数=" + list.size() + "，首条=" + list.get(0).title);
     }
+
+    /** A3 验证：推荐流只给 id，用 detail 接口换回可播地址与计数（地址必须是跳转式，不能是直连 CDN） */
+    @Test
+    public void fetchDetail_realNetwork() throws Exception {
+        Assume.assumeTrue("联网测试需 -Dnetwork.test=true", Boolean.getBoolean("network.test"));
+        File dir = new File("src/main/assets/sign");
+        Signer signer = new Signer(Arrays.asList(
+                new String(Files.readAllBytes(new File(dir, "utils.js").toPath()), StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(new File(dir, "sm3.js").toPath()), StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(new File(dir, "vm_decode.js").toPath()), StandardCharsets.UTF_8)));
+        DouyinApi api = new DouyinApi(signer);
+        FeedVideo v = api.fetchDetail("7658893735081676042");
+        assertFalse("detail 无标题", v.title == null || v.title.isEmpty());
+        assertFalse("播放地址不是跳转式（会 403 只显封面）: " + v.playUrl,
+                !v.playUrl.startsWith("https://www.douyin.com/"));
+        System.out.println("detail OK：" + v.playUrl.substring(0, Math.min(60, v.playUrl.length()))
+                + " 赞=" + v.diggCount + " 评=" + v.commentCount);
+    }
 }

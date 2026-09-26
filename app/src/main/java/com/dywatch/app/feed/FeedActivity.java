@@ -30,7 +30,8 @@ import java.util.List;
 
 import xyz.doikki.videoplayer.player.VideoView;
 
-public class FeedActivity extends AppCompatActivity implements FeedAdapter.ActionListener {
+public class FeedActivity extends AppCompatActivity implements FeedAdapter.ActionListener,
+        com.dywatch.app.chat.ChatEngine.FeedListener {
 
     /** 当前播放位置 */
     private int mCurPos;
@@ -44,6 +45,11 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
     private PreloadManager mPreloadManager;
     private TikTokController mController;
     private VideoView mVideoView;
+    private com.dywatch.app.chat.ChatEngine mEngine;
+    /** 推荐源（引擎抓精选页）是否已证实不可用→本次只用原生 feed，不再反复唤引擎 */
+    private boolean mRecommendBroken;
+    /** “这批全已看过→再抓”的连续次数：页面不再吐新内容时防止无限循环 */
+    private int mFeedRetries;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,7 +60,7 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
         mPreloadManager = PreloadManager.getInstance(this);
 
         loadFixtureOrCache(); // 冷启动=固件垫场；有缓存=直接放上次的视频（不闪老面孔）
-        loadFeed();
+        loadRecommend();      // 主源：PC 精选页推荐（用户 2026-09-26 定案）
         // 手表硬件适配 §10：可见返回键
         findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -75,6 +81,135 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
         loadMore(true);
     }
 
+    /**
+     * 主数据源（用户定案）：让引擎打开 PC 精选页抓 data-aweme-id 卡片列表（与电脑同源推荐），
+     * 再逐条用 detail 接口换可播地址——播放始经原生。任一环不通则回退原生 tab/feed。
+     */
+    private void loadRecommend() {
+        if (mRecommendBroken) { loadFeed(); return; }
+        try {
+            mEngine = com.dywatch.app.chat.ChatEngine.getInstance(this, null,
+                    com.dywatch.app.chat.ChatEngine.FEED_URL); // 首建就在精选页，不白跑一次 /chat
+            mEngine.setFeedListener(this);
+            // 引擎可能是本次刚建的，onResume 那次挂载赶不上 → 再挂一次拿真视口
+            com.dywatch.app.chat.ChatEngine.attachTo(this);
+            mEngine.fetchRecommendFeed(false);
+            AppLog.i("feed", "推荐源：引擎抓精选页 id 中");
+            mViewPager.postDelayed(mRecommendWatchdog, 25000);
+        } catch (Exception e) {
+            AppLog.i("feed", "推荐源启动失败，回退原生 feed: " + e);
+            mRecommendBroken = true;
+            loadFeed();
+        }
+    }
+
+    /** 兜底：引擎 25s 还没回 id（未登录/页面异常）→ 转原生 feed，不让用户面对空页 */
+    private final Runnable mRecommendWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (mVideoList.isEmpty()) {
+                AppLog.i("feed", "推荐源超时未回数据，回退原生 feed");
+                mRecommendBroken = true;
+                loadFeed();
+            }
+        }
+    };
+
+    /** 引擎抓到推荐 id → 过滤已看过 → 后台换可播地址 → 走单一入口进列表 */
+    @Override
+    public void onFeedIds(final java.util.List<String> ids) {
+        mViewPager.post(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing()) return;
+                mViewPager.removeCallbacks(mRecommendWatchdog);
+                if (ids == null || ids.isEmpty()) {
+                    if (mVideoList.isEmpty()) { mRecommendBroken = true; loadFeed(); }
+                    return;
+                }
+                final java.util.List<String> fresh = new java.util.ArrayList<>();
+                for (String id : ids) {
+                    if (id == null || id.isEmpty() || SeenStore.isSeen(FeedActivity.this, id)) continue;
+                    boolean dup = false;
+                    for (FeedVideo v : mVideoList) {
+                        if (id.equals(v.awemeId)) { dup = true; break; }
+                    }
+                    if (!dup && fresh.size() < 6) fresh.add(id);
+                }
+                if (fresh.isEmpty()) {
+                    // 防死循环：页面不再吐新 id 时不要无限“再抓”（每轮要 2.5s+网络）
+                    if (++mFeedRetries > 3) {
+                        AppLog.i("feed", "连续 3 批无新内容，停止自动再抓（等用户翻页）");
+                        return;
+                    }
+                    AppLog.i("feed", "推荐 id 全已看过（" + ids.size() + " 条）→ 滚动再抓 第" + mFeedRetries + "次");
+                    if (mEngine != null) mEngine.fetchRecommendFeed(true);
+                    return;
+                }
+                mFeedRetries = 0;
+                fetchDetails(fresh);
+            }
+        });
+    }
+
+    /** 后台逐条换地址（单条失败只跳过，不拖死整批） */
+    private void fetchDetails(final java.util.List<String> ids) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final java.util.List<FeedVideo> got = new java.util.ArrayList<>();
+                for (String id : ids) {
+                    try {
+                        com.dywatch.app.net.DouyinApi api = ensureApi();
+                        got.add(api.fetchDetail(id));
+                        // 真机取证：服务端给了哪些播放候选主机（选错＝只显封面类问题的第一手证据）
+                        AppLog.i("feed", "换址 " + id + " 候选[" + api.lastDiagnostics + "]");
+                    } catch (Exception e) {
+                        AppLog.i("feed", "detail 失败跳过 " + id + ": " + e);
+                    }
+                }
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing()) return;
+                        if (got.isEmpty()) {
+                            AppLog.i("feed", "推荐源换址全部失败 → 回退原生 feed");
+                            mRecommendBroken = true;
+                            loadFeed();
+                            return;
+                        }
+                        // 列表里还混着固件/无 id 项（URL 是几小时前抓的直连 CDN，已过期不可播）
+                        // → 首批整批换血，不让用户停在“只能显封面”的垫场项上；
+                        //   否则（翻页批次）追加，不弄没用户正在看的那条。
+                        boolean hasFixture = false;
+                        for (FeedVideo v : mVideoList) {
+                            if (v.awemeId == null || v.awemeId.isEmpty()) { hasFixture = true; break; }
+                        }
+                        int added = applyNewItems(got, hasFixture);
+                        AppLog.i("feed", "推荐源进列表 " + added + "/" + got.size() + " 条（共 "
+                                + mVideoList.size() + (hasFixture ? "，整批换掉垫场" : "，追加") + "）");
+                        startPlay(mViewPager.getCurrentItem());
+                    }
+                });
+            }
+        }, "detail-load").start();
+    }
+
+    /** 懒建 DouyinApi（签名 JS + 登录态 + 持久游标）；只在后台线程调 */
+    private com.dywatch.app.net.DouyinApi ensureApi() throws Exception {
+        if (mApi != null) return mApi;
+        java.util.List<String> js = java.util.Arrays.asList(
+                readAll(getAssets().open("sign/utils.js")),
+                readAll(getAssets().open("sign/sm3.js")),
+                readAll(getAssets().open("sign/vm_decode.js")));
+        mApi = new com.dywatch.app.net.DouyinApi(new com.dywatch.app.sign.Signer(js));
+        // 带登录态拉流（个性化推荐）与互动身份
+        mApi.setSessionCookie(com.dywatch.app.login.LoginManager.getCookies(this));
+        // 翻页游标持久化：从上次进度继续（否则每次进页面都拉第1页=同样视频）
+        mApi.setRefreshIndex(getSharedPreferences("feed_state", MODE_PRIVATE).getInt("refresh_index", 0));
+        return mApi;
+    }
+
     private void loadMore(final boolean first) {
         if (mLoading) return;
         mLoading = true;
@@ -83,19 +218,7 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
             @Override
             public void run() {
                 try {
-                    if (mApi == null) {
-                        java.util.List<String> js = java.util.Arrays.asList(
-                                readAll(getAssets().open("sign/utils.js")),
-                                readAll(getAssets().open("sign/sm3.js")),
-                                readAll(getAssets().open("sign/vm_decode.js")));
-                        mApi = new com.dywatch.app.net.DouyinApi(new com.dywatch.app.sign.Signer(js));
-                        // 带登录态拉流（个性化推荐）与互动身份
-                        mApi.setSessionCookie(com.dywatch.app.login.LoginManager.getCookies(FeedActivity.this));
-                        // 翻页游标持久化：从上次进度继续（否则每次进页面都拉第1页=同样视频）
-                        mApi.setRefreshIndex(getSharedPreferences("feed_state", MODE_PRIVATE)
-                                .getInt("refresh_index", 0));
-                    }
-                    final java.util.List<FeedVideo> list = mApi.fetchFeed(10);
+                    final java.util.List<FeedVideo> list = ensureApi().fetchFeed(10);
                     // 游标落盘 + 登录态标记进日志（验证个性化）
                     getSharedPreferences("feed_state", MODE_PRIVATE).edit()
                             .putInt("refresh_index", mApi.getRefreshIndex()).apply();
@@ -213,8 +336,11 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
                         startPlay(position);
                     }
                 });
-                // 快到底时预取下一页（抖音每页只回 2~5 条，不翻页就"到底了"）
-                if (position >= mVideoList.size() - 2) loadMore(false);
+                // 快到底时预取下一页：优先让引擎滚精选页抓下一批，推荐源坏了才用原生 feed
+                if (position >= mVideoList.size() - 2) {
+                    if (!mRecommendBroken && mEngine != null) mEngine.fetchRecommendFeed(true);
+                    else loadMore(false);
+                }
             }
 
             @Override
@@ -469,6 +595,8 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (mViewPager != null) mViewPager.removeCallbacks(mRecommendWatchdog);
+        if (mEngine != null) mEngine.setFeedListener(null);
         if (mVideoView != null) mVideoView.release();
         if (mPreloadManager != null) mPreloadManager.removeAllPreloadTask();
     }
