@@ -31,6 +31,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_convlist);
+        setPageTitle("会话");
 
         mConvs = findViewById(R.id.ll_convs);
         mHint = findViewById(R.id.tv_convlist_hint);
@@ -90,7 +91,9 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
             return;
         }
         mEmptyRetries = 0;
-        mHint.setText("共 " + list.size() + " 个会话");
+        // 计数折进页名，省掉常驻提示行——手表那点高度要留给会话本身
+        setPageTitle("会话 " + list.size());
+        mHint.setVisibility(View.GONE);
         for (final Conversation c : list) {
             TextView row = new TextView(this);
             String time = c.timeText.isEmpty() ? "" : ("　·　" + c.timeText);

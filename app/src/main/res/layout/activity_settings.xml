@@ -7,45 +7,13 @@
     android:background="@color/bg_base"
     android:orientation="vertical">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/bar_h"
-        android:background="@color/bg_surface"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingLeft="@dimen/bar_lead_inset">
-
-        <Button
-            android:id="@+id/btn_back"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:background="?android:attr/selectableItemBackground"
-            android:paddingLeft="@dimen/s4"
-            android:paddingRight="@dimen/s4"
-            android:text="← 返回"
-            android:textColor="@color/text_primary"
-            android:textSize="@dimen/t_body" />
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="设置"
-            android:textColor="@color/text_secondary"
-            android:textSize="@dimen/t_body" />
-
-        <View
-            android:layout_width="60dp"
-            android:layout_height="1dp" />
-    </LinearLayout>
+    <!-- 单行页头：返回箭头兼热区 + 页名 + 时钟 -->
+    <include layout="@layout/include_header" />
 
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:paddingLeft="@dimen/page_h_inset"
-        android:paddingRight="@dimen/page_h_inset">
+        android:layout_weight="1">
 
         <LinearLayout
             android:id="@+id/ll_settings"

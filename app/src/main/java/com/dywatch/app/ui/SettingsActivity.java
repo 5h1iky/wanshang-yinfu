@@ -32,6 +32,7 @@ public class SettingsActivity extends UiActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
+        setPageTitle("设置");
         mRoot = findViewById(R.id.ll_settings);
         findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -59,6 +60,22 @@ public class SettingsActivity extends UiActivity {
                 Settings.setShapeMode(SettingsActivity.this, next);
                 toast("屏幕形状：" + SHAPE_NAMES[next]
                         + (next == Settings.SHAPE_ROUND ? "（内容横向内缩，防四角裁切）" : ""));
+                recreate();
+            }
+        });
+        row("横向边距", percentLabel(Settings.paddingHPercent(this)), new Runnable() {
+            @Override public void run() {
+                int v = nextPercent(Settings.paddingHPercent(SettingsActivity.this));
+                Settings.setPaddingPercent(SettingsActivity.this, v, Settings.paddingVPercent(SettingsActivity.this));
+                toast("横向边距：" + v + "%");
+                recreate();
+            }
+        });
+        row("纵向边距", percentLabel(Settings.paddingVPercent(this)), new Runnable() {
+            @Override public void run() {
+                int v = nextPercent(Settings.paddingVPercent(SettingsActivity.this));
+                Settings.setPaddingPercent(SettingsActivity.this, Settings.paddingHPercent(SettingsActivity.this), v);
+                toast("纵向边距：" + v + "%");
                 recreate();
             }
         });
@@ -110,12 +127,39 @@ public class SettingsActivity extends UiActivity {
                 toast("已退出登录");
             }
         });
+        actionRow("恢复默认", "缩放/屏形/边距/画质全部回到初始值", new Runnable() {
+            @Override public void run() {
+                Settings.setScale(SettingsActivity.this, 1.0f);
+                Settings.setShapeMode(SettingsActivity.this, Settings.SHAPE_AUTO);
+                Settings.setPaddingPercent(SettingsActivity.this, 0, 0);
+                Settings.setQualityMode(SettingsActivity.this, Settings.Q_SAVE);
+                Settings.setCommentAutoLoad(SettingsActivity.this, true);
+                Settings.setKeepScreenOn(SettingsActivity.this, true);
+                DouyinApi.sQuality = Settings.Q_SAVE;
+                toast("已恢复默认");
+                recreate();
+            }
+        });
         infoRow("腕上音符 v0.1.0\n与抖音官方无关 · 仅供个人学习 · 风险自负");
     }
 
     private String qualityHint() {
         int q = Settings.qualityMode(this);
         return q == Settings.Q_SAVE ? "540p" : (q == Settings.Q_BALANCED ? "720p" : "1080p");
+    }
+
+    /** 边距档位：0 就是铺满，圆屏一般 4~8% 收得住；上限留给 14 免得调到没法用 */
+    private static final int[] PERCENTS = {0, 2, 4, 6, 8, 10, 14};
+
+    private static int nextPercent(int cur) {
+        for (int i = 0; i < PERCENTS.length; i++) {
+            if (PERCENTS[i] == cur) return PERCENTS[(i + 1) % PERCENTS.length];
+        }
+        return 0;
+    }
+
+    private static String percentLabel(int v) {
+        return v == 0 ? "0%（铺满）" : v + "%";
     }
 
     private static String onOff(boolean b) { return b ? "开" : "关"; }

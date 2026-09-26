@@ -49,6 +49,34 @@ public final class Settings {
         return roundBits == Configuration.SCREENLAYOUT_ROUND_YES;
     }
 
+    /**
+     * 页面边距百分比（圆屏适配的真正手段，参考 BiliClient）。
+     * 比"猜 round/square 然后套一套固定值"通用——每块表的圆形裁切深度不一样，
+     * 让用户自己调 0~30% 才收得住；开关只负责填一组合理默认值。
+     */
+    public static int paddingHPercent(Context c) {
+        int def = isRound(c) ? 5 : 0;
+        return clampPercent(sp(c).getInt("padding_h_percent", def));
+    }
+
+    public static int paddingVPercent(Context c) {
+        int def = isRound(c) ? 3 : 0;
+        return clampPercent(sp(c).getInt("padding_v_percent", def));
+    }
+
+    public static void setPaddingPercent(Context c, int h, int v) {
+        sp(c).edit()
+                .putInt("padding_h_percent", clampPercent(h))
+                .putInt("padding_v_percent", clampPercent(v))
+                .apply();
+    }
+
+    /** 越界不保存（照抄 BiliClient 的保护思路，但给个明确上限而不是静默丢弃） */
+    private static int clampPercent(int p) {
+        if (p < 0) return 0;
+        return Math.min(p, 30);
+    }
+
     /** 默认走省流量档：手表屏 1.4 寸看不出 720/1080 的差别，但解码功耗和流量是实打实的。 */
     public static int qualityMode(Context c) {
         return sp(c).getInt("quality_mode", Q_SAVE);

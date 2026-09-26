@@ -7,6 +7,8 @@ package com.dywatch.app.ui;
 import android.os.Bundle;
 import android.view.WindowManager;
 
+import com.dywatch.app.R;
+
 import androidx.appcompat.app.AppCompatActivity;
 
 public class UiActivity extends AppCompatActivity {
@@ -16,9 +18,41 @@ public class UiActivity extends AppCompatActivity {
         super.attachBaseContext(UiScale.wrap(this, newBase));
     }
 
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        applyPageInsets();
+    }
+
+    /**
+     * 圆屏/异形屏的内缩统一施加在 DecorView 根上：一处生效，不必每页布局各写一套 padding，
+     * 也不会漏掉新页面。圆屏底部再多留一点——圆形边缘在下巴处切得最深。
+     */
+    private void applyPageInsets() {
+        int ph = Settings.paddingHPercent(this);
+        int pv = Settings.paddingVPercent(this);
+        android.view.View root = getWindow().getDecorView().getRootView();
+        if (ph == 0 && pv == 0) {
+            root.setPadding(0, 0, 0, 0);
+            return;
+        }
+        android.util.DisplayMetrics m = new android.util.DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(m);
+        int side = m.widthPixels * ph / 100;
+        int vert = m.heightPixels * pv / 100;
+        int bottom = Settings.isRound(this) ? vert + m.heightPixels * 3 / 100 : vert;
+        root.setPadding(side, vert, side, bottom);
+    }
+
     /** 子类覆写：本页是否需要常亮 */
     protected boolean keepScreenOnWhileVisible() {
         return false;
+    }
+
+    /** 设置单行页头的标题；页面无 include_header 时静默跳过，不强迫每页都带页头 */
+    protected void setPageTitle(String title) {
+        android.widget.TextView tv = findViewById(R.id.tv_page_name);
+        if (tv != null) tv.setText(title);
     }
 
     @Override

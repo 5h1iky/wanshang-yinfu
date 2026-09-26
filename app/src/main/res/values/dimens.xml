@@ -30,16 +30,6 @@
     <dimen name="r_card">10dp</dimen>
     <dimen name="r_control">14dp</dimen>
 
-    <!-- 页面安全区：方屏几乎不用内缩。
-         同时给出方/圆两套显式值，好让设置里"手动指定屏形"能生效——
-         values-round 只跟随系统判定，用户强制圆屏时拿不到它。 -->
-    <dimen name="page_h_inset_square">0dp</dimen>
-    <dimen name="page_h_inset_round">16dp</dimen>
-    <dimen name="bar_lead_inset_square">0dp</dimen>
-    <dimen name="bar_lead_inset_round">10dp</dimen>
-
-    <dimen name="page_h_inset">@dimen/page_h_inset_square</dimen>
-    <dimen name="page_v_inset">6dp</dimen>
-    <!-- 顶栏返回键的左侧额外缩进 -->
-    <dimen name="bar_lead_inset">@dimen/bar_lead_inset_square</dimen>
+    <!-- 圆屏内缩不在这里：由 UiActivity 按设置里的百分比统一施加到 DecorView，
+         因为每块表的圆形裁切深度不同，固定值收不住。 -->
 </resources>

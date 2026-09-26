@@ -6,34 +6,8 @@
     android:orientation="vertical">
 
     <!-- 手表硬件适配 §10：可见返回键（不依赖系统手势/按键） -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#161C22"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-        <Button
-            android:id="@+id/btn_back"
-            android:layout_width="wrap_content"
-            android:layout_height="38dp"
-            android:background="?android:attr/selectableItemBackground"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:text="← 返回"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp" />
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="聊天"
-            android:textColor="#8A97A5"
-            android:textSize="13sp" />
-        <View
-            android:layout_width="60dp"
-            android:layout_height="1dp" />
-    </LinearLayout>
+    <!-- 单行页头：返回箭头兼热区 + 页名 + 时钟（§10 可见返回键，不依赖系统手势/按键） -->
+    <include layout="@layout/include_header" />
 
     <TextView
         android:id="@+id/tv_chat_hint"

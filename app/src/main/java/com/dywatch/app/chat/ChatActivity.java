@@ -45,6 +45,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
+        setPageTitle("聊天");
 
         mMessages = findViewById(R.id.ll_messages);
         mInput = findViewById(R.id.et_input);

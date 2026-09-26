@@ -161,6 +161,7 @@ public class LoginActivity extends UiActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_login);
+        setPageTitle("登录");
 
         mWebView = findViewById(R.id.login_webview);
         mWebView.addJavascriptInterface(new FitBridge(), "FitBridge");

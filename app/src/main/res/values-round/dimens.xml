@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 圆屏（系统判定 SCREENLAYOUT_ROUND_YES）：内容要横向内缩，否则四角被圆形边缘裁掉。 -->
-<resources>
-    <dimen name="page_h_inset">@dimen/page_h_inset_round</dimen>
-    <dimen name="bar_lead_inset">@dimen/bar_lead_inset_round</dimen>
-</resources>

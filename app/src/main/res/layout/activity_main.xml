@@ -18,9 +18,7 @@
         android:layout_height="wrap_content"
         android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:paddingLeft="@dimen/page_h_inset"
-        android:paddingRight="@dimen/page_h_inset"
-        android:paddingTop="@dimen/page_v_inset"
+        android:paddingTop="@dimen/s3"
         android:paddingBottom="@dimen/s4">
 
         <TextView
