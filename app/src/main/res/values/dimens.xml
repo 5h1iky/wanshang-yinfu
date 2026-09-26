@@ -30,6 +30,14 @@
     <dimen name="r_card">10dp</dimen>
     <dimen name="r_control">14dp</dimen>
 
+    <!-- 刷视频页操作栏（186dpi 手表：头像/图标比手机小一圈，间距收紧，
+         否则竖排四项会顶出圆屏可视区） -->
+    <dimen name="feed_avatar">34dp</dimen>
+    <dimen name="feed_action_icon">24dp</dimen>
+    <dimen name="feed_action_gap">8dp</dimen>
+    <dimen name="feed_bar_margin">6dp</dimen>
+    <dimen name="feed_count_text">10sp</dimen>
+
     <!-- 圆屏内缩不在这里：由 UiActivity 按设置里的百分比统一施加到 DecorView，
          因为每块表的圆形裁切深度不同，固定值收不住。 -->
 </resources>

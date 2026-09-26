@@ -45,12 +45,12 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
             mEngine = ChatEngine.getInstance(this, this);
-            mHint.setText("正在加载会话…");
+            hint("正在加载会话…");
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再拉）
             mEngine.ensureImHome();
         } else {
             mEngine = null;
-            mHint.setText("请先登录（主屏→登录→扫码）");
+            hint("请先登录（主屏→登录→扫码）");
         }
 
         AppLog.i("chat", "会话列表页打开");
@@ -72,10 +72,25 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         ChatEngine.detachFrom(this);
     }
 
+    /**
+     * 四态反馈统一出口：有话要说就显示，没话就收起来。
+     * 手表那点高度要留给会话本身——旧版提示行永远占位（且一直写"正在加载会话…"），
+     * 内容来了也不让位，是纯浪费。
+     */
+    private void hint(String text) {
+        if (mHint == null) return;
+        mHint.setText(text);
+        mHint.setVisibility(android.view.View.VISIBLE);
+    }
+
+    private void clearHint() {
+        if (mHint != null) mHint.setVisibility(android.view.View.GONE);
+    }
+
     private void render(List<Conversation> list) {
         mConvs.removeAllViews();
         if (list.isEmpty()) {
-            mHint.setText("正在等待会话数据…（自动重试）");
+            hint("正在等待会话数据…（自动重试）");
             // IM 数据异步渲染，页面刚就绪时常为空 → 自动重试
             if (mEmptyRetries < 8) {
                 mEmptyRetries++;
@@ -86,14 +101,14 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
                     }
                 }, 2500);
             } else {
-                mHint.setText("没有会话（可下拉重进或稍后再试）");
+                hint("没有会话（可下拉重进或稍后再试）");
             }
             return;
         }
         mEmptyRetries = 0;
         // 计数折进页名，省掉常驻提示行——手表那点高度要留给会话本身
         setPageTitle("会话 " + list.size());
-        mHint.setVisibility(View.GONE);
+        clearHint();
         for (final Conversation c : list) {
             // 昵称 / 时间 / 最近消息 三级分层（旧版三段同字号同颜色塞一个 TextView，读不出层级）
             View row = com.dywatch.app.ui.Rows.card(this, c.name, c.timeText, c.lastMsg);
@@ -117,7 +132,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         mHint.post(new Runnable() {
             @Override
             public void run() {
-                mHint.setText("通道就绪，拉取会话…");
+                hint("通道就绪，拉取会话…");
                 if (mEngine != null) mEngine.fetchConversations();
             }
         });
@@ -146,14 +161,14 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     @Override
     public void onAuth(boolean ok, String message) {
         if (!ok) {
-            mHint.setText("⚠ " + message);
+            hint("⚠ " + message);
             if (mEngine != null) mEngine.fetchConversations();
         }
     }
 
     @Override
     public void onEngineError(String err) {
-        mHint.setText("通道异常: " + err);
+        hint("通道异常: " + err);
         AppLog.i("chat", "会话列表异常: " + err);
         // 页面可能未就绪，稍后自动重试
         mConvs.postDelayed(new Runnable() {

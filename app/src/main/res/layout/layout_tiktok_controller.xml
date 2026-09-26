@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 抖音式控制层：封面 + 播放钮 + 标题（左下） + 操作栏（右侧：头像/点赞/评论/收藏/分享） -->
+<!--
+  抖音式控制层：封面 + 播放钮 + 标题（左下） + 操作栏（右侧：头像/点赞/评论/收藏/分享）
+
+  2026-09-26 手表适配重排：原本这套尺寸照搬手机 demo（头像 44dp、图标 30dp、间距 12~14dp），
+  竖排五项在 186dpi 圆屏上会顶出可视区、且挤掉标题空间；现在全部改走 dimens 里的
+  feed_* 系列（头像 34dp / 图标 24dp / 间距 8dp），色值也不再写死。
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
@@ -29,15 +35,15 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end|center_vertical"
-        android:layout_marginEnd="10dp"
+        android:layout_marginEnd="@dimen/feed_bar_margin"
         android:orientation="vertical"
         android:gravity="center_horizontal">
 
         <ImageView
             android:id="@+id/iv_avatar"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginBottom="14dp"
+            android:layout_width="@dimen/feed_avatar"
+            android:layout_height="@dimen/feed_avatar"
+            android:layout_marginBottom="@dimen/feed_action_gap"
             android:src="@drawable/ic_avatar"
             android:contentDescription="@null"/>
 
@@ -45,24 +51,24 @@
             android:id="@+id/btn_like"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="@dimen/feed_action_gap"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="4dp">
+            android:padding="@dimen/s2">
             <ImageView
                 android:id="@+id/iv_like"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
+                android:layout_width="@dimen/feed_action_icon"
+                android:layout_height="@dimen/feed_action_icon"
                 android:src="@drawable/ic_heart"
                 android:contentDescription="点赞"/>
             <TextView
                 android:id="@+id/tv_like_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFFFFFFF"
-                android:textSize="11sp"
-                android:shadowColor="#80000000"
+                android:textColor="@color/on_video_text"
+                android:textSize="@dimen/feed_count_text"
+                android:shadowColor="@color/on_video_shadow"
                 android:shadowRadius="3"
                 tools:text="1.2万"/>
         </LinearLayout>
@@ -71,24 +77,24 @@
             android:id="@+id/btn_comment"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="@dimen/feed_action_gap"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="4dp">
+            android:padding="@dimen/s2">
             <ImageView
                 android:id="@+id/iv_comment"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
+                android:layout_width="@dimen/feed_action_icon"
+                android:layout_height="@dimen/feed_action_icon"
                 android:src="@drawable/ic_comment"
                 android:contentDescription="评论"/>
             <TextView
                 android:id="@+id/tv_comment_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFFFFFFF"
-                android:textSize="11sp"
-                android:shadowColor="#80000000"
+                android:textColor="@color/on_video_text"
+                android:textSize="@dimen/feed_count_text"
+                android:shadowColor="@color/on_video_shadow"
                 android:shadowRadius="3"
                 tools:text="328"/>
         </LinearLayout>
@@ -97,24 +103,24 @@
             android:id="@+id/btn_collect"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="@dimen/feed_action_gap"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="4dp">
+            android:padding="@dimen/s2">
             <ImageView
                 android:id="@+id/iv_collect"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
+                android:layout_width="@dimen/feed_action_icon"
+                android:layout_height="@dimen/feed_action_icon"
                 android:src="@drawable/ic_star"
                 android:contentDescription="收藏"/>
             <TextView
                 android:id="@+id/tv_collect_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFFFFFFF"
-                android:textSize="11sp"
-                android:shadowColor="#80000000"
+                android:textColor="@color/on_video_text"
+                android:textSize="@dimen/feed_count_text"
+                android:shadowColor="@color/on_video_shadow"
                 android:shadowRadius="3"
                 tools:text="收藏"/>
         </LinearLayout>
@@ -126,35 +132,37 @@
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="4dp">
+            android:padding="@dimen/s2">
             <ImageView
                 android:id="@+id/iv_share"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
+                android:layout_width="@dimen/feed_action_icon"
+                android:layout_height="@dimen/feed_action_icon"
                 android:src="@drawable/ic_share"
                 android:contentDescription="分享"/>
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFFFFFFF"
-                android:textSize="11sp"
-                android:shadowColor="#80000000"
-                android:shadowRadius="3"
-                android:text="分享"/>
+                android:text="分享"
+                android:textColor="@color/on_video_text"
+                android:textSize="@dimen/feed_count_text"
+                android:shadowColor="@color/on_video_shadow"
+                android:shadowRadius="3"/>
         </LinearLayout>
     </LinearLayout>
 
-    <TextView
+    <!-- 标题：单行放不下时自己滚（MarqueeTextView 不依赖焦点——刷视频页没有可聚焦控件，
+         原生 marquee 的 selected=true 写法在这里根本不会动） -->
+    <com.dywatch.app.ui.MarqueeTextView
         android:id="@+id/tv_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_marginEnd="76dp"
-        android:padding="16dp"
-        android:textSize="15sp"
-        android:lineSpacingExtra="4dp"
-        android:textColor="@android:color/white"
-        android:shadowColor="#80000000"
+        android:layout_marginEnd="62dp"
+        android:padding="@dimen/s5"
+        android:textSize="@dimen/t_lede"
+        android:lineSpacingExtra="@dimen/s1"
+        android:textColor="@color/on_video_text"
+        android:shadowColor="@color/on_video_shadow"
         android:shadowRadius="4"
         android:elevation="5dp"
         tools:text="标题标题标题"/>

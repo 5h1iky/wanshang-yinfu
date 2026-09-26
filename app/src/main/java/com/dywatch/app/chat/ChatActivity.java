@@ -27,9 +27,12 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     public static final String EXTRA_CONV_NAME = "conv_name";
 
     private LinearLayout mMessages;
+    private android.widget.ScrollView mScroll;
     private EditText mInput;
     private TextView mHint;
     private ChatEngine mEngine;
+    /** 上次渲染的消息条数：只有真的变多了才自动滚到底，否则每 5s 轮询都会把用户拽回底部 */
+    private int mLastCount = -1;
     private String mConvName;
     private final SimpleDateFormat mFmt = new SimpleDateFormat("HH:mm", Locale.US);
     private final android.os.Handler mPoll = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -48,6 +51,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         setPageTitle("聊天");
 
         mMessages = findViewById(R.id.ll_messages);
+        mScroll = findViewById(R.id.sv_messages);
         mInput = findViewById(R.id.et_input);
         mHint = findViewById(R.id.tv_chat_hint);
         mConvName = getIntent().getStringExtra(EXTRA_CONV_NAME);
@@ -55,12 +59,12 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         // 登录门：私信必须先登录（未登录时页面上没有聊天输入框，JS 桥必然找不到）
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
             mEngine = ChatEngine.getInstance(this, this);
-            mHint.setText(mConvName == null ? "聊天通道启动中…" : ("打开会话: " + mConvName + "…"));
+            hint(mConvName == null ? "聊天通道启动中…" : ("打开会话: " + mConvName + "…"));
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再开会话）
             mEngine.ensureImHome();
         } else {
             mEngine = null;
-            mHint.setText("请先登录再聊天（主屏→登录→扫码）");
+            hint("请先登录再聊天（主屏→登录→扫码）");
         }
 
         findViewById(R.id.btn_send).setOnClickListener(new View.OnClickListener() {
@@ -102,10 +106,38 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     /** 安全发送：引擎未就绪时给提示而不是崩溃 */
     private void safeSend(String text) {
         if (mEngine == null) {
-            mHint.setText("未登录，不能发送（主屏→登录→扫码）");
+            hint("未登录，不能发送（主屏→登录→扫码）");
             return;
         }
         mEngine.sendText(text);
+    }
+
+    /** 发送失败/未登录等提示：只在有事时占一行，通道正常就让位给消息 */
+    private void hint(String text) {
+        if (mHint == null) return;
+        mHint.setText(text);
+        mHint.setVisibility(View.VISIBLE);
+    }
+
+    private void clearHint() {
+        if (mHint != null) mHint.setVisibility(View.GONE);
+    }
+
+    /**
+     * 滚到底部：只在消息条数真的变多时滚（新消息/首次进入）。
+     * 每 5s 的轮询重绘若无条件滚，用户往上翻历史会被反复拽回底部。
+     */
+    private void scrollToBottomIfGrew(int newCount) {
+        if (mScroll == null) return;
+        boolean grew = newCount > mLastCount;
+        mLastCount = newCount;
+        if (!grew) return;
+        mScroll.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isFinishing()) mScroll.fullScroll(View.FOCUS_DOWN);
+            }
+        });
     }
 
     private void addBubble(ChatMessage msg) {
@@ -152,7 +184,6 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         mHint.post(new Runnable() {
             @Override
             public void run() {
-                mHint.setText("通道就绪");
                 if (mEngine != null && mConvName != null && !mConvName.isEmpty()) {
                     mEngine.openConversation(mConvName);
                 }
@@ -171,11 +202,14 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         mMessages.removeAllViews();
         // 桥返回新→旧，页面按旧→新显示
         for (int i = list.size() - 1; i >= 0; i--) addBubble(list.get(i));
+        clearHint();
+        scrollToBottomIfGrew(list.size());
     }
 
     @Override
     public void onConversations(List<com.dywatch.app.chat.model.Conversation> list) {
-        mHint.setText("会话 " + list.size() + " 个");
+        // 聊天页顺带收到会话数：不占提示行（通道正常时不该有常驻提示）
+        AppLog.i("chat", "会话 " + list.size() + " 个");
     }
 
     @Override
@@ -190,13 +224,14 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
 
     @Override
     public void onAuth(boolean ok, String message) {
-        mHint.setText(ok ? message : ("⚠ " + message));
         AppLog.i("chat", "登录态: ok=" + ok + " " + message);
+        // 登录正常不占提示行；只有异常才提示（旧版一律写一行，白吃手表高度）
+        if (!ok) hint("⚠ " + message);
     }
 
     @Override
     public void onEngineError(String err) {
-        mHint.setText("通道异常: " + err);
+        hint("通道异常: " + err);
         AppLog.i("chat", "通道异常: " + err);
     }
 

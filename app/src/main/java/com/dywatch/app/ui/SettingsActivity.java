@@ -241,7 +241,8 @@ public class SettingsActivity extends UiActivity {
     private void infoRow(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(12);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.t_caption));
         tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_faint));
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(12), dp(14), dp(12), dp(14));
@@ -251,7 +252,8 @@ public class SettingsActivity extends UiActivity {
     private void addBase(String text, final Runnable onClick) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(13);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.t_body));
         tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_primary));
         tv.setPadding(dp(14), dp(12), dp(14), dp(12));
         tv.setMinimumHeight(dp(48));

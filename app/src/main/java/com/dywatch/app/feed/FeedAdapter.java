@@ -134,11 +134,17 @@ public class FeedAdapter extends PagerAdapter {
 
     /** 绑定操作栏数据与互动状态（互动回调后可局部刷新复用） */
     public static void bindActions(ViewHolder h, FeedVideo v) {
+        Context c = h.mTvLikeCount.getContext();
         h.mTvLikeCount.setText(FeedVideo.formatCount(v.diggCount));
         h.mTvCommentCount.setText(FeedVideo.formatCount(v.commentCount));
         h.mTvCollectCount.setText(v.collected ? "已藏" : "收藏");
-        h.mIvLike.setColorFilter(v.liked ? Color.parseColor("#FFFF3B5C") : Color.WHITE);
-        h.mIvCollect.setColorFilter(v.collected ? Color.parseColor("#FFFFC107") : Color.WHITE);
+        // 强调色走色板：旧版 Color.parseColor 写死在代码里，与 colors.xml 里那一套是两套颜色
+        h.mIvLike.setColorFilter(v.liked
+                ? androidx.core.content.ContextCompat.getColor(c, R.color.liked)
+                : Color.WHITE);
+        h.mIvCollect.setColorFilter(v.collected
+                ? androidx.core.content.ContextCompat.getColor(c, R.color.collected)
+                : Color.WHITE);
     }
 
     @Override

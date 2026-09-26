@@ -28,15 +28,15 @@
         android:paddingEnd="@dimen/s3"
         app:drawableStartCompat="@drawable/arrow_back" />
 
-    <TextView
+    <!-- 页名：单行放不下时自己滚（手表窄屏，"评论 40"加上长昵称很容易顶到边界） -->
+    <com.dywatch.app.ui.MarqueeTextView
         android:id="@+id/tv_page_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerVertical="true"
         android:layout_toEndOf="@id/btn_back"
         android:layout_toStartOf="@id/tv_clock"
-        android:ellipsize="end"
-        android:lines="1"
+        android:shadowColor="@color/on_video_shadow"
         android:textColor="@color/text_primary"
         android:textSize="@dimen/t_lede"
         android:textStyle="bold"

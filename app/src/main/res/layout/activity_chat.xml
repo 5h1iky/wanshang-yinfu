@@ -2,35 +2,40 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#101418"
+    android:background="@color/bg_base"
     android:orientation="vertical">
 
-    <!-- 手表硬件适配 §10：可见返回键（不依赖系统手势/按键） -->
     <!-- 单行页头：返回箭头兼热区 + 页名 + 时钟（§10 可见返回键，不依赖系统手势/按键） -->
     <include layout="@layout/include_header" />
 
+    <!-- 四态反馈：只在加载/空/失败时占位，通道正常就收起来 -->
     <TextView
         android:id="@+id/tv_chat_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#AA000000"
-        android:padding="6dp"
-        android:text="聊天通道初始化中…"
-        android:textColor="#88CCFF"
-        android:textSize="12sp" />
+        android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
 
-    <ScrollView
+    <!-- 表冠可滚（默认关）：与评论页、会话页共用同一份实现 -->
+    <com.dywatch.app.ui.RotaryScrollView
+        android:id="@+id/sv_messages"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:scrollbars="none">
 
         <LinearLayout
             android:id="@+id/ll_messages"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="6dp" />
-    </ScrollView>
+            android:padding="@dimen/s3" />
+    </com.dywatch.app.ui.RotaryScrollView>
 
     <!-- 快捷回复条：与评论页共用一份 include（等分权重，4 个永远都看得见，不需要横向滚） -->
     <include layout="@layout/include_quick_reply" />
@@ -38,20 +43,24 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
         android:orientation="horizontal"
-        android:padding="6dp">
+        android:paddingHorizontal="@dimen/s3"
+        android:paddingVertical="@dimen/s2">
 
         <EditText
             android:id="@+id/et_input"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/ctrl_min"
             android:layout_weight="1"
+            android:background="@drawable/bg_pill"
             android:hint="说点什么…"
             android:inputType="text"
             android:maxLines="2"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#667788"
-            android:textSize="14sp" />
+            android:paddingHorizontal="@dimen/s5"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="@dimen/t_body" />
 
         <Button
             android:id="@+id/btn_send"

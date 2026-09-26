@@ -9,30 +9,36 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 状态提示条（网络失败/回退固件等，无 adb 环境靠它拍照排障） -->
+    <!--
+      四态反馈：加载中 / 失败 / 没有更多。
+      旧版只有"失败"和"没有更多"两态，首次进页面那几秒是纯黑屏，用户不知道是坏了还是在加载
+      （真机首屏要等签名 + 拉流，手表上更久）。
+    -->
     <TextView
         android:id="@+id/tv_feed_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:background="#AA000000"
-        android:padding="8dp"
-        android:textColor="#FFCC66"
-        android:textSize="12sp"
+        android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
     <!-- 手表硬件适配 §10：可见返回键（无手势/无按键设备可回主屏） -->
     <Button
         android:id="@+id/btn_back"
         android:layout_width="wrap_content"
-        android:layout_height="36dp"
+        android:layout_height="@dimen/ctrl_min"
         android:layout_gravity="top|start"
-        android:layout_margin="8dp"
-        android:background="#66000000"
-        android:paddingLeft="12dp"
-        android:paddingRight="12dp"
+        android:layout_margin="@dimen/s3"
+        android:background="@drawable/bg_pill"
+        android:minWidth="@dimen/ctrl_min"
+        android:paddingLeft="@dimen/s4"
+        android:paddingRight="@dimen/s4"
         android:text="←"
-        android:textColor="#FFFFFF"
-        android:textSize="15sp" />
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/t_lede" />
 
 </FrameLayout>

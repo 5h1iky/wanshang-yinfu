@@ -3,33 +3,38 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#101418"
+    android:background="@color/bg_base"
     android:orientation="vertical">
 
     <!-- 单行页头：返回箭头兼热区 + 页名 + 时钟；页名由代码 setPageTitle 设置 -->
     <include layout="@layout/include_header" />
 
+    <!-- 四态反馈：只在加载/空/失败时占位，有内容就收起来（照评论页的口径） -->
     <TextView
         android:id="@+id/tv_convlist_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#AA000000"
-        android:padding="6dp"
-        android:text="正在加载会话…"
-        android:textColor="#88CCFF"
-        android:textSize="12sp" />
+        android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
 
-    <ScrollView
+    <!-- 表冠可滚（默认关，设置里开）：与评论页共用同一份实现 -->
+    <com.dywatch.app.ui.RotaryScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:scrollbars="none">
 
         <LinearLayout
             android:id="@+id/ll_convs"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="8dp" />
-    </ScrollView>
+            android:padding="@dimen/s3" />
+    </com.dywatch.app.ui.RotaryScrollView>
 
 </LinearLayout>

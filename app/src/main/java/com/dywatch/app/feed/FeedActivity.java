@@ -54,6 +54,9 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         mPreloadManager = PreloadManager.getInstance(this);
 
         loadFixtureOrCache(); // 冷启动=固件垫场；有缓存=直接放上次的视频（不闪老面孔）
+        // 四态反馈：先给"加载中"。首屏要等 Rhino 签名 + 拉流，手表上几秒纯黑屏
+        // 会被当成坏了——旧版只有失败/没有更多两态，加载过程没有任何交代。
+        showHint("正在拉取视频…");
         loadFeed();           // 主源：原生 tab/feed（实测 2026-09-26：PC 推荐页换条时调的就是这个 endpoint，10 屏 55 条零重复）
         // 手表硬件适配 §10：可见返回键
         findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
@@ -68,6 +71,22 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 startPlay(0);
             }
         });
+    }
+
+    /**
+     * 四态反馈统一出口：有事说事，没事收起来——刷视频页全屏，
+     * 提示行常驻会一直压在画面上。
+     */
+    private void showHint(String text) {
+        android.widget.TextView hint = findViewById(R.id.tv_feed_hint);
+        if (hint == null) return;
+        hint.setText(text);
+        hint.setVisibility(View.VISIBLE);
+    }
+
+    private void clearHint() {
+        android.widget.TextView hint = findViewById(R.id.tv_feed_hint);
+        if (hint != null) hint.setVisibility(View.GONE);
     }
 
     /** 网络优先加载真实 Feed（M2 数据层），失败回退固件。分页：抖音每页只回 2~5 条 */
@@ -122,11 +141,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                             // notifyDataSetChanged 会重建页面视图 → 无条件重挂当前播放
                             startPlay(mViewPager.getCurrentItem());
                             if (list.isEmpty()) {
-                                android.widget.TextView hint = findViewById(R.id.tv_feed_hint);
-                                if (hint != null) {
-                                    hint.setText("没有更多了");
-                                    hint.setVisibility(View.VISIBLE);
-                                }
+                                showHint("没有更多了");
                             } else if (added == 0) {
                                 // 本页全是看过的内容 → 自动补拉下一页
                                 com.dywatch.app.util.AppLog.i("feed", "本页全为看过内容，自动补拉");
@@ -136,6 +151,9 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                                         loadMore(false);
                                     }
                                 }, 300);
+                            } else {
+                                // 有内容就不占画面（全屏刷视频，提示行压在画面上很碍事）
+                                clearHint();
                             }
                         }
                     });
@@ -147,11 +165,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                         public void run() {
                             mLoading = false;
                             if (first) loadFixtureOrCache();
-                            android.widget.TextView hint = findViewById(R.id.tv_feed_hint);
-                            if (hint != null) {
-                                hint.setText((first ? "网络加载失败，已回退内置数据。\n" : "翻页失败: ") + err);
-                                hint.setVisibility(View.VISIBLE);
-                            }
+                            showHint((first ? "网络加载失败，已回退内置数据。\n" : "翻页失败: ") + err);
                         }
                     });
                 }

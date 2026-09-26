@@ -26,6 +26,11 @@ public class MainActivity extends UiActivity {
 
         final TextView status = findViewById(R.id.tv_status);
         refreshStatus(status);
+        // 版本行读真实包版本号，杜绝手写值随发版漂移（v0.1.0 曾一直挂在 0.2.0 的包上）
+        TextView about = findViewById(R.id.tv_about);
+        if (about != null) {
+            about.setText("v" + versionName() + " · 与官方无关 · 风险自负");
+        }
 
         findViewById(R.id.btn_login).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -67,15 +72,18 @@ public class MainActivity extends UiActivity {
         checkUpdateQuietly();
     }
 
+    /** 读本机包版本号（更新检查与版本行共用同一个来源） */
+    private String versionName() {
+        try {
+            return String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
+        } catch (Exception e) {
+            return "0.0.0";
+        }
+    }
+
     /** 静默检查更新（M4）：有新版只在状态栏提示，不打扰 */
     private void checkUpdateQuietly() {
-        String ver;
-        try {
-            ver = String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
-        } catch (Exception e) {
-            ver = "0.0.0";
-        }
-        final String current = ver;
+        final String current = versionName();
         new Thread(new Runnable() {
             @Override
             public void run() {

@@ -112,11 +112,13 @@
             android:textColor="@color/danger"
             android:textSize="@dimen/t_body" />
 
+        <!-- 版本行由代码写入（读 BuildConfig.VERSION_NAME），不再手写——
+             手写值必然随发版漂移（v0.1.0 曾一直挂在 0.2.0 的包上） -->
         <TextView
+            android:id="@+id/tv_about"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/s3"
-            android:text="v0.1.0 · 与官方无关 · 风险自负"
             android:textColor="@color/text_faint"
             android:textSize="@dimen/t_caption" />
     </LinearLayout>
