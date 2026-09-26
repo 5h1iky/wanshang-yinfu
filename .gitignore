@@ -62,3 +62,4 @@ tools/_session.xml
 commit-*.txt
 # 临时提交信息文件
 .git-commit-msg.txt
+.cm.txt

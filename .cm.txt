@@ -1,7 +1,1 @@
-﻿refactor(feed): 真冷启动不再垫死链固件
-
-- 固件 feed_fixture.json 里的签名 URL 数小时即过期（代码注释自认"必死链"），
-  冷启动垫 2 条黑屏死链是负体验；改为空列表 + 明确提示，由网络加载与失败重试接管
-- 顺带清掉 FeedActivity 里不再使用的 org.json 导入
-
-真机验证：强杀重启后首屏直接走网络（拉到 4/4 封面头像，PLAYING 正常）
+chore: gitignore 补 .cm.txt
