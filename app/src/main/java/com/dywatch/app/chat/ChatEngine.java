@@ -52,9 +52,11 @@ public class ChatEngine {
     public static synchronized ChatEngine getInstance(android.content.Context ctx, Listener listener) {
         if (sInstance == null) {
             sInstance = new ChatEngine(ctx.getApplicationContext(), listener);
-        } else {
+        } else if (listener != null) {
+            // ⚠️ 只在传了监听器时换绑：曾经无条件赋值，导致视频页用 getInstance(ctx, null)
+            // 取引擎时把聊天页的监听器静默摘掉（互动一次→聊天通道再也收不到回调）。
             sInstance.mListener = listener;
-            if (sInstance.mReady && listener != null) listener.onEngineReady();
+            if (sInstance.mReady) listener.onEngineReady();
         }
         return sInstance;
     }
@@ -133,6 +135,21 @@ public class ChatEngine {
     /** 返回会话列表 */
     public void backToList() {
         runJs("ChatBridge.backToList();");
+    }
+
+    /**
+     * 引擎归位：点赞/收藏/评论会把这唯一的全局引擎导航到 /video/*，若不送回 /chat，
+     * 聊天页与会话列表页的 DOM 抓取会永久空转（实测：归位后 SPA 自动恢复会话列表）。
+     * 导航发生在新页面加载完成时经 onEngineReady 回调，页面侧无需额外轮询。
+     */
+    public void ensureImHome() {
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (mWebView == null || !mReady) return; // 未就绪=构造时就在 /chat，无需归位
+                mWebView.evaluateJavascript("ChatBridge.ensureImHome();", null);
+            }
+        });
     }
 
     /** 页面销毁时解除监听（单例引擎继续存活） */
@@ -243,7 +260,9 @@ public class ChatEngine {
                 AppLog.i("engine", "发送结果: ok=" + o.optBoolean("ok") + " " + o.optString("note", ""));
             } else if ("action".equals(type)) {
                 String phase = o.optString("phase", "");
-                if (!"navigating".equals(phase)) {
+                // 过程事件（navigating=跳页、submitting=正在试提交钮）不是结果，
+                // 只有无 phase 字段的才当终态上报（否则过程事件会被当成失败，把乐观更新误回滚）
+                if (phase.length() == 0) {
                     boolean ok = o.optBoolean("ok", false);
                     String detail = o.optString("detail", o.optString("after", ""));
                     AppLog.i("engine", "互动结果: " + o.optString("action") + " ok=" + ok
@@ -254,6 +273,8 @@ public class ChatEngine {
                 }
             } else if ("opened".equals(type) || "back".equals(type)) {
                 AppLog.i("engine", "导航事件: " + json);
+            } else if ("home".equals(type)) {
+                AppLog.i("engine", o.optBoolean("ok") ? "引擎已在私信页" : "引擎归位：导航回 /chat");
             } else if ("error".equals(type)) {
                 if (mListener != null) mListener.onEngineError(o.optString("message"));
             }

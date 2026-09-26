@@ -55,6 +55,8 @@ public class ChatActivity extends AppCompatActivity implements ChatEngine.Listen
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
             mEngine = ChatEngine.getInstance(this, this);
             mHint.setText(mConvName == null ? "聊天通道启动中…" : ("打开会话: " + mConvName + "…"));
+            // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再开会话）
+            mEngine.ensureImHome();
         } else {
             mEngine = null;
             mHint.setText("请先登录再聊天（主屏→登录→扫码）");

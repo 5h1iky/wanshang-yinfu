@@ -45,6 +45,8 @@ public class ConvListActivity extends AppCompatActivity implements ChatEngine.Li
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
             mEngine = ChatEngine.getInstance(this, this);
             mHint.setText("正在加载会话…");
+            // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再拉）
+            mEngine.ensureImHome();
         } else {
             mEngine = null;
             mHint.setText("请先登录（主屏→登录→扫码）");
