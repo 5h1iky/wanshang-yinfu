@@ -38,6 +38,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     private final List<Comment> mAll = new java.util.ArrayList<>();
     private boolean mLoadingMore;
     private boolean mAtEnd;
+    /** 评论发送在途标记（防连点重复发出） */
+    private boolean mSending;
     /** 手表内存有限，评论攒到 300 条就停，别无限往下拉 */
     private static final int MAX_COMMENTS = 300;
 
@@ -75,6 +77,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         mEngine.setActionListener(new ChatEngine.ActionListener() {
             @Override
             public void onActionResult(String action, boolean ok, String detail) {
+                mSending = false;
+                mHint.setVisibility(View.VISIBLE);
                 mHint.setText(ok ? "已发送，刷新中…" : ("发送失败: " + detail));
                 if (ok && mEngine != null) {
                     mList.postDelayed(new Runnable() {
@@ -121,9 +125,26 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     private void send() {
         String text = mInput.getText() == null ? "" : mInput.getText().toString().trim();
         if (TextUtils.isEmpty(text)) return;
+        // 闸门：发出去到桥回报结果之间要几秒，期间再点会真发出第二条（评论是写操作，重发不可撤回）
+        if (mSending) {
+            mHint.setVisibility(View.VISIBLE);
+            mHint.setText("上一条还在发送中…");
+            return;
+        }
+        mSending = true;
         mInput.setText("");
+        mHint.setVisibility(View.VISIBLE);
         mHint.setText("发送中…");
         mEngine.sendComment(mAwemeId, text);
+        mList.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (mSending && !isFinishing()) {
+                    mSending = false;   // 桥没回音也不能把发送按钮永久锁死
+                    mHint.setText("发送无回应，可重试");
+                }
+            }
+        }, 20000);
     }
 
     /** 全量重绘累积表：分页只动数据源，渲染口径保持单一（两处画列表必然行为漂移） */

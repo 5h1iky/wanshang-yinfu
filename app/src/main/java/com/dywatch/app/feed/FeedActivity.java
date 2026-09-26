@@ -391,6 +391,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             return;
         }
         final boolean target = !video.liked;
+        if (actionBusy("like", video.awemeId)) return;
         video.liked = target;
         video.diggCount += target ? 1 : -1;
         if (video.diggCount < 0) video.diggCount = 0;
@@ -417,6 +418,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             return;
         }
         final boolean target = !video.collected;
+        if (actionBusy("collect", video.awemeId)) return;
         video.collected = target;
         FeedAdapter.bindActions(holder, video);
         AppLog.i("feed", "收藏 " + (target ? "收藏" : "取消") + " aweme=" + video.awemeId);
@@ -429,6 +431,23 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     }
 
     /**
+     * 同一条视频的同一个互动在途时不接受第二次。必须在"乐观翻转"之前拦：翻转发生在
+     * 调用 engineAction 之前，拦在里面会留下翻了却没人回滚的 UI（桥侧 __inFlight
+     * 只挡 JS 那层，挡不住这里已经翻掉的显示）。
+     */
+    private String mActionBusy;
+
+    private boolean actionBusy(String kind, String awemeId) {
+        String key = kind + ":" + awemeId;
+        if (key.equals(mActionBusy)) {
+            android.widget.Toast.makeText(this, "上一次操作还在进行中…", android.widget.Toast.LENGTH_SHORT).show();
+            return true;
+        }
+        mActionBusy = key;
+        return false;
+    }
+
+    /**
      * 互动走 WebView 引擎（全局单例复用，用户方案：一个 web 走天下）：
      * 引擎打开该视频的网页、点页面自带的赞/藏按钮——页面 SDK 承担全部签名/风控，零 KICK 风险。
      * 乐观更新 + 失败回滚。
@@ -437,10 +456,18 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                               final boolean target, final boolean isLike) {
         final com.dywatch.app.chat.ChatEngine engine =
                 com.dywatch.app.chat.ChatEngine.getInstance(this, null);
+        // 桥没回音（页面异常/被吞）时不能把互动按钮永久锁死
+        mViewPager.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (mActionBusy != null && mActionBusy.endsWith(":" + video.awemeId)) mActionBusy = null;
+            }
+        }, 30000);
         engine.setActionListener(new com.dywatch.app.chat.ChatEngine.ActionListener() {
             @Override
             public void onActionResult(String action, boolean ok, String detail) {
                 engine.setActionListener(null);
+                mActionBusy = null;
                 if (ok) {
                     android.widget.Toast.makeText(FeedActivity.this,
                             isLike ? (target ? "已点赞" : "已取消点赞") : (target ? "已收藏" : "已取消收藏"),
