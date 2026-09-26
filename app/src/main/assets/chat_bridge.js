@@ -167,9 +167,22 @@
     },
     __inFlight: {},
 
-    // 点击 + 以状态变化判定是否生效（异步，最多等 8s 让按钮渲染出来）
-    // 真机实测：页面刚加载时按钮虽在 DOM（display:none 区）但组件未就绪，首点会空打
-    // → 每次点完轮询到 2.5s，未变则重试（最多 3 次），全空才判失败。
+    // 就绪门：页面 DOM 里按钮很早就存在，但 React onClick 要等组件挂载完才绑上去；
+    // 绑上前点击=空操作（真机实测：App 路径 3 次点击窗口内未绑，窗口后才生效→误报"无响应"）。
+    // 所以直接读节点上的 __reactProps$ 看 onClick 在不在，比猜等待时长可靠。
+    __ready: function (el) {
+      if (!el) return false;
+      var keys = Object.keys(el);
+      for (var i = 0; i < keys.length; i++) {
+        if (keys[i].indexOf('__reactProps$') === 0) {
+          var pr = el[keys[i]];
+          return !!(pr && (pr.onClick || pr.onPointerDown || pr.onMouseDown));
+        }
+      }
+      return false;
+    },
+
+    // 点击 + 以状态指纹变化判定是否生效（先等就绪门，再点，再宽窗口复查）
     __clickAndJudge: function (kind, e2e, want, tries) {
       var self = this;
       var btn = document.querySelector('[data-e2e="' + e2e + '"]');
@@ -179,33 +192,41 @@
         }
         return Promise.resolve({ type: 'action', action: kind, ok: false, detail: '未找到按钮 ' + e2e });
       }
-      var before = this.__trait(btn);
-      if ((before.text || '').length === 0 && (tries || 0) < 20) {
-        // 计数文本未渲染 = 播放器/互动组件未就绪，等它出现再点
-        return wait(500).then(function () { return self.__clickAndJudge(kind, e2e, want, (tries || 0) + 1); });
+      if (!this.__ready(btn)) {
+        // 组件未挂载完：不计入点击次数，最多等 12s
+        if ((tries || 0) < 200) {
+          return wait(400).then(function () { return self.__clickAndJudge(kind, e2e, want, (tries || 0) + 1); });
+        }
+        return Promise.resolve({ type: 'action', action: kind, ok: false, detail: '按钮事件始终未绑定（组件未就绪）' });
       }
+      var before = this.__trait(btn);
+      var attempt = tries || 0;
       fireClick(btn);
-      return this.__waitChange(e2e, before, 9).then(function (now) {
+      return this.__waitChange(e2e, before, 14).then(function (now) {
         var changed = !!now && (now.cls !== before.cls || now.text !== before.text);
         if (changed) {
           return {
-            type: 'action', action: kind, ok: true, want: want, changed: true, attempts: (tries || 0) + 1,
+            type: 'action', action: kind, ok: true, want: want, changed: true, attempts: attempt + 1,
             count: before.text + '→' + now.text,
             detail: '状态已翻转'
           };
         }
-        if ((tries || 0) < 3) {
-          return wait(900).then(function () { return self.__clickAndJudge(kind, e2e, want, (tries || 0) + 1); });
+        if (attempt < 3) {
+          return wait(1200).then(function () { return self.__clickAndJudge(kind, e2e, want, attempt + 1); });
         }
-        return {
-          type: 'action', action: kind, ok: false, want: want, changed: false, attempts: 3,
-          count: before.text + '→' + (now ? now.text : '?'),
-          detail: '3 次点击均无响应（状态未变）'
-        };
+        // 最后复查一次（宽窗口）：真机出现过"窗口后才发现服务端已记账"的情况
+        return self.__waitChange(e2e, before, 14).then(function (late) {
+          var lateChanged = !!late && (late.cls !== before.cls || late.text !== before.text);
+          return {
+            type: 'action', action: kind, ok: lateChanged, want: want, changed: lateChanged, attempts: 4,
+            count: before.text + '→' + (late ? late.text : '?'),
+            detail: lateChanged ? '状态已翻转（复查发现）' : '多次点击后状态仍未变'
+          };
+        });
       });
     },
 
-    // 轮询等状态指纹变化（每 300ms 一次，最多 n 次）；变化即早退，避免误重试把刚点的赞翻回去
+    // 轮询等状态指纹变化（每 400ms 一次，最多 n 次）；变化即早退，避免误重试把刚点的赞翻回去
     __waitChange: function (e2e, before, n) {
       var self = this;
       return new Promise(function (res) {
@@ -214,7 +235,7 @@
           var now = self.__trait(document.querySelector('[data-e2e="' + e2e + '"]'));
           var diff = !!now && (now.cls !== before.cls || now.text !== before.text);
           if (diff || i++ >= n) { res(now); return; }
-          setTimeout(step, 300);
+          setTimeout(step, 400);
         })();
       });
     },
