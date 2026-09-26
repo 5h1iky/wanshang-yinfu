@@ -39,25 +39,6 @@ public class ChatEngine {
         void onActionResult(String action, boolean ok, String detail);
     }
 
-    /** 推荐流 id 回调（数据源=PC 精选页，用户 2026-09-26 定案） */
-    public interface FeedListener {
-        void onFeedIds(java.util.List<String> ids);
-    }
-
-    private FeedListener mFeedListener;
-
-    public void setFeedListener(FeedListener l) {
-        mFeedListener = l;
-    }
-
-    /**
-     * 拉一页推荐 id（引擎不在精选页时会先跳页、经 sessionStorage自续）。
-     * @param scroll true=先滚到底触发加载更多（翻页）
-     */
-    public void fetchRecommendFeed(boolean scroll) {
-        runAction("ChatBridge.fetchRecommendFeed(" + scroll + ");");
-    }
-
     private ActionListener mActionListener;
 
     public void setActionListener(ActionListener l) {
@@ -67,9 +48,6 @@ public class ChatEngine {
     // ⚠️ 私信入口是 /chat（实测 200+SPA）；/messages 是 404 死路由（调研报告过时勿信）
     private static final String MESSAGES_URL = "https://www.douyin.com/chat";
 
-    /** 推荐流页（PC 精选页；卡片带 data-aweme-id，实测 50 张） */
-    public static final String FEED_URL = "https://www.douyin.com/jingxuan";
-
     /** 单例：会话列表页/会话页共用一个页面引擎（手表性能：WebView 全局只留一个） */
     private static ChatEngine sInstance;
 
@@ -78,8 +56,8 @@ public class ChatEngine {
     }
 
     /**
-     * @param initialUrl 仅首次创建时生效（引擎只有一个，后续页面靠 fetchRecommendFeed/ensureImHome 切页）；
-     *                   传 null = 默认私信页。Feed 页传 FEED_URL 可避开“先加载 /chat 再跳走”的浪费。
+     * @param initialUrl 仅首次创建时生效（引擎只有一个，后续页面靠 ensureImHome 切页）；
+     *                   传 null = 默认私信页。
      */
     public static synchronized ChatEngine getInstance(android.content.Context ctx, Listener listener,
                                                       String initialUrl) {
@@ -375,14 +353,6 @@ public class ChatEngine {
                         mActionListener.onActionResult(o.optString("action"), ok, detail);
                     }
                 }
-            } else if ("feed".equals(type)) {
-                java.util.List<String> ids = new ArrayList<>();
-                org.json.JSONArray arr = o.optJSONArray("ids");
-                if (arr != null) {
-                    for (int i = 0; i < arr.length(); i++) ids.add(arr.optString(i));
-                }
-                AppLog.i("engine", "推荐流 id " + ids.size() + " 条（页高=" + o.optInt("docH") + "）");
-                if (mFeedListener != null) mFeedListener.onFeedIds(ids);
             } else if ("opened".equals(type) || "back".equals(type)) {
                 AppLog.i("engine", "导航事件: " + json);
             } else if ("home".equals(type)) {
