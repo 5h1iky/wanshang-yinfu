@@ -149,9 +149,20 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
     /** 全量重绘累积表：分页只动数据源，渲染口径保持单一（两处画列表必然行为漂移） */
     private void render() {
+        // 重绘会把 ScrollView 弹回顶部——自动续拉时每来一批就弹一次，用户看着就是"一直在往下读却突然回头"。
+        // 先记下位置，重建后再恢复。
+        final int keepY = mScroll == null ? 0 : mScroll.getScrollY();
         mList.removeAllViews();
         for (Comment c : mAll) {
             mList.addView(row(c));
+        }
+        if (keepY > 0 && mScroll != null) {
+            mScroll.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (!isFinishing()) mScroll.scrollTo(0, keepY);
+                }
+            });
         }
         if (mAll.isEmpty()) {
             ((TextView) findViewById(R.id.tv_page_name)).setText("评论");
