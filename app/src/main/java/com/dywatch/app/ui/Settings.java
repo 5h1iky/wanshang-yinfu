@@ -103,4 +103,25 @@ public final class Settings {
     public static void setKeepScreenOn(Context c, boolean v) {
         sp(c).edit().putBoolean("keep_screen_on", v).apply();
     }
+
+    /**
+     * 表冠滚动：默认关。有的手表表冠本来就能靠焦点导航滚动，我们再抢一次事件会双重滚，
+     * 所以做成开关 + 灵敏度，而不是无条件接管（方案 §10.5：表冠是加分项，不依赖）。
+     */
+    public static boolean rotaryEnabled(Context c) {
+        return sp(c).getBoolean("rotary_enabled", false);
+    }
+
+    public static void setRotaryEnabled(Context c, boolean v) {
+        sp(c).edit().putBoolean("rotary_enabled", v).apply();
+    }
+
+    /** 表冠灵敏度：0=不接管，越大一格滚得越多 */
+    public static float rotarySensitivity(Context c) {
+        return rotaryEnabled(c) ? sp(c).getFloat("rotary_sens", 1.0f) : 0f;
+    }
+
+    public static void setRotarySensitivity(Context c, float v) {
+        sp(c).edit().putFloat("rotary_sens", v).apply();
+    }
 }

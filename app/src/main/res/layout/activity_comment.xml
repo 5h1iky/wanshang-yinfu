@@ -24,7 +24,7 @@
         android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
-    <ScrollView
+    <com.dywatch.app.ui.RotaryScrollView
         android:id="@+id/sv_comments"
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -38,7 +38,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="@dimen/s3" />
-    </ScrollView>
+    </com.dywatch.app.ui.RotaryScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"

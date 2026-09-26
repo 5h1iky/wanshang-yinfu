@@ -104,6 +104,25 @@ public class SettingsActivity extends UiActivity {
                 buildRows();
             }
         });
+        row("表冠滚动", onOff(Settings.rotaryEnabled(this))
+                + (Settings.rotaryEnabled(this) ? "" : "（有的表本来就能滚，抢事件会双重滚）"), new Runnable() {
+            @Override public void run() {
+                boolean v = !Settings.rotaryEnabled(SettingsActivity.this);
+                Settings.setRotaryEnabled(SettingsActivity.this, v);
+                toast("表冠滚动：" + onOff(v));
+                buildRows();
+            }
+        });
+        if (Settings.rotaryEnabled(this)) {
+            row("表冠灵敏度", sensitivityLabel(), new Runnable() {
+                @Override public void run() {
+                    float v = nextSensitivity(Settings.rotarySensitivity(SettingsActivity.this));
+                    Settings.setRotarySensitivity(SettingsActivity.this, v);
+                    toast("表冠灵敏度：" + v + "x");
+                    buildRows();
+                }
+            });
+        }
         actionRow("清除「看过」记录", "重置后推荐可能重复出现旧视频", new Runnable() {
             @Override public void run() {
                 SeenStore.clear(SettingsActivity.this);
@@ -135,6 +154,8 @@ public class SettingsActivity extends UiActivity {
                 Settings.setQualityMode(SettingsActivity.this, Settings.Q_SAVE);
                 Settings.setCommentAutoLoad(SettingsActivity.this, true);
                 Settings.setKeepScreenOn(SettingsActivity.this, true);
+                Settings.setRotaryEnabled(SettingsActivity.this, false);
+                Settings.setRotarySensitivity(SettingsActivity.this, 1.0f);
                 DouyinApi.sQuality = Settings.Q_SAVE;
                 toast("已恢复默认");
                 recreate();
@@ -160,6 +181,19 @@ public class SettingsActivity extends UiActivity {
 
     private static String percentLabel(int v) {
         return v == 0 ? "0%（铺满）" : v + "%";
+    }
+
+    private static final float[] SENSITIVITY = {0.5f, 1.0f, 2.0f, 3.0f};
+
+    private static float nextSensitivity(float cur) {
+        for (int i = 0; i < SENSITIVITY.length; i++) {
+            if (Math.abs(SENSITIVITY[i] - cur) < 0.01f) return SENSITIVITY[(i + 1) % SENSITIVITY.length];
+        }
+        return 1.0f;
+    }
+
+    private String sensitivityLabel() {
+        return Settings.rotarySensitivity(this) + "x（转一格滚多少）";
     }
 
     private static String onOff(boolean b) { return b ? "开" : "关"; }
