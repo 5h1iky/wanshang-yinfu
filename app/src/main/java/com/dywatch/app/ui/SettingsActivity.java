@@ -129,14 +129,26 @@ public class SettingsActivity extends UiActivity {
                 toast("已清除看过记录");
             }
         });
-        actionRow("诊断日志", "看最近运行记录与上次崩溃", new Runnable() {
+        actionRow("诊断日志", "WebView 版本 / 上次崩溃 / 最近运行记录", new Runnable() {
             @Override public void run() {
                 new AlertDialog.Builder(SettingsActivity.this)
                         .setTitle("诊断")
-                        .setMessage("【登录】" + (LoginManager.hasSession(SettingsActivity.this) ? "有会话" : "无")
+                        .setMessage("【WebView】" + webViewInfo()
+                                + "\n【登录】" + (LoginManager.hasSession(SettingsActivity.this) ? "有会话" : "无")
+                                + "\n【屏幕】" + (Settings.isRound(SettingsActivity.this) ? "圆屏" : "方屏")
+                                + "  缩放 " + Settings.scale(SettingsActivity.this)
+                                + "  边距 " + Settings.paddingHPercent(SettingsActivity.this)
+                                + "/" + Settings.paddingVPercent(SettingsActivity.this) + "%"
+                                + "\n【看过记录】" + com.dywatch.app.feed.SeenStore.size(SettingsActivity.this) + " 条"
                                 + "\n【上次崩溃】\n" + CrashShield.lastCrash(SettingsActivity.this)
                                 + "\n【最近日志】\n" + AppLog.tail(25))
                         .setPositiveButton("关闭", null)
+                        .setNeutralButton("免责声明", new android.content.DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(android.content.DialogInterface dialog, int which) {
+                                com.dywatch.app.util.Disclaimer.show(SettingsActivity.this);
+                            }
+                        })
                         .show();
             }
         });
@@ -162,6 +174,21 @@ public class SettingsActivity extends UiActivity {
             }
         });
         infoRow("腕上音符 v0.1.0\n与抖音官方无关 · 仅供个人学习 · 风险自负");
+    }
+
+    /** WebView 运行时版本：拉流/渲染类问题第一手要看的（原先只在主屏诊断里有） */
+    private String webViewInfo() {
+        try {
+            android.content.pm.PackageInfo pi;
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                pi = android.webkit.WebView.getCurrentWebViewPackage();
+            } else {
+                pi = getPackageManager().getPackageInfo("com.google.android.webview", 0);
+            }
+            return pi != null ? pi.packageName + " v" + pi.versionName : "未检测到";
+        } catch (Throwable t) {
+            return "检测失败(" + t.getClass().getSimpleName() + ")";
+        }
     }
 
     private String qualityHint() {

@@ -41,13 +41,6 @@ public class MainActivity extends UiActivity {
             }
         });
 
-        findViewById(R.id.btn_diag).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showDiagnostics();
-            }
-        });
-
         findViewById(R.id.btn_chat).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -94,7 +87,7 @@ public class MainActivity extends UiActivity {
                         if (info != null) {
                             android.widget.TextView status = findViewById(R.id.tv_status);
                             if (status != null) {
-                                status.setText("发现新版本 " + info.version + "（打开诊断查看）");
+                                status.setText("发现新版本 " + info.version + "（设置→诊断日志 查看）");
                             }
                             com.dywatch.app.util.AppLog.i("update", "发现新版本 " + info.version);
                         }
@@ -104,39 +97,7 @@ public class MainActivity extends UiActivity {
         }, "update-check").start();
     }
 
-    /** 诊断面板：无 adb 环境的观测窗口（用户拍照反馈的主要信息源） */
-    private void showDiagnostics() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("【WebView】").append(webViewInfo()).append('\n');
-        sb.append("【登录】").append(LoginManager.hasSession(this) ? "有会话" : "无").append('\n');
-        sb.append("【上次崩溃】\n").append(com.dywatch.app.util.CrashShield.lastCrash(this)).append("\n\n");
-        sb.append("【最近日志】\n").append(com.dywatch.app.util.AppLog.tail(12));
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("诊断")
-                .setMessage(sb.toString())
-                .setPositiveButton("知道了", null)
-                .setNeutralButton("免责声明", new android.content.DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(android.content.DialogInterface dialog, int which) {
-                        com.dywatch.app.util.Disclaimer.show(MainActivity.this);
-                    }
-                })
-                .show();
-    }
-
-    private String webViewInfo() {
-        try {
-            android.content.pm.PackageInfo pi;
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
-                pi = android.webkit.WebView.getCurrentWebViewPackage();
-            } else {
-                pi = getPackageManager().getPackageInfo("com.google.android.webview", 0);
-            }
-            return pi != null ? pi.packageName + " v" + pi.versionName : "未检测到";
-        } catch (Throwable t) {
-            return "检测失败(" + t.getClass().getSimpleName() + ")";
-        }
-    }
+    /** 诊断面板已收进设置页（并补了 WebView 版本/屏形/缩放/看过条数），主屏不再留重复入口 */
 
     @Override
     protected void onResume() {
@@ -154,12 +115,18 @@ public class MainActivity extends UiActivity {
 
     private void refreshStatus(TextView status) {
         if (status == null) return;
+        // 登录入口要反映状态：原先无论登录与否都写"登录"，点了才知道已经登过，
+        // 主屏那行小字承担了本该由入口自己说明的信息。
+        TextView login = findViewById(R.id.lbl_login);
         if (LoginManager.hasSession(this) && LoginManager.isVerified(this)) {
             status.setText("已登录（会话存本机）");
+            if (login != null) login.setText("已登录");
         } else if (LoginManager.hasSession(this)) {
             status.setText("有会话但未验证/可能失效——建议重新扫码登录");
+            if (login != null) login.setText("需重登");
         } else {
-            status.setText("未登录——点下方“登录”扫码");
+            status.setText("未登录——点上方“登录”扫码");
+            if (login != null) login.setText("登录");
         }
     }
 }
