@@ -12,6 +12,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.dywatch.app.ui.RowAdapter;
 import com.dywatch.app.ui.UiActivity;
 
 import com.dywatch.app.R;
@@ -26,9 +27,10 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
     public static final String EXTRA_AWEME_ID = "aweme_id";
 
-    private LinearLayout mList;
-    private android.widget.ScrollView mScroll;
+    private androidx.recyclerview.widget.RecyclerView mList;
+    private com.dywatch.app.ui.RowAdapter mAdapter;
     private TextView mHint;
+    private TextView mFooter;
     private EditText mInput;
     private android.widget.Button mMoreBtn;
     private ChatEngine mEngine;
@@ -48,14 +50,18 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_comment);
 
-        mList = findViewById(R.id.ll_comments);
-        mScroll = findViewById(R.id.sv_comments);
+        mList = findViewById(R.id.rv_comments);
+        mList.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
+        mAdapter = new com.dywatch.app.ui.RowAdapter(null);
+        mList.setAdapter(mAdapter);
         mHint = findViewById(R.id.tv_comment_hint);
+        mFooter = findViewById(R.id.tv_comment_footer);
         mInput = findViewById(R.id.et_comment);
         // 滚到接近底部就自动续拉，不用用户去点按钮
-        mScroll.setOnScrollChangeListener(new android.widget.ScrollView.OnScrollChangeListener() {
+        mList.addOnScrollListener(new androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             @Override
-            public void onScrollChange(android.view.View v, int x, int y, int ox, int oy) {
+            public void onScrolled(@androidx.annotation.NonNull androidx.recyclerview.widget.RecyclerView rv,
+                                   int dx, int dy) {
                 if (com.dywatch.app.ui.Settings.commentAutoLoad(CommentActivity.this)) maybeAutoLoadMore();
             }
         });
@@ -69,7 +75,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         });
 
         if (mAwemeId == null || mAwemeId.isEmpty()) {
-            mHint.setText("示例视频没有评论（去刷真实视频）");
+            hint("示例视频没有评论（去刷真实视频）");
             return;
         }
 
@@ -163,27 +169,18 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         }, 20000);
     }
 
-    /** 全量重绘累积表：分页只动数据源，渲染口径保持单一（两处画列表必然行为漂移） */
+    /**
+     * 渲染：只更新页名/按钮/提示这些"外壳"，列表内容交给 RowAdapter 按语义通知。
+     *
+     * 旧版这里是 removeAllViews + 逐条 addView 的全量重建（300 条就要 new 300 个
+     * LinearLayout + 900 个 TextView），还要靠 keepY hack 把滚动位置救回来。
+     * 现在评论分页是纯追加，走 notifyItemRangeInserted —— 位置天然不丢，
+     * 也不再每来一批就把整屏视图重搭一遍。
+     */
     private void render() {
-        // 重绘会把 ScrollView 弹回顶部——自动续拉时每来一批就弹一次，用户看着就是"一直在往下读却突然回头"。
-        // 先记下位置，重建后再恢复。
-        final int keepY = mScroll == null ? 0 : mScroll.getScrollY();
-        mList.removeAllViews();
-        for (Comment c : mAll) {
-            mList.addView(row(c));
-        }
-        if (keepY > 0 && mScroll != null) {
-            mScroll.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (!isFinishing()) mScroll.scrollTo(0, keepY);
-                }
-            });
-        }
         if (mAll.isEmpty()) {
-            ((TextView) findViewById(R.id.tv_page_name)).setText("评论");
-            mHint.setVisibility(View.VISIBLE);
-            mHint.setText("正在等待评论数据…");
+            setPageTitle("评论");
+            hint("正在等待评论数据…");
             // 评论区要等 SPA 渲染，桥那边一有内容就会立刻回；这里只做兜底重试
             if (!mAtEnd && mEmptyRetries < 4) {
                 mEmptyRetries++;
@@ -194,16 +191,15 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
                     }
                 }, 3000);
             } else {
-                mHint.setText("暂无评论");
+                hint("暂无评论");
             }
         } else {
             mEmptyRetries = 0;
             // 页名兼当计数条：有内容就不占独立一行提示，把手表那点高度全留给评论
-            TextView name = findViewById(R.id.tv_page_name);
-            name.setText("评论 " + mAll.size());
-            mHint.setVisibility(View.GONE);
-            mList.addView(footer());
+            setPageTitle("评论 " + mAll.size());
+            clearHint();
         }
+        setFooter(mAtEnd ? "已经到底了" : (mLoadingMore ? "正在加载更多…" : "继续下滑加载更多"));
         boolean auto = com.dywatch.app.ui.Settings.commentAutoLoad(this);
         mMoreBtn.setVisibility((auto || mAll.isEmpty() || mAtEnd) ? View.GONE : View.VISIBLE);
         mMoreBtn.setText(mLoadingMore ? "加载中…" : "加载更多评论");
@@ -211,49 +207,55 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         if (auto) maybeAutoLoadMore();
     }
 
-    private TextView footer() {
-        TextView tv = new TextView(this);
-        tv.setText(mAtEnd ? "已经到底了" : (mLoadingMore ? "正在加载更多…" : "继续下滑加载更多"));
-        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
-                getResources().getDimension(R.dimen.t_caption));
-        tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_muted));
-        tv.setGravity(android.view.Gravity.CENTER);
-        tv.setPadding(dp(12), dp(10), dp(12), dp(10));
-        return tv;
+    /**
+     * 列表尾部提示（加载中 / 到底了）。
+     * 从"往 LinearLayout 末尾塞一个 TextView"改成独立的一行：ScrollView 时代那样做
+     * 会被下一次 removeAllViews 冲掉，RV 里则由 footer 自己持有。
+     */
+    private void setFooter(String text) {
+        if (mFooter == null) return;
+        mFooter.setText(text);
+        mFooter.setVisibility(mAll.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void hint(String text) {
+        if (mHint == null) return;
+        mHint.setText(text);
+        mHint.setVisibility(View.VISIBLE);
+    }
+
+    private void clearHint() {
+        if (mHint != null) mHint.setVisibility(View.GONE);
+    }
+
+    /** Comment -> 行数据（昵称兜底"匿名"照旧：桥偶尔抓空昵称，空着整行像坏了） */
+    private RowAdapter.Item toItem(Comment c) {
+        String meta = c.time + (c.likes.isEmpty() ? "" : ("  ·  " + c.likes + " 赞"));
+        return new RowAdapter.Item(c.name.isEmpty() ? "匿名" : c.name, meta, c.text, c);
     }
 
     /**
      * 无缝续拉：内容填不满屏幕时永远触发不了滚动事件，所以每次渲染完都要主动判一次，
      * 否则"自动加载"会卡在首屏那几条上。
+     *
+     * RV 版判底：问 LayoutManager 最后一个可见项是不是接近末尾——
+     * 比 ScrollView 那套 getScrollY()+getHeight() 更准（回收后子视图高度不代表内容高度）。
      */
     private void maybeAutoLoadMore() {
         if (mLoadingMore || mAtEnd || mEngine == null) return;
         if (mAll.size() >= MAX_COMMENTS) { mAtEnd = true; return; }
-        mScroll.post(new Runnable() {
+        final androidx.recyclerview.widget.LinearLayoutManager lm =
+                (androidx.recyclerview.widget.LinearLayoutManager) mList.getLayoutManager();
+        if (lm == null) return;
+        mList.post(new Runnable() {
             @Override
             public void run() {
                 if (isFinishing() || mLoadingMore || mAtEnd) return;
-                View child = mScroll.getChildAt(0);
-                if (child == null) return;
-                boolean nearBottom = mScroll.getScrollY() + mScroll.getHeight()
-                        >= child.getHeight() - dp(64);
-                if (nearBottom) loadMore();
+                int last = lm.findLastVisibleItemPosition();
+                // 末尾 3 条内就算"近底"：手表一屏也就四五条，阈值给大点才续得上
+                if (last >= mAdapter.getItemCount() - 3) loadMore();
             }
         });
-    }
-
-    private int dp(float v) {
-        return Math.round(getResources().getDisplayMetrics().density * v);
-    }
-
-    /**
-     * 一条评论：昵称 / 时间+赞数 / 正文 三级分层，画法与会话列表共用 Rows。
-     * 实测偶发昵称抓空（桥只取 info-wrap 的 textContent），空着会让整行看起来像坏了，给个兜底。
-     */
-    private View row(Comment c) {
-        String meta = c.time + (c.likes.isEmpty() ? "" : ("  ·  " + c.likes + " 赞"));
-        return com.dywatch.app.ui.Rows.card(this,
-                c.name.isEmpty() ? "匿名" : c.name, meta, c.text);
     }
 
     /** 翻页：让引擎把评论区滚一页，新渲染出来的那批经 onCommentsMore 追加回来 */
@@ -290,17 +292,28 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
     @Override
     public void onComments(List<Comment> list) {
+        // 首批/刷新：整批替换
         mAll.clear();
         mAll.addAll(list);
         mAtEnd = false;
         mLoadingMore = false;
+        mAdapter.clear();
+        java.util.List<RowAdapter.Item> items = new java.util.ArrayList<>();
+        for (Comment c : mAll) items.add(toItem(c));
+        mAdapter.append(items);
         render();
     }
 
     @Override
     public void onCommentsMore(List<Comment> list, boolean atEnd) {
         mLoadingMore = false;
-        mAll.addAll(list);
+        if (!list.isEmpty()) {
+            mAll.addAll(list);
+            // 追加而非全量替换：位置天然不丢，也不用把整屏视图重建一遍
+            java.util.List<RowAdapter.Item> items = new java.util.ArrayList<>();
+            for (Comment c : list) items.add(toItem(c));
+            mAdapter.append(items);
+        }
         // 只认引擎报来的"滚动位置真到底"；这次没抓到新内容不等于没有更多了
         mAtEnd = atEnd;
         render();

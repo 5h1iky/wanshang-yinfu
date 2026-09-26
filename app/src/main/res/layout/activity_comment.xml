@@ -24,21 +24,31 @@
         android:textSize="@dimen/t_caption"
         android:visibility="gone" />
 
-    <com.dywatch.app.ui.RotaryScrollView
-        android:id="@+id/sv_comments"
+    <!--
+      表冠可滚的 RecyclerView（默认关，设置里开）。
+      原先这里是 RotaryScrollView + LinearLayout，评论一多就全量重建视图；
+      换成 RV 后由 RotaryRecyclerView 接管表冠——它不带表冠逻辑的话，
+      换了列表实现就等于把手表上最省力的滚动方式弄丢了。
+    -->
+    <com.dywatch.app.ui.RotaryRecyclerView
+        android:id="@+id/rv_comments"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:clipToPadding="false"
-        android:scrollbars="none">
+        android:padding="@dimen/s3"
+        android:scrollbars="none" />
 
-        <LinearLayout
-            android:id="@+id/ll_comments"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="@dimen/s3" />
-    </com.dywatch.app.ui.RotaryScrollView>
+    <!-- 列表尾部提示（加载中 / 已经到底了）：RV 时代不再往列表里塞视图 -->
+    <TextView
+        android:id="@+id/tv_comment_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/text_muted"
+        android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
 
     <!--
       快捷回复：手表上打字最费劲，先给常用短语。

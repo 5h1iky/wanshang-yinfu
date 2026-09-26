@@ -26,8 +26,8 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     /** 进入指定会话（ConvListActivity 传入会话名） */
     public static final String EXTRA_CONV_NAME = "conv_name";
 
-    private LinearLayout mMessages;
-    private android.widget.ScrollView mScroll;
+    private androidx.recyclerview.widget.RecyclerView mMessages;
+    private com.dywatch.app.ui.MessageAdapter mAdapter;
     private EditText mInput;
     private TextView mHint;
     private ChatEngine mEngine;
@@ -50,8 +50,10 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         setContentView(R.layout.activity_chat);
         setPageTitle("聊天");
 
-        mMessages = findViewById(R.id.ll_messages);
-        mScroll = findViewById(R.id.sv_messages);
+        mMessages = findViewById(R.id.rv_messages);
+        mMessages.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
+        mAdapter = new com.dywatch.app.ui.MessageAdapter();
+        mMessages.setAdapter(mAdapter);
         mInput = findViewById(R.id.et_input);
         mHint = findViewById(R.id.tv_chat_hint);
         mConvName = getIntent().getStringExtra(EXTRA_CONV_NAME);
@@ -88,7 +90,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
                     @Override
                     public void onPick(String t) {
                         safeSend(t);
-                        addBubble(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
+                        appendLocal(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
                     }
                 });
 
@@ -100,7 +102,19 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         if (TextUtils.isEmpty(text)) return;
         mInput.setText("");
         safeSend(text);
-        addBubble(new ChatMessage(ChatMessage.OUT, text, System.currentTimeMillis()));
+        appendLocal(new ChatMessage(ChatMessage.OUT, text, System.currentTimeMillis()));
+    }
+
+    /**
+     * 本地回声：刚发出的消息先显示出来（等桥 5s 轮询回来才有真数据，那之前不能空白）。
+     * 走追加而不是塞进 mAll——下一次 onMessages 会以服务端数据整批替换，
+     * 这里加的东西自然会被覆盖，不会重复。
+     */
+    private void appendLocal(ChatMessage msg) {
+        java.util.List<ChatMessage> one = new java.util.ArrayList<>();
+        one.add(msg);
+        mAdapter.appendLocal(one);
+        scrollToBottomIfGrew(mAdapter.size());
     }
 
     /** 安全发送：引擎未就绪时给提示而不是崩溃 */
@@ -128,52 +142,17 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
      * 每 5s 的轮询重绘若无条件滚，用户往上翻历史会被反复拽回底部。
      */
     private void scrollToBottomIfGrew(int newCount) {
-        if (mScroll == null) return;
+        if (mMessages == null) return;
         boolean grew = newCount > mLastCount;
         mLastCount = newCount;
         if (!grew) return;
-        mScroll.post(new Runnable() {
+        mMessages.post(new Runnable() {
             @Override
             public void run() {
-                if (!isFinishing()) mScroll.fullScroll(View.FOCUS_DOWN);
+                int n = mAdapter.getItemCount();
+                if (n > 0 && !isFinishing()) mMessages.scrollToPosition(n - 1);
             }
         });
-    }
-
-    private void addBubble(ChatMessage msg) {
-        boolean out = msg.direction == ChatMessage.OUT;
-        int dp_ = com.dywatch.app.ui.Rows.dp(this, 1);
-
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        // 我方靠右、对方靠左，靠外侧留白做出对话轴向
-        lp.setMargins(out ? dp_ * 80 : dp_ * 8, dp_ * 8, out ? dp_ * 8 : dp_ * 80, dp_ * 8);
-        lp.gravity = out ? android.view.Gravity.END : android.view.Gravity.START;
-        col.setLayoutParams(lp);
-
-        // ⚠️ 必须显式给文字颜色：主题是 Material3.DayNight，浅色模式下默认字色是深色，
-        // 配我们这套深色气泡会几乎看不见——以前只是恰好没在浅色模式下试过。
-        TextView meta = new TextView(this);
-        meta.setText((out ? "我" : "对方")
-                + (msg.timeText == null || msg.timeText.isEmpty() ? "" : (" · " + msg.timeText)));
-        meta.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
-                getResources().getDimension(R.dimen.t_caption));
-        meta.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_muted));
-        meta.setGravity(out ? android.view.Gravity.END : android.view.Gravity.START);
-        col.addView(meta);
-
-        TextView tv = new TextView(this);
-        tv.setText(msg.text);
-        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
-                getResources().getDimension(R.dimen.t_body));
-        tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_primary));
-        tv.setPadding(dp_ * 12, dp_ * 9, dp_ * 12, dp_ * 9);
-        tv.setBackgroundResource(out ? R.drawable.bg_bubble_out : R.drawable.bg_bubble_in);
-        col.addView(tv);
-
-        mMessages.addView(col);
     }
 
     // ---- ChatEngine.Listener ----
@@ -199,11 +178,12 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
 
     @Override
     public void onMessages(List<ChatMessage> list) {
-        mMessages.removeAllViews();
         // 桥返回新→旧，页面按旧→新显示
-        for (int i = list.size() - 1; i >= 0; i--) addBubble(list.get(i));
+        java.util.List<ChatMessage> ordered = new java.util.ArrayList<>();
+        for (int i = list.size() - 1; i >= 0; i--) ordered.add(list.get(i));
+        mAdapter.submitList(ordered);
         clearHint();
-        scrollToBottomIfGrew(list.size());
+        scrollToBottomIfGrew(ordered.size());
     }
 
     @Override

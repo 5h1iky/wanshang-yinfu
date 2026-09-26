@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  聊天气泡行：元信息（我/对方 · 时间）+ 气泡正文。
+  原先由 ChatActivity.addBubble() 在代码里 new；改成 XML 后由 ViewHolder 复用。
+  ⚠️ 文字颜色必须显式给：主题是 Material3.DayNight，浅色模式下默认字色是深色，
+     配深色气泡会几乎看不见（真机踩过，见 ChatActivity 原注释）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/msg_col"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/msg_meta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/text_muted"
+        android:textSize="@dimen/t_caption" />
+
+    <TextView
+        android:id="@+id/msg_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s1"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/t_body" />
+
+</LinearLayout>

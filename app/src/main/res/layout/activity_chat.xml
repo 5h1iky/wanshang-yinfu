@@ -21,21 +21,14 @@
         android:visibility="gone" />
 
     <!-- 表冠可滚（默认关）：与评论页、会话页共用同一份实现 -->
-    <com.dywatch.app.ui.RotaryScrollView
-        android:id="@+id/sv_messages"
+    <com.dywatch.app.ui.RotaryRecyclerView
+        android:id="@+id/rv_messages"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:clipToPadding="false"
-        android:scrollbars="none">
-
-        <LinearLayout
-            android:id="@+id/ll_messages"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="@dimen/s3" />
-    </com.dywatch.app.ui.RotaryScrollView>
+        android:padding="@dimen/s3"
+        android:scrollbars="none" />
 
     <!-- 快捷回复条：与评论页共用一份 include（等分权重，4 个永远都看得见，不需要横向滚） -->
     <include layout="@layout/include_quick_reply" />

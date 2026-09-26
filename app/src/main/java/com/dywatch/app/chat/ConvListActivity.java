@@ -22,7 +22,8 @@ import java.util.List;
 
 public class ConvListActivity extends UiActivity implements ChatEngine.Listener {
 
-    private LinearLayout mConvs;
+    private androidx.recyclerview.widget.RecyclerView mConvs;
+    private com.dywatch.app.ui.RowAdapter mAdapter;
     private TextView mHint;
     private ChatEngine mEngine;
     private int mEmptyRetries;
@@ -33,7 +34,21 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         setContentView(R.layout.activity_convlist);
         setPageTitle("会话");
 
-        mConvs = findViewById(R.id.ll_convs);
+        mConvs = findViewById(R.id.rv_convs);
+        mConvs.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
+        // 行点击 → 进会话（会话对象作为载荷带回）
+        mAdapter = new com.dywatch.app.ui.RowAdapter(
+                new com.dywatch.app.ui.RowAdapter.OnRowClick() {
+                    @Override
+                    public void onClick(Object payload) {
+                        if (!(payload instanceof Conversation)) return;
+                        Conversation c = (Conversation) payload;
+                        Intent it = new Intent(ConvListActivity.this, ChatActivity.class);
+                        it.putExtra(ChatActivity.EXTRA_CONV_NAME, c.name);
+                        startActivity(it);
+                    }
+                });
+        mConvs.setAdapter(mAdapter);
         mHint = findViewById(R.id.tv_convlist_hint);
 
         findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
@@ -88,7 +103,6 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     }
 
     private void render(List<Conversation> list) {
-        mConvs.removeAllViews();
         if (list.isEmpty()) {
             hint("正在等待会话数据…（自动重试）");
             // IM 数据异步渲染，页面刚就绪时常为空 → 自动重试
@@ -109,19 +123,12 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         // 计数折进页名，省掉常驻提示行——手表那点高度要留给会话本身
         setPageTitle("会话 " + list.size());
         clearHint();
-        for (final Conversation c : list) {
-            // 昵称 / 时间 / 最近消息 三级分层（旧版三段同字号同颜色塞一个 TextView，读不出层级）
-            View row = com.dywatch.app.ui.Rows.card(this, c.name, c.timeText, c.lastMsg);
-            row.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    Intent it = new Intent(ConvListActivity.this, ChatActivity.class);
-                    it.putExtra(ChatActivity.EXTRA_CONV_NAME, c.name);
-                    startActivity(it);
-                }
-            });
-            mConvs.addView(row);
+        // 昵称 / 时间 / 最近消息 三级分层（旧版三段同字号同颜色塞一个 TextView，读不出层级）
+        java.util.List<com.dywatch.app.ui.RowAdapter.Item> items = new java.util.ArrayList<>();
+        for (Conversation c : list) {
+            items.add(new com.dywatch.app.ui.RowAdapter.Item(c.name, c.timeText, c.lastMsg, c));
         }
+        mAdapter.submitList(items);
     }
 
     // ---- ChatEngine.Listener ----

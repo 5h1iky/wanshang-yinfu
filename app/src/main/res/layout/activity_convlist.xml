@@ -22,19 +22,13 @@
         android:visibility="gone" />
 
     <!-- 表冠可滚（默认关，设置里开）：与评论页共用同一份实现 -->
-    <com.dywatch.app.ui.RotaryScrollView
+    <com.dywatch.app.ui.RotaryRecyclerView
+        android:id="@+id/rv_convs"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:clipToPadding="false"
-        android:scrollbars="none">
-
-        <LinearLayout
-            android:id="@+id/ll_convs"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="@dimen/s3" />
-    </com.dywatch.app.ui.RotaryScrollView>
+        android:padding="@dimen/s3"
+        android:scrollbars="none" />
 
 </LinearLayout>
