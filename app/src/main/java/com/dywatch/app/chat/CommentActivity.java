@@ -80,17 +80,27 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         }
 
         mEngine = ChatEngine.getInstance(this, this);
+        // 直连是主路（只读接口风控宽松、结构稳定）；引擎 DOM 抓取只在直连失败时兜底
+        fetchCommentsFromApi(0, false);
         mEngine.setActionListener(new ChatEngine.ActionListener() {
             @Override
             public void onActionResult(String action, boolean ok, String detail) {
                 mSending = false;
                 mHint.setVisibility(View.VISIBLE);
                 mHint.setText(ok ? "已发送，刷新中…" : ("发送失败: " + detail));
-                if (ok && mEngine != null) {
+                if (ok) {
                     mList.postDelayed(new Runnable() {
                         @Override
                         public void run() {
-                            if (mEngine != null && !isFinishing()) mEngine.fetchComments(mAwemeId);
+                            if (isFinishing()) return;
+                            // 发完刷新：按当前数据源走（直连就直连，回退了就走引擎）
+                            if (mApiMode) {
+                                mApiCursor = 0;
+                                mApiLoading = false;
+                                fetchCommentsFromApi(0, false);
+                            } else if (mEngine != null) {
+                                mEngine.fetchComments(mAwemeId);
+                            }
                         }
                     }, 1500);
                 }
@@ -181,13 +191,20 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         if (mAll.isEmpty()) {
             setPageTitle("评论");
             hint("正在等待评论数据…");
-            // 评论区要等 SPA 渲染，桥那边一有内容就会立刻回；这里只做兜底重试
+            // 空态兜底重试：直连模式下重发直连，回退模式下才找引擎
+            // （直连是同步返回的，空只可能是真没评论或刚进来还没到，重试一次够）
             if (!mAtEnd && mEmptyRetries < 4) {
                 mEmptyRetries++;
                 mList.postDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        if (mEngine != null && !isFinishing()) mEngine.fetchComments(mAwemeId);
+                        if (isFinishing()) return;
+                        if (mApiMode) {
+                            mApiLoading = false;
+                            fetchCommentsFromApi(0, false);
+                        } else if (mEngine != null) {
+                            mEngine.fetchComments(mAwemeId);
+                        }
                     }
                 }, 3000);
             } else {
@@ -242,7 +259,9 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
      * 比 ScrollView 那套 getScrollY()+getHeight() 更准（回收后子视图高度不代表内容高度）。
      */
     private void maybeAutoLoadMore() {
-        if (mLoadingMore || mAtEnd || mEngine == null) return;
+        // ⚠️ 这里的守卫不能依赖 mEngine：直连模式下评论根本不经引擎，
+        //    写成 mEngine == null 就直接返回，自动续拉永远不触发（真机踩到过）。
+        if (mLoadingMore || mApiLoading || mAtEnd) return;
         if (mAll.size() >= MAX_COMMENTS) { mAtEnd = true; return; }
         final androidx.recyclerview.widget.LinearLayoutManager lm =
                 (androidx.recyclerview.widget.LinearLayoutManager) mList.getLayoutManager();
@@ -250,16 +269,107 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         mList.post(new Runnable() {
             @Override
             public void run() {
-                if (isFinishing() || mLoadingMore || mAtEnd) return;
+                if (isFinishing() || mLoadingMore || mApiLoading || mAtEnd) return;
                 int last = lm.findLastVisibleItemPosition();
-                // 末尾 3 条内就算"近底"：手表一屏也就四五条，阈值给大点才续得上
-                if (last >= mAdapter.getItemCount() - 3) loadMore();
+                int count = mAdapter.getItemCount();
+                // 末尾 3 条内就算"近底"（手表一屏四五条，阈值给大点才续得上）；
+                // 空列表也放行，否则首屏永远触发不到
+                if (count == 0 || last >= count - 3) loadMore();
             }
         });
     }
 
+    /**
+     * 拉评论：优先走原生直连（只读接口，风控宽松、结构稳定、带真分页）。
+     * 直连失败才回退 WebView 引擎的 DOM 抓取——那条路脆（类名是构建期 hash 拼接），
+     * 但它是"没得选时的兜底"，不是主路。
+     */
+    private void fetchCommentsFromApi(final long cursor, final boolean append) {
+        if (mApiLoading) return;
+        mApiLoading = true;
+        hint(append ? "正在加载更多…" : "正在拉取评论…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final com.dywatch.app.net.DouyinApi api = ensureApi();
+                    final List<Comment> list = api.fetchComments(mAwemeId, cursor, 20);
+                    final boolean more = api.lastCommentHasMore;
+                    final long next = api.lastCommentCursor;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            mApiLoading = false;
+                            mApiCursor = next > 0 ? next : mApiCursor + list.size();
+                            com.dywatch.app.util.AppLog.i("chat", "评论直连 " + list.size()
+                                    + " 条（cursor=" + cursor + " 下一页=" + mApiCursor
+                                    + " 还有=" + more + " 累计=" + (mAll.size() + list.size()) + "）");
+                            if (append) {
+                                onCommentsMore(list, !more);
+                            } else {
+                                onComments(list);
+                                mAtEnd = !more;
+                                render();
+                            }
+                            mApiMode = true;   // 直连成功过，后续翻页也走直连
+                        }
+                    });
+                } catch (final Exception e) {
+                    com.dywatch.app.util.AppLog.i("chat", "评论直连失败: " + e);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            mApiLoading = false;
+                            mApiMode = false;
+                            // 兜底：走引擎 DOM 抓取
+                            if (append) {
+                                if (mEngine != null) mEngine.loadMoreComments(mAwemeId);
+                            } else if (mEngine != null) {
+                                mEngine.fetchComments(mAwemeId);
+                            } else {
+                                hint("评论加载失败: " + e.getMessage());
+                            }
+                        }
+                    });
+                }
+            }
+        }, "comment-api").start();
+    }
+
+    /** 直连模式：true=走 API，false=回退引擎 DOM 抓取 */
+    private boolean mApiMode = true;
+    private boolean mApiLoading;
+    private long mApiCursor;
+    private com.dywatch.app.net.DouyinApi mApi;
+
+    private com.dywatch.app.net.DouyinApi ensureApi() throws Exception {
+        if (mApi != null) return mApi;
+        mApi = new com.dywatch.app.net.DouyinApi(new com.dywatch.app.sign.Signer(
+                java.util.Arrays.asList(
+                        readAll(getAssets().open("sign/utils.js")),
+                        readAll(getAssets().open("sign/sm3.js")),
+                        readAll(getAssets().open("sign/vm_decode.js")))));
+        mApi.setSessionCookie(com.dywatch.app.login.LoginManager.getCookies(this));
+        return mApi;
+    }
+
+    private static String readAll(java.io.InputStream is) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+        is.close();
+        return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     /** 翻页：让引擎把评论区滚一页，新渲染出来的那批经 onCommentsMore 追加回来 */
     private void loadMore() {
+        // 直连模式用 cursor 翻页，不用去页面上"滚一屏骗出新评论"
+        if (mApiMode) {
+            if (mApiLoading || mAtEnd) return;
+            fetchCommentsFromApi(mApiCursor, true);
+            return;
+        }
         if (mLoadingMore || mAtEnd || mEngine == null) return;
         mLoadingMore = true;
         render();

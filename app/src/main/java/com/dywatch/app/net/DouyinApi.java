@@ -160,6 +160,80 @@ public final class DouyinApi {
     }
 
     /**
+     * 拉评论列表（只读，直连）。
+     *
+     * 实测（2026-09-26，tools/probe-readonly-apis2.js）：www-hj 域 + 仅 3 个参数
+     * （aweme_id / cursor / count + a_bogus）即可，HTTP 200 + status_code=0 + 20 条。
+     * 参考源码 dyapi-src 的 VideoCommentListHandler 也是这个极简形态。
+     *
+     * 为什么改直连：原实现是 WebView 里抓 DOM（comment-item-info-wrap 等 class），
+     * 那些类名是构建期 hash 拼接，页面一改版就全断；直连拿 JSON 结构稳定，
+     * 还带 cursor + has_more 真分页，不用靠滚动懒加载去"骗"出更多评论。
+     *
+     * @return 评论列表；附带把 has_more 记到 lastCommentHasMore
+     */
+    public List<com.dywatch.app.chat.model.Comment> fetchComments(
+            String awemeId, long cursor, int count) throws IOException {
+        ensureTtwid();
+        String base = "aweme_id=" + awemeId + "&cursor=" + cursor + "&count=" + count;
+        String url = "https://www-hj.douyin.com/aweme/v1/web/comment/list/?" + base
+                + "&a_bogus=" + urlEncode(signer.makeABogus(base));
+        Request req = new Request.Builder()
+                .url(url)
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/")
+                .header("Origin", "https://www.douyin.com")
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            String body = resp.body().string();
+            com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(body);
+            if (!el.isJsonObject()) throw new IOException("评论接口非 JSON");
+            com.google.gson.JsonObject o = el.getAsJsonObject();
+            int code = optInt(o, "status_code");
+            if (code != 0) throw new IOException("评论列表 status=" + code);
+            lastCommentHasMore = o.has("has_more") && o.get("has_more").getAsInt() == 1;
+            lastCommentCursor = o.has("cursor") ? o.get("cursor").getAsLong() : 0L;
+            List<com.dywatch.app.chat.model.Comment> out = new ArrayList<>();
+            com.google.gson.JsonArray arr = o.getAsJsonArray("comments");
+            if (arr == null) return out;
+            for (int i = 0; i < arr.size(); i++) {
+                com.google.gson.JsonObject c = arr.get(i).getAsJsonObject();
+                com.google.gson.JsonObject u = c.getAsJsonObject("user");
+                String name = u == null ? "" : optString(u, "nickname");
+                long digg = c.has("digg_count") ? c.get("digg_count").getAsLong() : 0L;
+                long ts = c.has("create_time") ? c.get("create_time").getAsLong() : 0L;
+                com.dywatch.app.chat.model.Comment cm =
+                        new com.dywatch.app.chat.model.Comment(
+                                name,
+                                optString(c, "text"),
+                                formatCommentTime(ts),
+                                com.dywatch.app.feed.FeedVideo.formatCount(digg));
+                out.add(cm);
+            }
+            return out;
+        }
+    }
+
+    /** 上次拉评论的结果：还有没有下一页 */
+    public boolean lastCommentHasMore;
+    /** 上次拉评论返回的下一页游标 */
+    public long lastCommentCursor;
+
+    /** create_time（秒）→ 展示文案。相对时间比绝对时间省地方，手表屏要省着用。 */
+    static String formatCommentTime(long epochSec) {
+        if (epochSec <= 0) return "";
+        long diff = System.currentTimeMillis() / 1000 - epochSec;
+        if (diff < 60) return "刚刚";
+        if (diff < 3600) return (diff / 60) + "分钟前";
+        if (diff < 86400) return (diff / 3600) + "小时前";
+        if (diff < 86400 * 30) return (diff / 86400) + "天前";
+        if (diff < 86400 * 365) return (diff / 86400 / 30) + "个月前";
+        return (diff / 86400 / 365) + "年前";
+    }
+
+    /**
      * 取自己的 sec_uid（拉喜欢列表要用）。
      * ⚠️ 主站 /user/self 页面已改客户端渲染、HTML 里没有 secUid（cv-cat 2026-08 复核）；
      *    但实测 profile/self 这个 JSON 接口的 user.sec_uid 仍然给，直接用它。
