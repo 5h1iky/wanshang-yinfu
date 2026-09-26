@@ -135,6 +135,14 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         refreshStatus(findViewById(R.id.tv_status));
+        // 引擎作本页隐藏子视图获得真视口（页面不透明背景盖住它）
+        com.dywatch.app.chat.ChatEngine.attachTo(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        com.dywatch.app.chat.ChatEngine.detachFrom(this);
     }
 
     private void refreshStatus(TextView status) {

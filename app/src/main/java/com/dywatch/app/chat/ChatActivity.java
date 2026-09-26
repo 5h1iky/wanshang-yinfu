@@ -181,15 +181,17 @@ public class ChatActivity extends AppCompatActivity implements ChatEngine.Listen
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
-        mPoll.removeCallbacks(mPollTask);
+    protected void onResume() {
+        super.onResume();
+        ChatEngine.attachTo(this);
+        if (mEngine != null) startPolling();
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        if (mEngine != null) startPolling();
+    protected void onPause() {
+        super.onPause();
+        ChatEngine.detachFrom(this);
+        mPoll.removeCallbacks(mPollTask);
     }
 
     @Override

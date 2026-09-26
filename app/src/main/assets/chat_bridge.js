@@ -277,21 +277,26 @@
           clearInterval(timer);
           var items = [];
           for (var i = 0; i < wraps.length; i++) {
-            var col = wraps[i].parentElement;
+            var wrap = wraps[i];
+            var col = wrap.parentElement;
             if (!col) continue;
-            var name = (wraps[i].textContent || '').replace(/\s+/g, ' ').trim().replace(/\.{2,}$/, '');
+            var name = (wrap.textContent || '').replace(/\s+/g, ' ').trim().replace(/\.{2,}$/, '');
             var text = '', time = '', likes = '';
             for (var c = 0; c < col.children.length; c++) {
               var el = col.children[c];
               var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+              // ⁠ 排除昵称列：querySelector 只查后代、不查自身，只靠它会把昵称列漏进来，
+              //   而昵称+“...” 比正文长→被当成正文（真机实测：自己的评论只显了个账号名）
+              if (el === wrap || wrap.contains(el) || el.contains(wrap)) continue;
               if (el.querySelector('[class*="comment-item-info-wrap"]')) continue;
               if (el.querySelector('[class*="comment-item-stats-container"]')) {
                 var sp = el.querySelector('p span');
                 likes = sp ? (sp.textContent || '').trim() : '';
                 continue;
               }
-              // 时间形如「1天前 · 广东」「刚刚」「09-20」：取开头的相对/绝对时间部分
-              var mt = t.match(/^(刚刚|[\d]+\s?(秒|分钟|小时|天|周|个月)前|\d{1,2}-\d{1,2})/);
+              // 时间形如「刚刚」「1分钟前」「2月前·山西」「1天前」「09-20」
+              // ⁠ 单位必须含“月/年”：实测 “2月前” 在旧正则下逐条漏配→time 全空
+              var mt = t.match(/^(刚刚|\d+\s?(秒|分钟|小时|天|周|月|年)前|\d{1,2}-\d{1,2})/);
               if (mt) { time = mt[1]; continue; }
               if (t.length > text.length) text = t;
             }
@@ -314,15 +319,31 @@
     // 判定 = 编辑器清空（清空即已被页面消费=已发出）；不再用「未找到即失败」的假阴性口径
     __doSendComment: function (text) {
       var self = this;
-      var box = document.querySelector('[class*="comment-input-inner-container"]');
-      if (!box) { post({ type: 'action', action: 'sendComment', ok: false, detail: '未找到评论框' }); return; }
-      fireClick(box);
+      // 评论框要等 SPA 渲染（实测：跳页后 4s 才起页面、评论框还没挂载，旧版直接报"未找到评论框"）
+      var boxTries = 0;
+      var boxTimer = setInterval(function () {
+        boxTries++;
+        var b = document.querySelector('[class*="comment-input-inner-container"]');
+        if (!b) {
+          if (boxTries > 40) {
+            clearInterval(boxTimer);
+            post({ type: 'action', action: 'sendComment', ok: false, detail: '等 20s 仍无评论框（页面未渲染完）' });
+          }
+          return;
+        }
+        clearInterval(boxTimer);
+        fireClick(b);
+        self.__doSendCommentEdit(text);
+      }, 500);
+    },
 
+    __doSendCommentEdit: function (text) {
+      var self = this;
       var tries = 0;
       var timer = setInterval(function () {
         tries++;
         var editor = document.querySelector('.public-DraftEditor-content[contenteditable="true"]');
-        if (editor || tries > 12) {
+        if (editor || tries > 25) {
           clearInterval(timer);
           if (!editor) { post({ type: 'action', action: 'sendComment', ok: false, detail: '编辑器未出现' }); return; }
           editor.focus();
@@ -343,11 +364,16 @@
               post({ type: 'action', action: 'sendComment', ok: false, detail: '文本未进入编辑器（state=' + injected + '）' });
               return;
             }
-            // 提交面枚举：commentInput-right-ct 里所有 cursor:pointer 的 span（实测 3 个，末尾那个带独立类=高亮发送钮）
+            // 提交面枚举（真机实测纠版）：right-ct 里 3 个 span = 表情 / @提及 / 发送。
+            // 真发送钮在编辑器为空时是 cursor:auto + opacity:1，表情与@ 钮是 cursor:pointer + opacity 0.44；
+            // 旧版只收 cursor:pointer → 把 @ 提及钮当候选点了→它往编辑器里插了一个“@”（用户反馈的尾@根因）。
+            // 现按 DOM 倒序（发送恒在末尾）优先，且不再以 cursor 为硬性门槛。
             var nodes = document.querySelectorAll('[class*="commentInput-right-ct"] span, [class*="commentInput-right-ct"] button');
             var cands = [];
-            for (var i = 0; i < nodes.length; i++) {
-              if (getComputedStyle(nodes[i]).cursor === 'pointer') cands.push(nodes[i]);
+            for (var i = nodes.length - 1; i >= 0; i--) {
+              var cs = getComputedStyle(nodes[i]);
+              var op = parseFloat(cs.opacity || '1');
+              if (cs.cursor === 'pointer' || op >= 0.9) cands.push(nodes[i]);
             }
             post({ type: 'action', action: 'sendComment', phase: 'submitting', cands: cands.length, injected: injected });
             return self.__trySubmit(editor, cands, 0);
@@ -365,10 +391,24 @@
         return Promise.resolve({ type: 'action', action: 'sendComment', ok: true, detail: '已发送（编辑器已清空）' });
       }
       if (idx < cands.length) {
+        var beforeText = self.__editorText(editor);
         fireClick(cands[idx]);
         return wait(1500).then(function () {
-          if (self.__editorText(editor).length === 0) {
-            return { type: 'action', action: 'sendComment', ok: true, via: 'click#' + idx, detail: '已发送（点提交钮第' + idx + '个）' };
+          var nowText = self.__editorText(editor);
+          if (nowText.length === 0) {
+            return { type: 'action', action: 'sendComment', ok: true, via: 'click#' + idx, detail: '已发送（点提交钮第' + (cands.length - idx) + '个）' };
+          }
+          // 文本变长 = 点到了“插入型”钮（表情/@ 提及）→ 把插入的字符删掉再试下一个，
+          // 绝不带着它提交（这就是用户看到尾@ 的那一步）
+          if (nowText.length > beforeText.length) {
+            var extra = nowText.length - beforeText.length;
+            editor.focus();
+            for (var d = 0; d < extra; d++) {
+              try { document.execCommand('delete', false, null); } catch (e) {}
+            }
+            return wait(400).then(function () {
+              return self.__trySubmit(editor, cands, idx + 1);
+            });
           }
           return self.__trySubmit(editor, cands, idx + 1);
         });

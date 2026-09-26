@@ -179,6 +179,18 @@ public class CommentActivity extends AppCompatActivity implements ChatEngine.Lis
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        ChatEngine.attachTo(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        ChatEngine.detachFrom(this);
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         if (mEngine != null) {

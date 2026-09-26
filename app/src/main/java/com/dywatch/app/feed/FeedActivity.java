@@ -369,12 +369,6 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
         return new String(bos.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        if (mVideoView != null) mVideoView.pause();
-    }
-
     // ---- 互动（操作栏）：乐观更新 + 后台直写（用户已授权直写尝试，KICK 则重登）----
 
     @Override
@@ -462,6 +456,14 @@ public class FeedActivity extends AppCompatActivity implements FeedAdapter.Actio
     protected void onResume() {
         super.onResume();
         if (mVideoView != null) mVideoView.resume();
+        com.dywatch.app.chat.ChatEngine.attachTo(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        com.dywatch.app.chat.ChatEngine.detachFrom(this);
+        if (mVideoView != null) mVideoView.pause();
     }
 
     @Override

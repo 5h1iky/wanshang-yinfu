@@ -58,10 +58,17 @@ public class ConvListActivity extends AppCompatActivity implements ChatEngine.Li
     @Override
     protected void onResume() {
         super.onResume();
+        ChatEngine.attachTo(this);
         if (mEngine != null) {
             // 从会话页返回时刷新列表
             mEngine.fetchConversations();
         }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        ChatEngine.detachFrom(this);
     }
 
     private void render(List<Conversation> list) {

@@ -157,6 +157,51 @@ public class ChatEngine {
         if (mListener == l) mListener = null;
     }
 
+    // ---- 引擎宿主窗口（真视口）----
+    // 背景：引擎 WebView 从来没用加进窗口树 → 0×0 视口（实测 innerWidth/innerHeight/clientWidth
+    // 全为 0）。很多页面行为因此不对：推荐流“可见才加载”直接不发请求、沉浸式规则把
+    // 交互区藏掉、元素 rect 乱跳。解法：把它挂到当前页面内容层【底下】（index 0）。
+    // ⚠️ 不能用 View.INVISIBLE：那会被 Chromium 报成 visibilityState=hidden，页面反而不加载；
+    //    也不不能用 GONE（不参与测量＝回到 0×0）。靠宿主页不透明背景盖住它。
+
+    private android.app.Activity mHost;
+
+    /** 把引擎挂到该 Activity 的内容层底下（获得真实尺寸，用户看不见、点不到） */
+    public static void attachTo(android.app.Activity a) {
+        final ChatEngine e = sInstance;
+        if (e == null || a == null || a.isFinishing() || e.mWebView == null) return;
+        final android.view.ViewGroup content =
+                (android.view.ViewGroup) a.findViewById(android.R.id.content);
+        if (content == null) return;
+        if (e.mHost == a && e.mWebView.getParent() == content) return;
+        e.detachFromView();
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT);
+        content.addView(e.mWebView, 0, lp); // index 0 → 被页面根布局盖住
+        e.mHost = a;
+        AppLog.i("engine", "引擎已挂载获得真视口");
+    }
+
+    /** 页面 onPause/onDestroy 时调用：只在当前宿主就是它时才摘（防回前台时抢动） */
+    public static void detachFrom(android.app.Activity a) {
+        final ChatEngine e = sInstance;
+        if (e == null || a == null || e.mHost != a) return;
+        e.detachFromView();
+        e.mHost = null;
+    }
+
+    private void detachFromView() {
+        if (mWebView != null && mWebView.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) mWebView.getParent()).removeView(mWebView);
+        }
+    }
+
+    /** 引擎当前页面 URL（主线程读，供归位判断） */
+    public String currentUrl() {
+        return mWebView == null ? "" : mWebView.getUrl();
+    }
+
     /** 一次性动作：未就绪先暂存，就绪后补发（只补一次，跨页自续由桥负责） */
     private void runAction(String js) {
         mPendingJs = js;
@@ -310,6 +355,8 @@ public class ChatEngine {
     public void destroy() {
         mReady = false;
         mListener = null;
+        detachFromView();
+        mHost = null;
         synchronized (ChatEngine.class) {
             sInstance = null;
         }
