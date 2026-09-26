@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">腕上音符</string>
+    <string name="hello_m0">M0 骨架已就绪</string>
+    <!-- DKVideoPlayer demo 引用的字符串（原在 sample 的 strings.xml） -->
+    <string name="dkplayer_error_message">播放出错，请稍后重试</string>
+</resources>

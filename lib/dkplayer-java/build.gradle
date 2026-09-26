@@ -1,0 +1,22 @@
+// DKVideoPlayer core（源码内嵌，Apache-2.0，作者 Doikki）
+// 原仓库 build.gradle 基于 constants.gradle/publish.gradle，此处为 AGP 8.7 适配重写
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'xyz.doikki.videoplayer'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 21
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // 版本经阿里云 google 镜像实测 200（2026-09-25）
+    compileOnly 'androidx.annotation:annotation:1.8.2'
+}

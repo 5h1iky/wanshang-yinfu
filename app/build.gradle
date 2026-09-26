@@ -1,0 +1,84 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 发布签名：读本地 keystore.properties（不入库，.gitignore 已挡；缺失时 release 退化为未签名）
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+def hasKeystore = keystorePropsFile.exists()
+if (hasKeystore) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
+// dywatch 手表端客户端 · 应用名「腕上音符」（用户命名，2026-09-25）
+// 依赖纪律（决策 #12）：新增依赖先实测镜像存在再写版本
+// 以下版本均取自 SAChat UPGRADE_PLAN §7.3 实测清单（阿里云镜像可达）
+android {
+    namespace 'com.dywatch.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.dywatch.app'
+        minSdk 21
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    signingConfigs {
+        release {
+            if (hasKeystore) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        // 联网冒烟测试（FeedFetchTest）按需开启：gradlew test -Dnetwork.test=true
+        unitTests.all {
+            systemProperty 'network.test', System.getProperty('network.test', 'false')
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'com.google.android.material:material:1.12.0'
+
+    // DKVideoPlayer（源码内嵌，Apache-2.0）：M2 刷视频页
+    implementation project(':dkplayer-java')
+    implementation project(':dkplayer-ui')
+    implementation project(':dkplayer-videocache')
+
+    // 图片加载（封面图）：Glide 4.16.0（版本实测存在；⚠️ group 是 com.github.bumptech.glide——
+    // SAChat 清单误写 com.bumptech.glide，实测 404，勿再抄错）
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
+
+    // a_bogus 签名：App 内嵌 Rhino 跑 ylcangel/douyin_sign 的 JS（Apache-2.0）
+    // 坐标与版本实测阿里云 central 200（2026-09-25）
+    implementation 'org.mozilla:rhino:1.7.15'
+    // HTTP 客户端（Feed/IM 数据层）
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // JSON 解析（纯 Java 可单测；坐标实测 200）
+    implementation 'com.google.code.gson:gson:2.11.0'
+
+    testImplementation 'junit:junit:4.13.2'
+}

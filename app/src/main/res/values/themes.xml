@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 手表风格：深色底、无 ActionBar；圆屏/表冠适配 M2/M3 再细化 -->
+    <style name="Theme.Dywatch" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">#101418</item>
+    </style>
+</resources>

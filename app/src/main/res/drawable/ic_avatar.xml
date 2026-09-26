@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 作者头像占位（圆形 + 人形，自绘；真实头像后续接 Glide） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp" android:height="44dp"
+    android:viewportWidth="44" android:viewportHeight="44">
+    <path android:fillColor="#FF3A4A5A"
+        android:pathData="M22,22m-22,0a22,22 0,1 1,44 0a22,22 0,1 1,-44 0"/>
+    <path android:fillColor="#FFB0BEC5"
+        android:pathData="M22,22c3.3,0 6,-2.7 6,-6s-2.7,-6 -6,-6 -6,2.7 -6,6 2.7,6 6,6zM22,25c-4,0 -12,2 -12,6v3h24v-3c0,-4 -8,-6 -12,-6z"/>
+</vector>

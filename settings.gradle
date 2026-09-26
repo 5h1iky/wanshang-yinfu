@@ -1,0 +1,37 @@
+pluginManagement {
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        // 备用镜像（腾讯 nexus 本机不可达，已移除，勿加回）
+        maven { url 'https://repo.huaweicloud.com/repository/maven/' }
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        // 备用镜像（腾讯 nexus 本机不可达，已移除，勿加回）
+        maven { url 'https://repo.huaweicloud.com/repository/maven/' }
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "dywatch"
+include ':app'
+
+// DKVideoPlayer（Apache-2.0，源码内嵌三模块，避开 jitpack；AGP 8.7 适配构建脚本在各 lib/ 目录）
+include ':dkplayer-java'
+project(':dkplayer-java').projectDir = file('lib/dkplayer-java')
+include ':dkplayer-ui'
+project(':dkplayer-ui').projectDir = file('lib/dkplayer-ui')
+include ':dkplayer-videocache'
+project(':dkplayer-videocache').projectDir = file('lib/dkplayer-videocache')

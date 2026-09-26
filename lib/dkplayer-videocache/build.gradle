@@ -1,0 +1,16 @@
+// AndroidVideoCache 分支（DKVideoPlayer 自带，源码内嵌，Apache-2.0）——视频预加载用
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.danikula.videocache'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 21
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

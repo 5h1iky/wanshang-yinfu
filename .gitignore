@@ -1,0 +1,39 @@
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+captures/
+.DS_Store
+keystore.properties
+keystore/
+
+# 构建产物与日志（工程根目录的 40 个 build-*.log 与两个 APK 不入库）
+build-*.log
+*.apk
+
+# 调试现场的敏感/二进制残留（明文 cookie、抓包 body、挑战页）
+tools/dy-cookie.txt
+tools/dy-web-params.json
+tools/webview-cookies.json
+tools/*.bin
+tools/challenge-page.html
+tools/session-monitor.log
+tools/m05-feed-result.json
+tools/dy-app-session.xml
+tools/*.xml
+tools/node_modules/
+tools/ui-*.xml
+
+# 真机截图（体积大，本地留档）
+shots/
+
+# Node 移植件的产物目录
+**/node_modules/
+
+# 第三方参考克隆（各自带 .git，可随时重下；dy-spider/dyapi 无 LICENSE，不进我们将发布的仓库）
+/tools/chatkit-src/
+/tools/dkvideo-src/
+/tools/dy-spider-src/
+/tools/dyapi-src/
+/tools/sign-src/
