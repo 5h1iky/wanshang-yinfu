@@ -28,6 +28,20 @@ tools/ui-*.xml
 # 真机截图（体积大，本地留档）
 shots/
 
+# 探针产物与会话派生落盘（含签名播放地址 / RENDER_DATA / 整页 HTML，不入库也不该入库）
+tools/detail-raw.json
+tools/dom-signed-urls.json
+tools/first-batch.json
+tools/rec-page.html
+tools/tabfeed-url.txt
+tools/jxids.txt
+tools/tf.txt
+tools/_new_comments_block.js
+tools/*.log
+probe-*.log
+test-*.log
+feedcap-*.log
+
 # Node 移植件的产物目录
 **/node_modules/
 

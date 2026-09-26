@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  尺寸基准：186dpi（手表 320px 见方 → 可用约 275dp）。
+  所有页面都从这里取尺寸，圆屏差异靠 values-round 覆盖同名键，不在布局里写死。
+  触摸目标下限 42dp ≈ 49px@186dpi，手指粗也点得到。
+-->
+<resources>
+    <!-- 字号阶 -->
+    <dimen name="t_caption">11sp</dimen>
+    <dimen name="t_body">13sp</dimen>
+    <dimen name="t_lede">15sp</dimen>
+    <dimen name="t_title">17sp</dimen>
+    <dimen name="t_display">22sp</dimen>
+
+    <!-- 间距阶 -->
+    <dimen name="s1">2dp</dimen>
+    <dimen name="s2">4dp</dimen>
+    <dimen name="s3">8dp</dimen>
+    <dimen name="s4">12dp</dimen>
+    <dimen name="s5">16dp</dimen>
+    <dimen name="s6">20dp</dimen>
+
+    <!-- 控件高度阶 -->
+    <dimen name="ctrl_min">42dp</dimen>
+    <dimen name="ctrl_md">48dp</dimen>
+    <dimen name="ctrl_lg">54dp</dimen>
+    <dimen name="bar_h">40dp</dimen>
+
+    <!-- 圆角 -->
+    <dimen name="r_card">10dp</dimen>
+    <dimen name="r_control">14dp</dimen>
+
+    <!-- 页面安全区：方屏几乎不用内缩。
+         同时给出方/圆两套显式值，好让设置里"手动指定屏形"能生效——
+         values-round 只跟随系统判定，用户强制圆屏时拿不到它。 -->
+    <dimen name="page_h_inset_square">0dp</dimen>
+    <dimen name="page_h_inset_round">16dp</dimen>
+    <dimen name="bar_lead_inset_square">0dp</dimen>
+    <dimen name="bar_lead_inset_round">10dp</dimen>
+
+    <dimen name="page_h_inset">@dimen/page_h_inset_square</dimen>
+    <dimen name="page_v_inset">6dp</dimen>
+    <!-- 顶栏返回键的左侧额外缩进 -->
+    <dimen name="bar_lead_inset">@dimen/bar_lead_inset_square</dimen>
+</resources>

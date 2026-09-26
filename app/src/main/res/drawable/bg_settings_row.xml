@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设置行：圆角卡片 + 按下反馈。手表屏上"能不能点"必须一眼看出来，所以按下态要够明显。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/bg_control" />
+            <corners android:radius="@dimen/r_card" />
+            <stroke android:width="1dp" android:color="@color/accent_dim" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/bg_card" />
+            <corners android:radius="@dimen/r_card" />
+            <stroke android:width="1dp" android:color="@color/bg_control" />
+        </shape>
+    </item>
+</selector>

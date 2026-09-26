@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 全局色板。此前色值散落在 xml 与 Java（0xFF1A222C、#101418…）里，改一处要翻八个文件。 -->
+<resources>
+    <color name="bg_base">#0E141B</color>        <!-- 页面底 -->
+    <color name="bg_surface">#161C22</color>     <!-- 顶栏/底栏 -->
+    <color name="bg_card">#1A222C</color>        <!-- 列表行/卡片 -->
+    <color name="bg_control">#243040</color>     <!-- 按钮/输入框 -->
+    <color name="bg_control_dim">#18202A</color> <!-- 次要按钮 -->
+    <color name="scrim">#B0000000</color>        <!-- 状态条 -->
+
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#9AA7B4</color>
+    <color name="text_muted">#6B7684</color>
+    <color name="text_faint">#4A5560</color>
+    <color name="accent">#7CC4FF</color>
+    <color name="accent_dim">#3A4A5C</color>
+    <color name="danger">#FF8A8A</color>
+    <color name="ok">#7BE0A0</color>
+</resources>
