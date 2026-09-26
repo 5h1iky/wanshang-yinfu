@@ -53,3 +53,7 @@ feedcap-*.log
 /tools/sign-src/
 
 /tools/bili-src/
+
+# 会话 cookie 导出（含敏感值，仅供本地对照实验）
+tools/_session_cookie.txt
+tools/_session.xml

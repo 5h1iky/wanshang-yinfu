@@ -76,7 +76,16 @@ public final class DouyinApi {
         }
     }
 
-    /** 拉推荐视频流（无需登录）。每次调用自动递增 refresh_index 翻页 */
+    /**
+     * 拉推荐视频流（带登录态拉本人推荐）。每次调用自动递增 refresh_index 翻页。
+     *
+     * ⚠️ 必须用 fullCookie()（匿名 cookie + 登录态合并）。这里原本用 cookieHeader()，
+     *    而 cookieHeader() 只遍历 cookies——那个 map 只有 ensureTtwid() 塞进去的 ttwid，
+     *    登录态存在 mSessionCookie 里根本没发出去（fullCookie 全工程零调用者）。
+     *    后果：服务端把我们当匿名设备，返回影视/剧情这类冷启动泛池，
+     *    而不是本人画像的推荐（用户目击：App 里刷到的和浏览器里刷到的完全不一样）。
+     *    日志里的"登录态=true"只是判断本机有没有存会话，跟请求带没带是两回事。
+     */
     public List<FeedVideo> fetchFeed(int count) throws IOException {
         ensureTtwid();
         mRefreshIndex++;
@@ -85,7 +94,7 @@ public final class DouyinApi {
                 .url("https://www.douyin.com/aweme/v1/web/tab/feed/?" + query)
                 .header("User-Agent", UA)
                 .header("Referer", "https://www.douyin.com/")
-                .header("Cookie", cookieHeader())
+                .header("Cookie", fullCookie())
                 .build();
         try (Response resp = client.newCall(req).execute()) {
             if (resp.body() == null) throw new IOException("空响应");
