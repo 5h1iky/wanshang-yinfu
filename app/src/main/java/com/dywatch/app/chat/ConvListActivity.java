@@ -95,18 +95,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         setPageTitle("会话 " + list.size());
         mHint.setVisibility(View.GONE);
         for (final Conversation c : list) {
-            TextView row = new TextView(this);
-            String time = c.timeText.isEmpty() ? "" : ("　·　" + c.timeText);
-            String last = c.lastMsg.isEmpty() ? "" : ("\n" + c.lastMsg);
-            row.setText(c.name + time + last);
-            row.setTextSize(15);
-            row.setTextColor(Color.WHITE);
-            row.setPadding(24, 20, 24, 20);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, 0, 0, 12);
-            row.setLayoutParams(lp);
-            row.setBackgroundResource(R.drawable.bg_pill);
+            // 昵称 / 时间 / 最近消息 三级分层（旧版三段同字号同颜色塞一个 TextView，读不出层级）
+            View row = com.dywatch.app.ui.Rows.card(this, c.name, c.timeText, c.lastMsg);
             row.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {

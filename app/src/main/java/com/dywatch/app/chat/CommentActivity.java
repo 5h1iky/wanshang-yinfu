@@ -187,10 +187,11 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     private TextView footer() {
         TextView tv = new TextView(this);
         tv.setText(mAtEnd ? "已经到底了" : (mLoadingMore ? "正在加载更多…" : "继续下滑加载更多"));
-        tv.setTextSize(12);
-        tv.setTextColor(0xFF6B7684);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.t_caption));
+        tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_muted));
         tv.setGravity(android.view.Gravity.CENTER);
-        tv.setPadding(16, 12, 16, 12);
+        tv.setPadding(dp(12), dp(10), dp(12), dp(10));
         return tv;
     }
 
@@ -218,59 +219,14 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         return Math.round(getResources().getDisplayMetrics().density * v);
     }
 
-    /** 从 dimens 取 sp 尺寸，字号只有 token 一个来源（写死一处到别的屏就失控） */
-    private float size(int dimenRes) {
-        return getResources().getDimension(dimenRes);
-    }
-
     /**
-     * 一条评论：昵称 / 时间+赞数 / 正文 三级要能一眼分开。
-     * 旧版四级信息同字号同颜色，读起来是一坨——这是"UI 基本为零"最典型的样本。
+     * 一条评论：昵称 / 时间+赞数 / 正文 三级分层，画法与会话列表共用 Rows。
+     * 实测偶发昵称抓空（桥只取 info-wrap 的 textContent），空着会让整行看起来像坏了，给个兜底。
      */
     private View row(Comment c) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.bg_settings_row);
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(6);
-        card.setLayoutParams(lp);
-
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        card.addView(head);
-
-        TextView name = new TextView(this);
-        // 实测偶发昵称抓空（桥只取 info-wrap 的 textContent），空着会让整行看起来像坏了
-        name.setText(c.name.isEmpty() ? "匿名" : c.name);
-        name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size(R.dimen.t_body));
-        name.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_primary));
-        name.setSingleLine(true);
-        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        name.setLayoutParams(nlp);
-        head.addView(name);
-
         String meta = c.time + (c.likes.isEmpty() ? "" : ("  ·  " + c.likes + " 赞"));
-        TextView metaTv = new TextView(this);
-        metaTv.setText(meta);
-        metaTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size(R.dimen.t_caption));
-        metaTv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_muted));
-        head.addView(metaTv);
-
-        TextView body = new TextView(this);
-        body.setText(c.text);
-        body.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size(R.dimen.t_body));
-        body.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_secondary));
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        blp.topMargin = dp(4);
-        body.setLayoutParams(blp);
-        card.addView(body);
-
-        return card;
+        return com.dywatch.app.ui.Rows.card(this,
+                c.name.isEmpty() ? "匿名" : c.name, meta, c.text);
     }
 
     /** 翻页：让引擎把评论区滚一页，新渲染出来的那批经 onCommentsMore 追加回来 */
