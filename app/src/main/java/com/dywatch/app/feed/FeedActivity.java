@@ -18,9 +18,6 @@ import com.dywatch.app.cache.PreloadManager;
 import com.dywatch.app.util.AppLog;
 import com.dywatch.app.widget.VerticalViewPager;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -360,24 +357,17 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         }
     }
 
-    /** 加载固件数据（真实接口数据的快照；数据层接通后替换为网络源） */
+    /**
+     * 真冷启动的垫场数据（M2 时代的接口快照）。
+     *
+     * ⚠️ 2026-09-27 复盘：固件里的签名播放 URL 几小时就过期（代码注释自己写着"必死链"），
+     * 而真冷启动如今已极少走到这里——首屏失败会 showHint"网络加载失败"并自动重试，
+     * 垫几条黑屏死链反而是负体验。所以改成**空列表 + 提示**，不再读死链固件。
+     * （固件文件保留在 assets 里，等哪天要做"离线演示模式"再启用。）
+     */
     private void loadFixture() {
-        try {
-            InputStream is = getAssets().open("feed_fixture.json");
-            String json = readAll(is);
-            JSONArray arr = new JSONArray(json);
-            java.util.List<FeedVideo> fixture = new java.util.ArrayList<>();
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject o = arr.getJSONObject(i);
-                fixture.add(new FeedVideo(
-                        o.optString("title"),
-                        o.optString("playUrl"),
-                        o.optString("coverUrl")));
-            }
-            applyNewItems(fixture, false);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        applyNewItems(new java.util.ArrayList<FeedVideo>(), false);
+        showHint("正在连接网络，首次加载需要几秒…");
     }
 
     /**
