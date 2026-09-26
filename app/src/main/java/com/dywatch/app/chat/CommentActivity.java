@@ -250,7 +250,9 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
     /** Comment -> 行数据（昵称兜底"匿名"照旧：桥偶尔抓空昵称，空着整行像坏了） */
     private RowAdapter.Item toItem(Comment c) {
-        String meta = c.time + (c.likes.isEmpty() ? "" : ("  ·  " + c.likes + " 赞"));
+        // 0 赞不显示：满屏"· 0 赞"是噪音，手表上每个字符都要有信息量
+        boolean hasLikes = !c.likes.isEmpty() && !"0".equals(c.likes.trim());
+        String meta = c.time + (hasLikes ? ("  ·  " + c.likes + " 赞") : "");
         return new RowAdapter.Item(c.name.isEmpty() ? "匿名" : c.name, meta, c.text, c);
     }
 

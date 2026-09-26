@@ -179,9 +179,57 @@ public class MineActivity extends UiActivity {
     /** 点条目 → 进播放页（把整批传过去，可以上下滑着看） */
     private void openAt(int index) {
         if (index < 0 || index >= mVideos.size()) return;
-        // 看过的记录没有播放地址，直接播不了——提示而不是给个黑屏
+        // 看过的记录只存了 id/标题/封面（没有播放地址）→ 先按 aweme/detail 换址再播。
+        // 一次换一批（并发会显得像攻击，串行几秒用户可接受），换好的列表才进播放页。
         if (mTab == TAB_HISTORY) {
-            hint("看过记录需要重新取播放地址，暂不支持直接播放");
+            final FeedVideo stub = mVideos.get(index);
+            hint("正在取回播放地址…");
+            Loading.show(this, true);
+            final java.util.List<FeedVideo> resolved = new ArrayList<>();
+            final java.util.List<FeedVideo> queue = new ArrayList<>(mVideos);
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        DouyinApi api = ensureApi();
+                        for (FeedVideo v : queue) {
+                            if (isFinishing()) return;
+                            try {
+                                FeedVideo full = api.fetchDetail(v.awemeId);
+                                resolved.add(full != null ? full : v);
+                            } catch (Exception e) {
+                                // 单条换址失败只影响它自己（留 stub，播放页会报错而不是黑屏）
+                                AppLog.i("mine", "换址失败 " + v.awemeId + ": " + e.getMessage());
+                                resolved.add(v);
+                            }
+                        }
+                        final int targetIndex = queue.indexOf(stub);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Loading.show(MineActivity.this, false);
+                                clearHint();
+                                android.content.Intent it = new android.content.Intent(MineActivity.this,
+                                        com.dywatch.app.feed.FeedActivity.class);
+                                it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_LIST,
+                                        new ArrayList<>(resolved));
+                                it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_START_INDEX,
+                                        Math.max(0, targetIndex));
+                                startActivity(it);
+                            }
+                        });
+                    } catch (final Exception e) {
+                        AppLog.i("mine", "看过换址失败: " + e);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Loading.show(MineActivity.this, false);
+                                hint("取播放地址失败: " + e.getMessage());
+                            }
+                        });
+                    }
+                }
+            }, "mine-resolve").start();
             return;
         }
         android.content.Intent it = new android.content.Intent(this,

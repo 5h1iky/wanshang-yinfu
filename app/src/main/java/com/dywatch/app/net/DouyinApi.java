@@ -201,6 +201,19 @@ public final class DouyinApi {
             if (resp.body() == null) throw new IOException("空响应");
             String body = resp.body().string();
             List<FeedVideo> list = parseFeed(body);
+            // 翻页游标（下一批从这继续；-1 = 没有更多）。响应里有 has_more/max_cursor，
+            // 不记的话调用方只能反复拉第一页
+            com.google.gson.JsonElement rootEl = com.google.gson.JsonParser.parseString(body);
+            if (rootEl.isJsonObject()) {
+                com.google.gson.JsonObject root = rootEl.getAsJsonObject();
+                boolean hasMore = optInt(root, "has_more") == 1;
+                long next = optLong(root, "max_cursor");
+                lastPostsHasMore = hasMore;
+                lastPostsCursor = hasMore ? next : -1;
+            } else {
+                lastPostsHasMore = false;
+                lastPostsCursor = -1;
+            }
             if (list.isEmpty()) {
                 com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(body);
                 int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
@@ -209,6 +222,10 @@ public final class DouyinApi {
             return list;
         }
     }
+
+    /** fetchUserPosts 的翻页游标/是否还有更多（public 字段，与 lastCommentHasMore 同一口径） */
+    public volatile boolean lastPostsHasMore;
+    public volatile long lastPostsCursor = -1;
 
     /** 构造 aweme/post query；纯函数（除签名外无副作用） */
     String buildUserPostsQuery(String secUid, long cursor) {
@@ -225,6 +242,38 @@ public final class DouyinApi {
         p.put("publish_video_strategy_type", "2");
         p.put("from_user_page", "1");          // 看别人的主页
         return joinAndSign(p);
+    }
+
+    /**
+     * 按 aweme_id 换取可播地址（只读，直连）。
+     *
+     * 用途：「我的」页看过记录只存了 id/标题/封面，没有播放地址——点进去要靠它换址。
+     * ⚠️ 响应结构与 feed 不同：条目在 `aweme_detail`（不是 aweme_list）。
+     *    2026-09-27 实测 tools/probe-aweme-detail.js：status_code=0，可解出 play_url。
+     */
+    public FeedVideo fetchDetail(String awemeId) throws IOException {
+        ensureTtwid();
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("aweme_id", awemeId == null ? "" : awemeId);
+        Request req = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/detail/?"
+                        + joinAndSign(p))
+                .header("User-Agent", UA)
+                .header("Referer", "https://www.douyin.com/")
+                .header("Cookie", fullCookie())
+                .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("空响应");
+            String body = resp.body().string();
+            com.google.gson.JsonElement rootEl = com.google.gson.JsonParser.parseString(body);
+            if (!rootEl.isJsonObject()) throw new IOException("detail 非 JSON");
+            com.google.gson.JsonObject root = rootEl.getAsJsonObject();
+            int code = optInt(root, "status_code");
+            if (code != 0) throw new IOException("detail status=" + code);
+            com.google.gson.JsonObject item = objOf(root, "aweme_detail");
+            if (item == null) throw new IOException("detail 无 aweme_detail");
+            return itemToVideo(item);
+        }
     }
 
     /** 作者信息（昵称/粉丝数/作品数等），给主页头部用 */

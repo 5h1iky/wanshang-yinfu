@@ -34,6 +34,10 @@ public class UserActivity extends UiActivity {
     private TextView mHint, mName, mStats;
     private DouyinApi mApi;
     private String mSecUid;
+    /** 翻页状态（滚到底自动续拉） */
+    private boolean mPostsHasMore;
+    private boolean mLoadingPosts;
+    private long mPostsCursor;
     /** 当前作品列表（点条目进播放页要用） */
     private final List<FeedVideo> mVideos = new ArrayList<>();
 
@@ -55,6 +59,7 @@ public class UserActivity extends UiActivity {
             }
         });
         mList.setAdapter(mAdapter);
+        wireAutoLoadMore();
 
         mHint = findViewById(R.id.tv_user_hint);
         mName = findViewById(R.id.tv_user_name);
@@ -93,6 +98,8 @@ public class UserActivity extends UiActivity {
                         AppLog.i("user", "作者信息失败（不影响作品列表）: " + e);
                     }
                     final DouyinApi.UserInfo finfo = info;
+                    final boolean more = api.lastPostsHasMore;
+                    final long next = api.lastPostsCursor;
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -107,6 +114,9 @@ public class UserActivity extends UiActivity {
                                 setPageTitle(finfo.nickname.isEmpty() ? "主页" : finfo.nickname);
                             }
                             show(posts);
+                            // 首页就有更多 → 先把游标记下，滚到底由自动续拉接手
+                            mPostsCursor = next;
+                            mPostsHasMore = more && next >= 0;
                         }
                     });
                 } catch (final Exception e) {
@@ -122,6 +132,78 @@ public class UserActivity extends UiActivity {
                 }
             }
         }, "user-load").start();
+    }
+
+    /**
+     * 自动续拉（滚到底触发）：作者主页作品常超过一屏，只拉首页的话
+     * 用户会以为"这人就没几个视频"。
+     */
+    private void loadMorePosts() {
+        if (mLoadingPosts || !mPostsHasMore || mSecUid.isEmpty()) return;
+        mLoadingPosts = true;
+        hint("正在加载更多作品…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final DouyinApi api = ensureApi();
+                    final List<FeedVideo> posts = api.fetchUserPosts(mSecUid, mPostsCursor);
+                    final boolean more = api.lastPostsHasMore;
+                    final long next = api.lastPostsCursor;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            mLoadingPosts = false;
+                            mPostsCursor = next;
+                            mPostsHasMore = more && next >= 0;
+                            // 追加渲染（不清空，保住已看位置）
+                            for (FeedVideo v : posts) {
+                                if (!mVideos.contains(v)) mVideos.add(v);
+                            }
+                            List<RowAdapter.Item> items = new ArrayList<>();
+                            for (int i = 0; i < mVideos.size(); i++) {
+                                FeedVideo v = mVideos.get(i);
+                                String meta = v.diggCount > 0 ? (FeedVideo.formatCount(v.diggCount) + " 赞") : "";
+                                items.add(new RowAdapter.Item(
+                                        v.title.isEmpty() ? "(无标题)" : v.title, meta, "", i));
+                            }
+                            mAdapter.submitList(items);
+                            // 成功也落日志：分不清"到底了"还是"续拉没触发"时这就是唯一线索
+                            AppLog.i("user", "作品续拉 +" + posts.size() + " 条，累计 "
+                                    + mVideos.size() + "，还有更多=" + mPostsHasMore);
+                            if (mPostsHasMore) clearHint();
+                            else hint("已经到底了");
+                        }
+                    });
+                } catch (final Exception e) {
+                    AppLog.i("user", "作品续拉失败: " + e);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            mLoadingPosts = false;
+                            hint("加载更多失败: " + e.getMessage());
+                        }
+                    });
+                }
+            }
+        }, "user-more").start();
+    }
+
+    /** 滚动近底 → 自动续拉（与评论页同一套口径） */
+    private void wireAutoLoadMore() {
+        mList.addOnScrollListener(new androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@androidx.annotation.NonNull androidx.recyclerview.widget.RecyclerView rv,
+                                   int dx, int dy) {
+                if (mLoadingPosts || !mPostsHasMore) return;
+                androidx.recyclerview.widget.LinearLayoutManager lm =
+                        (androidx.recyclerview.widget.LinearLayoutManager) mList.getLayoutManager();
+                if (lm == null || mList.getAdapter() == null) return;
+                int last = lm.findLastVisibleItemPosition();
+                int count = mList.getAdapter().getItemCount();
+                if (count > 0 && last >= count - 3) loadMorePosts();
+            }
+        });
     }
 
     private void show(List<FeedVideo> list) {

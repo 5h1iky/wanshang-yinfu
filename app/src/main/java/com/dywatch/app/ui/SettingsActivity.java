@@ -153,6 +153,14 @@ public class SettingsActivity extends UiActivity {
                 toast("已清除看过记录");
             }
         });
+        // 两个账本职责不同（SeenStore=去重、HistoryStore=给人看），清除入口也得各给一个；
+        // 只有"清看过"的话，用户想删浏览隐私就无从下手，而误清去重账本又会集体回炉
+        actionRow("清除浏览记录", "清掉「我的」页那份看过列表（不影响推荐去重）", new Runnable() {
+            @Override public void run() {
+                com.dywatch.app.feed.HistoryStore.clear(SettingsActivity.this);
+                toast("已清除浏览记录");
+            }
+        });
         actionRow("诊断日志", "WebView 版本 / 上次崩溃 / 最近运行记录", new Runnable() {
             @Override public void run() {
                 new AlertDialog.Builder(SettingsActivity.this)

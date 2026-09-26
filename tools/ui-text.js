@@ -1,5 +1,12 @@
+// dump 里所有可见文本 + 关键 id（验证 UI 的首选，绕开截图）
+// ⚠️ 2026-09-27 修：adb pull 出来的 dump 可能是 UTF-16（BOM 判断），
+//    原来固定 utf8 读中文会变成乱码（GBK 控制台 + UTF-16 文件双重坑），
+//    导致"明明界面有这行、ui-text 却看不到"的假阴性。
 const fs = require('fs');
-const src = fs.readFileSync('D:/dev/dywatch/shots/uid.xml', 'utf8');
+const buf = fs.readFileSync('D:/dev/dywatch/shots/uid.xml');
+const src = (buf[0] === 0xFF && buf[1] === 0xFE)
+  ? buf.toString('utf16le')
+  : buf.toString('utf8');
 const texts = [];
 const re = /text="([^"]*)"/g;
 let m;

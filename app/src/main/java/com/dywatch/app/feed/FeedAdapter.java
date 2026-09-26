@@ -118,7 +118,9 @@ public class FeedAdapter extends PagerAdapter {
                         .into(viewHolder.mIvAvatar);
             }
         }
-        viewHolder.mTitle.setText(item.title);
+        // 标题带作者名（抖音本体口径）：@昵称 + 标题。作者名缺失时退回纯标题。
+        viewHolder.mTitle.setText(item.authorName == null || item.authorName.isEmpty()
+                ? item.title : "@" + item.authorName + "  " + item.title);
         viewHolder.mPosition = pos;
         viewHolder.mItem = item;
         bindActions(viewHolder, item);
