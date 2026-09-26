@@ -60,3 +60,5 @@ tools/_session.xml
 
 # 提交信息临时文件（写完就删，别进库）
 commit-*.txt
+# 临时提交信息文件
+.git-commit-msg.txt
