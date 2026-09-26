@@ -12,7 +12,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
+import com.dywatch.app.ui.UiActivity;
 
 import com.dywatch.app.R;
 import com.dywatch.app.chat.model.ChatMessage;
@@ -22,16 +22,24 @@ import com.dywatch.app.util.AppLog;
 
 import java.util.List;
 
-public class CommentActivity extends AppCompatActivity implements ChatEngine.Listener {
+public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
     public static final String EXTRA_AWEME_ID = "aweme_id";
 
     private LinearLayout mList;
+    private android.widget.ScrollView mScroll;
     private TextView mHint;
     private EditText mInput;
+    private android.widget.Button mMoreBtn;
     private ChatEngine mEngine;
     private String mAwemeId;
     private int mEmptyRetries;
+    /** 已收到的评论累积表（桥每次只回"新增的一批"，追加式渲染才拼得完整） */
+    private final List<Comment> mAll = new java.util.ArrayList<>();
+    private boolean mLoadingMore;
+    private boolean mAtEnd;
+    /** 手表内存有限，评论攒到 300 条就停，别无限往下拉 */
+    private static final int MAX_COMMENTS = 300;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,8 +47,16 @@ public class CommentActivity extends AppCompatActivity implements ChatEngine.Lis
         setContentView(R.layout.activity_comment);
 
         mList = findViewById(R.id.ll_comments);
+        mScroll = findViewById(R.id.sv_comments);
         mHint = findViewById(R.id.tv_comment_hint);
         mInput = findViewById(R.id.et_comment);
+        // 滚到接近底部就自动续拉，不用用户去点按钮
+        mScroll.setOnScrollChangeListener(new android.widget.ScrollView.OnScrollChangeListener() {
+            @Override
+            public void onScrollChange(android.view.View v, int x, int y, int ox, int oy) {
+                if (com.dywatch.app.ui.Settings.commentAutoLoad(CommentActivity.this)) maybeAutoLoadMore();
+            }
+        });
         mAwemeId = getIntent().getStringExtra(EXTRA_AWEME_ID);
 
         findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
@@ -78,6 +94,15 @@ public class CommentActivity extends AppCompatActivity implements ChatEngine.Lis
             }
         });
 
+        mMoreBtn = findViewById(R.id.btn_comments_more);
+        mMoreBtn.setVisibility(View.GONE);
+        mMoreBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                loadMore();
+            }
+        });
+
         // 键盘"发送/完成"键直接提交（手表键盘点按不便，IME 动作键是主通道）
         mInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -101,41 +126,148 @@ public class CommentActivity extends AppCompatActivity implements ChatEngine.Lis
         mEngine.sendComment(mAwemeId, text);
     }
 
-    private void render(List<Comment> list) {
+    /** 全量重绘累积表：分页只动数据源，渲染口径保持单一（两处画列表必然行为漂移） */
+    private void render() {
         mList.removeAllViews();
-        if (list.isEmpty()) {
-            mHint.setText("正在等待评论数据…（自动重试）");
-            // 评论区懒加载：页面刚就绪时常为空 → 自动重试
-            if (mEmptyRetries < 6) {
+        for (Comment c : mAll) {
+            mList.addView(row(c));
+        }
+        if (mAll.isEmpty()) {
+            ((TextView) findViewById(R.id.tv_page_name)).setText("评论");
+            mHint.setVisibility(View.VISIBLE);
+            mHint.setText("正在等待评论数据…");
+            // 评论区要等 SPA 渲染，桥那边一有内容就会立刻回；这里只做兜底重试
+            if (!mAtEnd && mEmptyRetries < 4) {
                 mEmptyRetries++;
                 mList.postDelayed(new Runnable() {
                     @Override
                     public void run() {
                         if (mEngine != null && !isFinishing()) mEngine.fetchComments(mAwemeId);
                     }
-                }, 4000);
+                }, 3000);
             } else {
                 mHint.setText("暂无评论");
             }
-            return;
+        } else {
+            mEmptyRetries = 0;
+            // 页名兼当计数条：有内容就不占独立一行提示，把手表那点高度全留给评论
+            TextView name = findViewById(R.id.tv_page_name);
+            name.setText("评论 " + mAll.size());
+            mHint.setVisibility(View.GONE);
+            mList.addView(footer());
         }
-        mEmptyRetries = 0;
-        mHint.setText("共 " + list.size() + " 条评论");
-        for (Comment c : list) {
-            TextView tv = new TextView(this);
-            String head = c.name + (c.time.isEmpty() ? "" : (" · " + c.time))
-                    + (c.likes.isEmpty() ? "" : ("  ❤" + c.likes));
-            tv.setText(head + "\n" + c.text);
-            tv.setTextSize(13);
-            tv.setTextColor(Color.WHITE);
-            tv.setPadding(16, 14, 16, 14);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, 0, 0, 8);
-            tv.setLayoutParams(lp);
-            tv.setBackgroundColor(0xFF1A222C);
-            mList.addView(tv);
-        }
+        boolean auto = com.dywatch.app.ui.Settings.commentAutoLoad(this);
+        mMoreBtn.setVisibility((auto || mAll.isEmpty() || mAtEnd) ? View.GONE : View.VISIBLE);
+        mMoreBtn.setText(mLoadingMore ? "加载中…" : "加载更多评论");
+        mMoreBtn.setEnabled(!mLoadingMore);
+        if (auto) maybeAutoLoadMore();
+    }
+
+    private TextView footer() {
+        TextView tv = new TextView(this);
+        tv.setText(mAtEnd ? "已经到底了" : (mLoadingMore ? "正在加载更多…" : "继续下滑加载更多"));
+        tv.setTextSize(12);
+        tv.setTextColor(0xFF6B7684);
+        tv.setGravity(android.view.Gravity.CENTER);
+        tv.setPadding(16, 12, 16, 12);
+        return tv;
+    }
+
+    /**
+     * 无缝续拉：内容填不满屏幕时永远触发不了滚动事件，所以每次渲染完都要主动判一次，
+     * 否则"自动加载"会卡在首屏那几条上。
+     */
+    private void maybeAutoLoadMore() {
+        if (mLoadingMore || mAtEnd || mEngine == null) return;
+        if (mAll.size() >= MAX_COMMENTS) { mAtEnd = true; return; }
+        mScroll.post(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing() || mLoadingMore || mAtEnd) return;
+                View child = mScroll.getChildAt(0);
+                if (child == null) return;
+                boolean nearBottom = mScroll.getScrollY() + mScroll.getHeight()
+                        >= child.getHeight() - dp(64);
+                if (nearBottom) loadMore();
+            }
+        });
+    }
+
+    private int dp(float v) {
+        return Math.round(getResources().getDisplayMetrics().density * v);
+    }
+
+    /** 从 dimens 取 sp 尺寸，字号只有 token 一个来源（写死一处到别的屏就失控） */
+    private float size(int dimenRes) {
+        return getResources().getDimension(dimenRes);
+    }
+
+    /**
+     * 一条评论：昵称 / 时间+赞数 / 正文 三级要能一眼分开。
+     * 旧版四级信息同字号同颜色，读起来是一坨——这是"UI 基本为零"最典型的样本。
+     */
+    private View row(Comment c) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_settings_row);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(6);
+        card.setLayoutParams(lp);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        card.addView(head);
+
+        TextView name = new TextView(this);
+        // 实测偶发昵称抓空（桥只取 info-wrap 的 textContent），空着会让整行看起来像坏了
+        name.setText(c.name.isEmpty() ? "匿名" : c.name);
+        name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size(R.dimen.t_body));
+        name.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_primary));
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        name.setLayoutParams(nlp);
+        head.addView(name);
+
+        String meta = c.time + (c.likes.isEmpty() ? "" : ("  ·  " + c.likes + " 赞"));
+        TextView metaTv = new TextView(this);
+        metaTv.setText(meta);
+        metaTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size(R.dimen.t_caption));
+        metaTv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_muted));
+        head.addView(metaTv);
+
+        TextView body = new TextView(this);
+        body.setText(c.text);
+        body.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size(R.dimen.t_body));
+        body.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_secondary));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(4);
+        body.setLayoutParams(blp);
+        card.addView(body);
+
+        return card;
+    }
+
+    /** 翻页：让引擎把评论区滚一页，新渲染出来的那批经 onCommentsMore 追加回来 */
+    private void loadMore() {
+        if (mLoadingMore || mAtEnd || mEngine == null) return;
+        mLoadingMore = true;
+        render();
+        mEngine.loadMoreComments(mAwemeId);
+        // 兜底：桥那边若没回音（页面异常/到底），30s 后放开按钮，别把用户卡死
+        mList.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (mLoadingMore && !isFinishing()) {
+                    mLoadingMore = false;
+                    render();
+                }
+            }
+        }, 30000);
     }
 
     // ---- ChatEngine.Listener ----
@@ -154,7 +286,20 @@ public class CommentActivity extends AppCompatActivity implements ChatEngine.Lis
 
     @Override
     public void onComments(List<Comment> list) {
-        render(list);
+        mAll.clear();
+        mAll.addAll(list);
+        mAtEnd = false;
+        mLoadingMore = false;
+        render();
+    }
+
+    @Override
+    public void onCommentsMore(List<Comment> list, boolean atEnd) {
+        mLoadingMore = false;
+        mAll.addAll(list);
+        // 只认引擎报来的"滚动位置真到底"；这次没抓到新内容不等于没有更多了
+        mAtEnd = atEnd;
+        render();
     }
 
     @Override

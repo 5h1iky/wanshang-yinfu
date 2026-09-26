@@ -1,97 +1,90 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 视频评论页：列表 + 输入条（手表友好：可见返回键，方案 §10） -->
+<!--
+  视频评论页：收 = DOM 抓取，发 = 引擎注入。
+  版式参考 BiliClient 的单行页头：原先 40dp 顶栏 + 常驻提示行 + 42dp 输入 + 文字按钮，
+  光 chrome 就吃掉约 90dp；现在页头 22dp、提示行只在加载/空/失败时出现，省下的都换成评论内容。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#101418"
+    android:background="@color/bg_base"
     android:orientation="vertical">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#161C22"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-        <Button
-            android:id="@+id/btn_back"
-            android:layout_width="wrap_content"
-            android:layout_height="38dp"
-            android:background="?android:attr/selectableItemBackground"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:text="← 返回"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp" />
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="评论"
-            android:textColor="#8A97A5"
-            android:textSize="13sp" />
-        <View
-            android:layout_width="60dp"
-            android:layout_height="1dp" />
-    </LinearLayout>
+    <include layout="@layout/include_header" />
 
+    <!-- 四态反馈：加载/空/失败时才占位，正常有内容就收起来，不常驻吃高度 -->
     <TextView
         android:id="@+id/tv_comment_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#AA000000"
-        android:padding="6dp"
-        android:text="正在加载评论…"
-        android:textColor="#88CCFF"
-        android:textSize="12sp" />
+        android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
 
     <ScrollView
+        android:id="@+id/sv_comments"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingHorizontal="@dimen/page_h_inset"
+        android:scrollbars="none">
 
         <LinearLayout
             android:id="@+id/ll_comments"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="8dp" />
+            android:padding="@dimen/s3" />
     </ScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#161C22"
+        android:background="@color/bg_surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="6dp">
+        android:paddingHorizontal="@dimen/s3"
+        android:paddingVertical="@dimen/s2">
 
         <EditText
             android:id="@+id/et_comment"
             android:layout_width="0dp"
-            android:layout_height="42dp"
+            android:layout_height="@dimen/ctrl_min"
             android:layout_weight="1"
             android:background="@drawable/bg_pill"
             android:hint="说点什么…"
             android:imeOptions="actionSend"
             android:inputType="text"
-            android:paddingLeft="14dp"
-            android:paddingRight="14dp"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#5A6572"
-            android:textSize="13sp" />
+            android:paddingHorizontal="@dimen/s5"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="@dimen/t_body" />
 
-        <Button
+        <ImageButton
             android:id="@+id/btn_send_comment"
-            android:layout_width="wrap_content"
-            android:layout_height="42dp"
-            android:layout_marginLeft="8dp"
+            android:layout_width="@dimen/ctrl_min"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_marginStart="@dimen/s2"
             android:background="@drawable/bg_pill"
-            android:paddingLeft="16dp"
-            android:paddingRight="16dp"
-            android:text="发送"
-            android:textColor="#88CCFF"
-            android:textSize="13sp" />
+            android:contentDescription="发送评论"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_share" />
     </LinearLayout>
 
+    <!-- 关掉「评论自动续拉」时才露出的手动兜底 -->
+    <Button
+        android:id="@+id/btn_comments_more"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/ctrl_min"
+        android:layout_marginHorizontal="@dimen/s3"
+        android:layout_marginBottom="@dimen/s2"
+        android:background="@drawable/bg_settings_row"
+        android:text="加载更多评论"
+        android:textColor="@color/accent"
+        android:textSize="@dimen/t_body"
+        android:visibility="gone" />
 </LinearLayout>

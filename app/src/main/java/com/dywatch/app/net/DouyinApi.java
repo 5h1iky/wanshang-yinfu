@@ -20,13 +20,23 @@ import java.util.Map;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import okhttp3.Response;
 
 public final class DouyinApi {
 
     public static final String UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+
+    /**
+     * 拉流/播放必需的请求头。真机 34s ERROR 的根因就在这里：CDN 边缘对无 Referer 的请求一律 403。
+     * 实测头矩阵（tools/play-header-matrix.js，2026-09-26）：带 Referer 即可 206 video/mp4，Cookie 反而不需要。
+     */
+    public static Map<String, String> playHeaders() {
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("User-Agent", UA);
+        h.put("Referer", "https://www.douyin.com/");
+        return h;
+    }
 
     private final OkHttpClient client;
     private final Signer signer;
@@ -100,96 +110,6 @@ public final class DouyinApi {
     private String fullCookie() {
         String base = cookieHeader();
         return mSessionCookie.isEmpty() ? base : mSessionCookie + "; " + base;
-    }
-
-    /** 点赞/取消点赞（cv-cat digg() 实录形态：POST /commit/item/digg/，query 签名 body 不签） */
-    public String digg(String awemeId, boolean like) throws IOException {
-        return postForm("/aweme/v1/web/commit/item/digg/",
-                "https://www.douyin.com/discover?modal_id=" + awemeId,
-                "aweme_id=" + awemeId + "&item_type=0&type=" + (like ? "1" : "0"),
-                false);
-    }
-
-    /** 收藏/取消收藏（cv-cat collect_aweme() 实录形态：POST /aweme/collect/，无 dtrait） */
-    public String collect(String awemeId, boolean collect) throws IOException {
-        return postForm("/aweme/v1/web/aweme/collect/",
-                "https://www.douyin.com/?recommend=1",
-                "action=" + (collect ? "1" : "0") + "&aweme_id=" + awemeId + "&aweme_type=0",
-                false);
-    }
-
-    /** 写操作公共形态：query=平台参数+verifyFp/uifid/msToken+a_bogus(+uid)，body 表单 */
-    private String postForm(String api, String referer, String body, boolean withDtrait) throws IOException {
-        if (mSessionCookie.isEmpty()) throw new IOException("未登录（无会话 cookie）");
-        Map<String, String> p = new LinkedHashMap<>();
-        p.put("device_platform", "webapp");
-        p.put("aid", "6383");
-        p.put("channel", "channel_pc_web");
-        p.put("pc_client_type", "1");
-        p.put("update_version_code", "170400");
-        p.put("version_code", "170400");
-        p.put("version_name", "17.4.0");
-        p.put("cookie_enabled", "true");
-        p.put("screen_width", "1920");
-        p.put("screen_height", "1080");
-        p.put("browser_language", "zh-CN");
-        p.put("browser_platform", "Win32");
-        p.put("browser_name", "Chrome");
-        p.put("browser_version", "135.0.0.0");
-        p.put("browser_online", "true");
-        p.put("os_name", "Windows");
-        p.put("os_version", "10");
-        p.put("platform", "PC");
-        p.put("downlink", "10");
-        p.put("effective_type", "4g");
-        p.put("round_trip_time", "0");
-        String fp = cookieValue("s_v_web_id");
-        if (!fp.isEmpty()) {
-            p.put("verifyFp", fp);
-            p.put("fp", fp);
-        }
-        String uifid = cookieValue("UIFID");
-        if (!uifid.isEmpty()) p.put("uifid", uifid);
-        p.put("msToken", randomToken(107));
-        StringBuilder q = new StringBuilder();
-        for (Map.Entry<String, String> e : p.entrySet()) {
-            if (q.length() > 0) q.append('&');
-            q.append(e.getKey()).append('=').append(e.getValue());
-        }
-        String ab = signer.makeABogus(q.toString());
-        String url = "https://www.douyin.com" + api + "?" + q + "&a_bogus=" + urlEncode(ab);
-        String uid = cookieValue("sessionid_uid");
-        Request.Builder rb = new Request.Builder()
-                .url(url)
-                .header("User-Agent", UA)
-                .header("Referer", referer)
-                .header("Origin", "https://www.douyin.com")
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .header("Cookie", fullCookie())
-                .post(RequestBody.create(okhttp3.MediaType.parse("application/x-www-form-urlencoded"), body));
-        String csrf = cookieValue("passport_csrf_token");
-        if (!csrf.isEmpty()) rb.header("x-tt-passport-csrf-token", csrf);
-        try (Response resp = client.newCall(rb.build()).execute()) {
-            String text = resp.body() == null ? "" : resp.body().string();
-            return "HTTP " + resp.code() + " " + text.substring(0, Math.min(200, text.length()));
-        }
-    }
-
-    private String cookieValue(String name) {
-        String src = mSessionCookie.isEmpty() ? cookieHeader() : fullCookie();
-        for (String part : src.split(";")) {
-            int i = part.indexOf('=');
-            if (i > 0 && part.substring(0, i).trim().equals(name)) return part.substring(i + 1).trim();
-        }
-        return "";
-    }
-
-    private static String randomToken(int len) {
-        String abc = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnoprstwxyz0123456789";
-        StringBuilder sb = new StringBuilder();
-        java.util.Random r = new java.util.Random();
-        for (int i = 0; i < len; i++) sb.append(abc.charAt(r.nextInt(abc.length())));
-        return sb.toString();
     }
 
     /** 构造 feed query（含 a_bogus）；纯函数 */
@@ -274,7 +194,8 @@ public final class DouyinApi {
         String coverUrl = "";
         JsonObject video = item.getAsJsonObject("video");
         if (video != null) {
-            playUrl = firstUrl(video, "play_addr", awemeId);
+            playUrl = pickGearUrl(video, awemeId);
+            if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr", awemeId);
             if (playUrl.isEmpty()) playUrl = firstUrl(video, "play_addr_lowbr", awemeId);
             coverUrl = firstUrl(video, "cover", awemeId);
             if (coverUrl.isEmpty()) coverUrl = firstUrl(video, "origin_cover", awemeId);
@@ -395,9 +316,74 @@ public final class DouyinApi {
         return e == null || e.isJsonNull() ? 0 : e.getAsLong();
     }
 
+    private static int optInt(JsonObject o, String key) {
+        JsonElement e = o.get(key);
+        return e == null || e.isJsonNull() ? 0 : e.getAsInt();
+    }
+
     private static String firstUrl(JsonObject video, String key, String awemeId) {
         JsonObject addr = video.getAsJsonObject(key);
         if (addr == null) return "";
+        return urlFromAddr(addr, awemeId);
+    }
+
+    /**
+     * 画质偏好（设置页写入）：0=省流量(优先540p) 1=平衡(优先720p) 2=清晰(允许1080p)。
+     * 默认 0——手表屏只有 1.4 寸，高分辨率看不出差别，却实打实吃解码功耗和流量。
+     */
+    public static volatile int sQuality = 0;
+
+    /** 按画质偏好给档位打分，分越高越优先；H.264 / 非 DASH 的硬门槛在 pickGearUrl 里另判 */
+    static int gearRank(String gearName) {
+        boolean p540 = gearName.contains("_540_");
+        boolean p720 = gearName.contains("_720_");
+        boolean p1080 = gearName.contains("_1080_");
+        if (sQuality >= 2) return p1080 ? 3 : p720 ? 2 : p540 ? 1 : 0;
+        if (sQuality == 1) return p720 ? 3 : p540 ? 2 : 1;
+        return p540 ? 3 : p720 ? 2 : 1;
+    }
+
+    /**
+     * 手表优先挑解码友好的一档：H.264（HEVC 在低端手表 SoC 上常无硬解，软解更吃电）
+     * + 按 sQuality 选分辨率 + 同档取最低码率。挑不到返回空，由调用方回退默认 play_addr。
+     *
+     * ⚠️ 必须排除 DASH 档（url 形如 /aweme/v1/play/dash/）：实测 25 档里 14 档给跳转式 mp4、
+     * 11 档给 DASH **单轨**流（站点自己另发一条 media-audio-und-mp4a 请求配音频）。
+     * MediaPlayer 单 URL 播它＝有画面没声音。
+     */
+    static String pickGearUrl(JsonObject video, String awemeId) {
+        JsonArray gears = video.getAsJsonArray("bit_rate");
+        if (gears == null || gears.size() == 0) return "";
+        String bestUrl = "";
+        int bestRank = 0;
+        long bestBr = 0;
+        String bestGear = "";
+        for (JsonElement el : gears) {
+            if (!el.isJsonObject()) continue;
+            JsonObject g = el.getAsJsonObject();
+            if (optInt(g, "is_h265") != 0 || optInt(g, "is_bytevc1") != 0) continue;
+            JsonObject addr = g.getAsJsonObject("play_addr");
+            if (addr == null) continue;
+            String url = urlFromAddr(addr, awemeId);
+            if (url.isEmpty() || url.contains("/play/dash/")) continue;
+            String gear = optString(g, "gear_name");
+            int rank = gearRank(gear);
+            long br = optLong(g, "bit_rate");
+            if (bestUrl.isEmpty() || rank > bestRank || (rank == bestRank && br < bestBr)) {
+                bestUrl = url;
+                bestRank = rank;
+                bestBr = br;
+                bestGear = gear;
+            }
+        }
+        if (bestUrl.isEmpty()) return "";
+        // 选档结果落日志：URL 本身看不出档位，不记就没法验证手表上到底播的是哪一档
+        com.dywatch.app.util.AppLog.i("feed", "选档 " + awemeId + " → " + bestGear
+                + " " + (bestBr / 1000) + "kbps（共 " + gears.size() + " 档候选）");
+        return bestUrl;
+    }
+
+    private static String urlFromAddr(JsonObject addr, String awemeId) {
         JsonArray list = addr.getAsJsonArray("url_list");
         if (list == null || list.size() == 0) return "";
         // ⚠️ 真机取证（2026-09-25，url-test.js 实测）：url_list 里直连 CDN 候选（v*-web*.douyinvod.com）

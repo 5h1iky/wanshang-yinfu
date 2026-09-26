@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  单行页头（参考 BiliClient）：返回箭头是页名的 drawableStart，整行左边即返回热区；
+  右侧放系统时钟。总高约 22dp，替掉原先 40dp 的三段式顶栏——手表只有约 275dp 可用高，
+  每页省下的 18dp 都能换成多一条评论内容。
+  页名由代码 setText（各页不同），所以这里给 tools:ignore 而不是写死。
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/header_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/bg_base"
+    android:paddingTop="@dimen/s1"
+    android:paddingBottom="@dimen/s1">
+
+    <TextView
+        android:id="@+id/btn_back"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:drawablePadding="@dimen/s2"
+        android:gravity="center_vertical"
+        android:minWidth="@dimen/ctrl_min"
+        android:minHeight="@dimen/ctrl_min"
+        android:paddingStart="@dimen/bar_lead_inset"
+        android:paddingEnd="@dimen/s3"
+        app:drawableStartCompat="@drawable/arrow_back" />
+
+    <TextView
+        android:id="@+id/tv_page_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerVertical="true"
+        android:layout_toEndOf="@id/btn_back"
+        android:layout_toStartOf="@id/tv_clock"
+        android:ellipsize="end"
+        android:lines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/t_lede"
+        android:textStyle="bold"
+        tools:text="评论" />
+
+    <TextClock
+        android:id="@+id/tv_clock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="@dimen/s4"
+        android:format12Hour="HH:mm"
+        android:format24Hour="HH:mm"
+        android:textColor="@color/text_muted"
+        android:textSize="@dimen/t_caption" />
+</RelativeLayout>

@@ -10,7 +10,7 @@ import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
+import com.dywatch.app.ui.UiActivity;
 
 import com.dywatch.app.R;
 import com.dywatch.app.chat.model.ChatMessage;
@@ -20,7 +20,7 @@ import com.dywatch.app.util.AppLog;
 
 import java.util.List;
 
-public class ConvListActivity extends AppCompatActivity implements ChatEngine.Listener {
+public class ConvListActivity extends UiActivity implements ChatEngine.Listener {
 
     private LinearLayout mConvs;
     private TextView mHint;
@@ -142,6 +142,11 @@ public class ConvListActivity extends AppCompatActivity implements ChatEngine.Li
 
     @Override
     public void onComments(List<Comment> list) {
+        // 会话列表页不消费评论
+    }
+
+    @Override
+    public void onCommentsMore(List<Comment> list, boolean atEnd) {
         // 会话列表页不消费评论
     }
 

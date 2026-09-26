@@ -179,6 +179,11 @@
     fetchComments: function (awemeId) {
       ChatBridge.__doVideoAction('comments', awemeId, true);
     },
+    // 加载更多评论（已在该视频页时直接滚评论区翻页，不再重新导航）
+    loadMoreComments: function (awemeId) {
+      if (location.href.indexOf('/video/' + awemeId) >= 0) return ChatBridge.__loadMoreComments();
+      ChatBridge.__doVideoAction('commentsMore', awemeId, true);
+    },
     // 发评论（激活 Draft.js 框 → 粘贴注入 → 枚举提交面）
     sendComment: function (awemeId, text) {
       ChatBridge.__doVideoAction('sendComment', awemeId, text);
@@ -284,6 +289,7 @@
         return;
       }
       if (kind === 'comments') return this.__scrapeComments();
+      if (kind === 'commentsMore') return this.__loadMoreComments();
       if (kind === 'sendComment') return this.__doSendComment(payload);
       if (kind === 'feed') return this.fetchRecommendFeed(!!payload);
       var key = kind + ':' + awemeId;
@@ -298,46 +304,99 @@
       });
     },
 
-    // 评论抓取：语义锚点（comment-item-info-wrap / comment-item-stats-container）+ 列分类
-    // ⚠️ 评论区懒加载（实测 10~20 秒才渲染）→ 轮询窗口放宽到 ~30 秒
+    // ---- 评论：增量分页 ----
+    // 实测（2026-09-26）：评论挂在 [class*="route-scroll-container"] 里，滚一屏就能从 16 条涨到 76 条。
+    // 旧实现只抓「当前 DOM 已有」的一次性快照、且等满 30 秒才 post 一次
+    // → 用户永远只见五六条、滑不出更多、还慢。现在改成：一有内容立刻 post，滚动一页追发新的一批。
+    __commentScroller: function () {
+      return document.querySelector('[class*="route-scroll-container"]') || document.scrollingElement;
+    },
+
+    // 去重键：DOM 里没有稳定的评论 id，用 昵称+正文前缀+时间 兜住
+    __ck: function (it) { return it.name + '|' + it.text.slice(0, 60) + '|' + it.time; },
+
+    // 抓当前 DOM 里渲染出来的评论（语义锚点 + 列分类）
+    __collectComments: function () {
+      var items = [];
+      var wraps = document.querySelectorAll('[class*="comment-item-info-wrap"]');
+      for (var i = 0; i < wraps.length; i++) {
+        var wrap = wraps[i];
+        var col = wrap.parentElement;
+        if (!col) continue;
+        var name = (wrap.textContent || '').replace(/\s+/g, ' ').trim().replace(/\.{2,}$/, '');
+        var text = '', time = '', likes = '';
+        for (var c = 0; c < col.children.length; c++) {
+          var el = col.children[c];
+          var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          // 排除昵称列：querySelector 只查后代不查自身，光靠它会把昵称列漏进来，
+          // 而昵称+「…」比正文长→被当成正文（真机实测：自己的评论只显了个账号名）
+          if (el === wrap || wrap.contains(el) || el.contains(wrap)) continue;
+          if (el.querySelector('[class*="comment-item-info-wrap"]')) continue;
+          if (el.querySelector('[class*="comment-item-stats-container"]')) {
+            var sp = el.querySelector('p span');
+            likes = sp ? (sp.textContent || '').trim() : '';
+            continue;
+          }
+          // 时间形如「刚刚」「1分钟前」「2月前·山西」「09-20」；单位必须含「月/年」，漏了会逐条漏配
+          var mt = t.match(/^(刚刚|\d+\s?(秒|分钟|小时|天|周|月|年)前|\d{1,2}-\d{1,2})/);
+          if (mt) { time = mt[1]; continue; }
+          if (t.length > text.length) text = t;
+        }
+        if (name || text) items.push({ name: name, text: text, time: time, likes: likes });
+      }
+      return items;
+    },
+
+    // 只把没发过的那部分推给原生；返回新增条数
+    __drainComments: function (type) {
+      if (!this.__seenCmts) this.__seenCmts = {};
+      var all = this.__collectComments(), fresh = [];
+      for (var i = 0; i < all.length; i++) {
+        var k = this.__ck(all[i]);
+        if (this.__seenCmts[k]) continue;
+        this.__seenCmts[k] = 1;
+        fresh.push(all[i]);
+      }
+      if (!fresh.length) return 0;
+      var sc = this.__commentScroller();
+      var atEnd = sc ? (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 40) : true;
+      post({ type: type, items: fresh, total: Object.keys(this.__seenCmts).length, atEnd: !!atEnd });
+      return fresh.length;
+    },
+
+    // 首次拉取：清零账本、回到顶部，之后每 500ms 试一次，一有评论就发（不再干等 30 秒）
     __scrapeComments: function () {
+      var self = this;
+      this.__seenCmts = {};
+      var sc = this.__commentScroller();
+      if (sc) sc.scrollTop = 0;
       var tries = 0;
       var timer = setInterval(function () {
         tries++;
-        var wraps = document.querySelectorAll('[class*="comment-item-info-wrap"]');
-        if (wraps.length || tries > 40) {
-          clearInterval(timer);
-          var items = [];
-          for (var i = 0; i < wraps.length; i++) {
-            var wrap = wraps[i];
-            var col = wrap.parentElement;
-            if (!col) continue;
-            var name = (wrap.textContent || '').replace(/\s+/g, ' ').trim().replace(/\.{2,}$/, '');
-            var text = '', time = '', likes = '';
-            for (var c = 0; c < col.children.length; c++) {
-              var el = col.children[c];
-              var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-              // ⁠ 排除昵称列：querySelector 只查后代、不查自身，只靠它会把昵称列漏进来，
-              //   而昵称+“...” 比正文长→被当成正文（真机实测：自己的评论只显了个账号名）
-              if (el === wrap || wrap.contains(el) || el.contains(wrap)) continue;
-              if (el.querySelector('[class*="comment-item-info-wrap"]')) continue;
-              if (el.querySelector('[class*="comment-item-stats-container"]')) {
-                var sp = el.querySelector('p span');
-                likes = sp ? (sp.textContent || '').trim() : '';
-                continue;
-              }
-              // 时间形如「刚刚」「1分钟前」「2月前·山西」「1天前」「09-20」
-              // ⁠ 单位必须含“月/年”：实测 “2月前” 在旧正则下逐条漏配→time 全空
-              var mt = t.match(/^(刚刚|\d+\s?(秒|分钟|小时|天|周|月|年)前|\d{1,2}-\d{1,2})/);
-              if (mt) { time = mt[1]; continue; }
-              if (t.length > text.length) text = t;
-            }
-            if (name || text) items.push({ name: name, text: text, time: time, likes: likes });
-          }
-          post({ type: 'comments', items: items });
-        }
-      }, 750);
+        if (self.__drainComments('comments') || tries > 30) clearInterval(timer);
+      }, 500);
     },
+
+    // 加载更多：一次滚约 3 屏，每屏把新渲染出来的追发出去。
+    // ⚠️ 只有滚动位置真到底才允许报 atEnd —— 早先"一次没抓到就 end:true"会把还有评论的视频误标成已到底。
+    __loadMoreComments: function () {
+      var self = this;
+      var sc = this.__commentScroller();
+      if (!sc) { post({ type: 'commentsMore', items: [], end: true, atEnd: true }); return; }
+      var atBottom = function () { return sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 40; };
+      var round = 0;
+      var timer = setInterval(function () {
+        round++;
+        self.__drainComments('commentsMore');
+        if (round % 3 === 1) sc.scrollTop = sc.scrollTop + sc.clientHeight * 0.85;
+        if (round >= 9 || (atBottom() && round >= 6)) {
+          clearInterval(timer);
+          self.__drainComments('commentsMore');
+          post({ type: 'commentsMore', items: [], end: true, atEnd: atBottom() });
+        }
+      }, 700);
+    },
+
 
     // 编辑器是否有内容（Draft 的 [data-text] 镜像 + textContent 双通道；DOM 直改不可信）
     __editorText: function (ed) {

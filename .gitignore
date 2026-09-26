@@ -51,3 +51,5 @@ feedcap-*.log
 /tools/dy-spider-src/
 /tools/dyapi-src/
 /tools/sign-src/
+
+/tools/bili-src/

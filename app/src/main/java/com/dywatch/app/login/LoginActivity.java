@@ -16,14 +16,14 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import androidx.appcompat.app.AppCompatActivity;
+import com.dywatch.app.ui.UiActivity;
 
 import com.dywatch.app.R;
 import com.dywatch.app.feed.FeedActivity;
 import com.dywatch.app.net.DouyinApi;
 import com.dywatch.app.util.AppLog;
 
-public class LoginActivity extends AppCompatActivity {
+public class LoginActivity extends UiActivity {
 
     // 预热：先拿设备 cookie（实测缺它时 QR 接口被拦/页面降级）
     private static final String WARM_URL = "https://www.douyin.com/";

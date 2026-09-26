@@ -5,7 +5,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
+import com.dywatch.app.ui.UiActivity;
 
 import com.dywatch.app.feed.FeedActivity;
 import com.dywatch.app.login.LoginActivity;
@@ -14,7 +14,7 @@ import com.dywatch.app.login.LoginManager;
 /**
  * 腕上音符（dywatch）—— 主屏入口：登录状态 + 功能入口。
  */
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends UiActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +53,13 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 // 用户设计：会话列表 → 选人 → 进会话
                 startActivity(new Intent(MainActivity.this, com.dywatch.app.chat.ConvListActivity.class));
+            }
+        });
+
+        findViewById(R.id.btn_settings).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, com.dywatch.app.ui.SettingsActivity.class));
             }
         });
 

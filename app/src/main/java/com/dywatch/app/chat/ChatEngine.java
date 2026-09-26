@@ -28,6 +28,8 @@ public class ChatEngine {
         void onMessages(List<ChatMessage> list);
         void onConversations(List<com.dywatch.app.chat.model.Conversation> list);
         void onComments(List<com.dywatch.app.chat.model.Comment> list);
+        /** 评论「加载更多」追加的一批；atEnd=true 表示评论区已滚到底 */
+        void onCommentsMore(List<com.dywatch.app.chat.model.Comment> list, boolean atEnd);
         void onAuth(boolean ok, String message);
         void onEngineError(String err);
     }
@@ -262,6 +264,11 @@ public class ChatEngine {
         runAction("ChatBridge.fetchComments(" + org.json.JSONObject.quote(awemeId) + ");");
     }
 
+    /** 评论「加载更多」：引擎把评论区滚一页，新渲染出来的经 onCommentsMore 追加回来 */
+    public void loadMoreComments(String awemeId) {
+        runAction("ChatBridge.loadMoreComments(" + org.json.JSONObject.quote(awemeId) + ");");
+    }
+
     /** 发表视频评论 */
     public void sendComment(String awemeId, String text) {
         runAction("ChatBridge.sendComment(" + org.json.JSONObject.quote(awemeId) + ","
@@ -314,7 +321,7 @@ public class ChatEngine {
                     }
                 }
                 if (mListener != null) mListener.onConversations(list);
-            } else if ("comments".equals(type)) {
+            } else if ("comments".equals(type) || "commentsMore".equals(type)) {
                 List<com.dywatch.app.chat.model.Comment> list = new ArrayList<>();
                 org.json.JSONArray arr = o.optJSONArray("items");
                 if (arr != null) {
@@ -327,7 +334,10 @@ public class ChatEngine {
                                 it.optString("likes")));
                     }
                 }
-                if (mListener != null) mListener.onComments(list);
+                if (mListener != null) {
+                    if ("comments".equals(type)) mListener.onComments(list);
+                    else mListener.onCommentsMore(list, o.optBoolean("atEnd", false));
+                }
             } else if ("auth".equals(type)) {
                 boolean ok = o.optBoolean("ok", false);
                 String msg = ok ? ("已登录 " + o.optString("user", "")) : o.optString("message", "");

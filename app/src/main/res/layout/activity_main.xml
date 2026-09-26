@@ -1,101 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 手表风主屏：大号药丸行 + 高对比排版（圆屏友好，内容居中安全区） -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  手表主屏 = 导航根（方案 §10）。
+  旧版是 5 条全宽按钮，纵向约 400dp，186dpi 圆屏可用高只有约 275dp —— 必然溢出。
+  现在：一级功能做成 2×2 图标卡，次要动作压成底部一行；整体再套 ScrollView 兜底，
+  这样即使某块表更矮也只是能滚，不会把「退出」挤出屏幕。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0E141B"
-    android:gravity="center_horizontal"
-    android:orientation="vertical"
-    android:padding="20dp"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
-
-    <TextView
-        android:id="@+id/tv_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/app_name"
-        android:textColor="#FFFFFF"
-        android:textSize="26sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tv_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="@string/hello_m0"
-        android:textColor="#8A97A5"
-        android:textSize="13sp" />
+    android:background="@color/bg_base"
+    android:fillViewport="true"
+    android:scrollbars="none">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:orientation="vertical">
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingLeft="@dimen/page_h_inset"
+        android:paddingRight="@dimen/page_h_inset"
+        android:paddingTop="@dimen/page_v_inset"
+        android:paddingBottom="@dimen/s4">
 
-        <Button
-            android:id="@+id/btn_login"
-            android:layout_width="match_parent"
-            android:layout_height="58dp"
-            android:background="@drawable/bg_pill"
-            app:backgroundTint="#243040"
-            android:text="登  录"
-            android:textColor="#FFFFFF"
-            android:textSize="17sp" />
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s2"
+            android:text="@string/app_name"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_title"
+            android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/btn_feed"
-            android:layout_width="match_parent"
-            android:layout_height="58dp"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_pill"
-            app:backgroundTint="#243040"
-            android:text="刷 视 频"
-            android:textColor="#FFFFFF"
-            android:textSize="17sp" />
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s1"
+            android:text="@string/hello_m0"
+            android:textColor="@color/text_muted"
+            android:textSize="@dimen/t_caption" />
 
-        <Button
-            android:id="@+id/btn_chat"
+        <!-- 一级功能：刷视频 / 聊天 -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="58dp"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_pill"
-            app:backgroundTint="#243040"
-            android:text="聊  天"
-            android:textColor="#FFFFFF"
-            android:textSize="17sp" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s4"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/btn_diag"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_pill"
-            app:backgroundTint="#243040"
-            android:text="诊断"
-            android:textColor="#9AA7B4"
-            android:textSize="14sp" />
+            <LinearLayout
+                android:id="@+id/btn_feed"
+                style="@style/EntryCard"
+                android:layout_marginRight="@dimen/s3">
 
-        <!-- 手表硬件适配红线 §10：无手势/无按键设备也能退出应用 -->
-        <Button
-            android:id="@+id/btn_exit"
+                <ImageView style="@style/EntryCardIcon" android:src="@drawable/ic_play" />
+
+                <TextView style="@style/EntryCardLabel" android:text="刷视频" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/btn_chat"
+                style="@style/EntryCard">
+
+                <ImageView style="@style/EntryCardIcon" android:src="@drawable/ic_chat" />
+
+                <TextView style="@style/EntryCardLabel" android:text="聊天" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 一级功能：登录 / 设置 -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="42dp"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_pill"
-            app:backgroundTint="#1A222C"
-            android:text="退出应用"
-            android:textColor="#6B7684"
-            android:textSize="13sp" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/btn_login"
+                style="@style/EntryCard"
+                android:layout_marginRight="@dimen/s3">
+
+                <ImageView style="@style/EntryCardIcon" android:src="@drawable/ic_avatar" />
+
+                <TextView style="@style/EntryCardLabel" android:text="登录" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/btn_settings"
+                style="@style/EntryCard">
+
+                <ImageView style="@style/EntryCardIcon" android:src="@drawable/ic_gear" />
+
+                <TextView style="@style/EntryCardLabel" android:text="设置" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 次要动作：诊断 / 退出（手表无手势无按键，退出必须显式存在） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_diag"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/ctrl_min"
+                android:layout_marginRight="@dimen/s2"
+                android:layout_weight="1"
+                android:background="@drawable/bg_settings_row"
+                android:text="诊断"
+                android:textColor="@color/text_muted"
+                android:textSize="@dimen/t_caption"
+                app:backgroundTint="@android:color/transparent" />
+
+            <Button
+                android:id="@+id/btn_exit"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/ctrl_min"
+                android:layout_marginLeft="@dimen/s2"
+                android:layout_weight="1"
+                android:background="@drawable/bg_settings_row"
+                android:text="退出应用"
+                android:textColor="@color/danger"
+                android:textSize="@dimen/t_caption"
+                app:backgroundTint="@android:color/transparent" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="v0.1.0 · 与官方无关 · 风险自负"
+            android:textColor="@color/text_faint"
+            android:textSize="@dimen/t_caption" />
     </LinearLayout>
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="v0.1.0 · 与官方无关 · 风险自负"
-        android:textColor="#4A5560"
-        android:textSize="11sp" />
-
-</LinearLayout>
+</ScrollView>

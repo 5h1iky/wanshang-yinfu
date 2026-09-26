@@ -10,7 +10,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
+import com.dywatch.app.ui.UiActivity;
 
 import com.dywatch.app.R;
 import com.dywatch.app.chat.model.ChatMessage;
@@ -21,7 +21,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-public class ChatActivity extends AppCompatActivity implements ChatEngine.Listener {
+public class ChatActivity extends UiActivity implements ChatEngine.Listener {
 
     /** 进入指定会话（ConvListActivity 传入会话名） */
     public static final String EXTRA_CONV_NAME = "conv_name";
@@ -165,6 +165,11 @@ public class ChatActivity extends AppCompatActivity implements ChatEngine.Listen
 
     @Override
     public void onComments(List<com.dywatch.app.chat.model.Comment> list) {
+        // 聊天页不消费评论
+    }
+
+    @Override
+    public void onCommentsMore(List<com.dywatch.app.chat.model.Comment> list, boolean atEnd) {
         // 聊天页不消费评论
     }
 
