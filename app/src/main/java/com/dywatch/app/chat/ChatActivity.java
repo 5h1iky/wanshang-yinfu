@@ -56,6 +56,8 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         mMessages.setAdapter(mAdapter);
         mInput = findViewById(R.id.et_input);
         mHint = findViewById(R.id.tv_chat_hint);
+        // 方案 C：输入框 = 正文面，吃「字体大小」（发送键/快捷回复条等 chrome 不跟）
+        com.dywatch.app.ui.Fonts.scale(mInput, R.dimen.t_body);
         mConvName = getIntent().getStringExtra(EXTRA_CONV_NAME);
 
         // 登录门：私信必须先登录（未登录时页面上没有聊天输入框，JS 桥必然找不到）

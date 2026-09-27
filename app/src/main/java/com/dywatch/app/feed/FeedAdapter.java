@@ -121,6 +121,9 @@ public class FeedAdapter extends PagerAdapter {
         // 标题带作者名（抖音本体口径）：@昵称 + 标题。作者名缺失时退回纯标题。
         viewHolder.mTitle.setText(item.authorName == null || item.authorName.isEmpty()
                 ? item.title : "@" + item.authorName + "  " + item.title);
+        // 方案 C：视频标题 = 阅读面，吃「字体大小」设置（MarqueeTextView.onMeasure 会随
+        // 字号重算滚动范围，行高锁死由固定 padding 保证）
+        com.dywatch.app.ui.Fonts.scale(viewHolder.mTitle, R.dimen.t_lede);
         viewHolder.mPosition = pos;
         viewHolder.mItem = item;
         bindActions(viewHolder, item);

@@ -72,6 +72,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Holder> 
         h.text.setText(m.text);
         h.text.setGravity(out ? Gravity.END : Gravity.START);
         h.text.setTextColor(ContextCompat.getColor(h.text.getContext(), R.color.text_primary));
+        // 方案 C：气泡正文 = 阅读面，吃「字体大小」设置（chrome 的 meta 行不跟）
+        Fonts.scale(h.text, R.dimen.t_body);
 
         h.meta.setText((out ? "我" : "对方")
                 + (m.timeText == null || m.timeText.isEmpty() ? "" : (" · " + m.timeText)));

@@ -57,6 +57,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         mHint = findViewById(R.id.tv_comment_hint);
         mFooter = findViewById(R.id.tv_comment_footer);
         mInput = findViewById(R.id.et_comment);
+        // 方案 C：输入框 = 正文面，吃「字体大小」
+        com.dywatch.app.ui.Fonts.scale(mInput, R.dimen.t_body);
         // 滚到接近底部就自动续拉，不用用户去点按钮
         mList.addOnScrollListener(new androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             @Override

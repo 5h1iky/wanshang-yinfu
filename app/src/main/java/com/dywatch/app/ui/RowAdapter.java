@@ -93,6 +93,10 @@ public class RowAdapter extends RecyclerView.Adapter<RowAdapter.Holder> {
             h.summary.setVisibility(View.VISIBLE);
             h.summary.setText(it.summary);
         }
+        // 方案 C：行正文（昵称/摘要）= 阅读面，吃「字体大小」设置；右侧元信息（时间戳）是
+        // chrome，不跟——否则整行高度跟着涨，列表可视行数变少。
+        Fonts.scale(h.title, R.dimen.t_body);
+        Fonts.scale(h.summary, R.dimen.t_body);
         h.itemView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
