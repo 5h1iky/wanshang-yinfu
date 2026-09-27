@@ -2,8 +2,10 @@ package com.dywatch.app.feed;
 
 import android.content.Context;
 import android.util.AttributeSet;
+import android.view.Gravity;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.widget.FrameLayout;
 import android.widget.SeekBar;
 
 import androidx.annotation.NonNull;
@@ -108,6 +110,30 @@ public class TikTokController extends BaseVideoController {
         return false;
     }
 
+    /** 手表适配：进度条收窄到父宽 70% 并水平居中（圆屏左右两端被圆形边框裁切，铺满必被切）。
+     *  XML 写不了"父宽的 70%"（AAPT 不接受 percent width/margin），运行时设。
+     *  幂等：宽已是 70% 就不动；onSizeChanged 与 PREPARED 两处都会调，谁后到谁生效。 */
+    private void applyWatchWidth() {
+        if (mSeekBar == null || getWidth() <= 0) return;
+        android.view.ViewGroup.LayoutParams raw = mSeekBar.getLayoutParams();
+        int target = (int) (getWidth() * 0.7f);
+        if (raw.width != target) {
+            raw.width = target;
+            if (raw instanceof FrameLayout.LayoutParams) {
+                ((FrameLayout.LayoutParams) raw).gravity =
+                        Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            }
+            mSeekBar.setLayoutParams(raw);
+            com.dywatch.app.util.AppLog.i("seek", "进度条收窄 " + target + "/" + getWidth());
+        }
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        applyWatchWidth();
+    }
+
     @Override
     protected void onPlayStateChanged(int playState) {
         super.onPlayStateChanged(playState);
@@ -118,6 +144,7 @@ public class TikTokController extends BaseVideoController {
             post(new Runnable() {
                 @Override
                 public void run() {
+                    applyWatchWidth();   // 布局稳定后再兜底收窄一次（时序保险）
                     com.dywatch.app.util.AppLog.i("seek", "控制层尺寸 controller="
                             + getWidth() + "x" + getHeight() + " seekBar="
                             + mSeekBar.getWidth() + "x" + mSeekBar.getHeight()
