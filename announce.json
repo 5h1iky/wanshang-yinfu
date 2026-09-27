@@ -1,0 +1,19 @@
+{
+  "_comment": "腕上音符 · 公告数据（App 读取本文件显示主屏顶部细 banner）。改公告 = 改这个文件并提交；jsDelivr 有 CDN 缓存，急公告可调 https://purge.jsdelivr.net/gh/5h1iky/wanshang-yinfu@main/announce.json 立即刷新。字段说明见 cloudflare/README.md。",
+  "_schema": {
+    "id": "唯一标识，App 本地记 lastReadId，点击消失后不再提示同一条",
+    "level": "info | warn | danger（决定 banner 配色，可空=info）",
+    "title": "标题（必填）",
+    "text": "正文（可空）",
+    "link": "可选链接，点击 banner 时附带提示",
+    "showUntil": "毫秒时间戳，过期自动不显示",
+    "enabled": "false 时整条忽略（留空模板用）"
+  },
+  "enabled": false,
+  "id": "2026-09-27-00",
+  "level": "info",
+  "title": "示例公告（未启用）",
+  "text": "把 enabled 改成 true 并填好内容即可对全群发布。",
+  "link": "",
+  "showUntil": 0
+}
