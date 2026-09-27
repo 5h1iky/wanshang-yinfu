@@ -1,59 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  TikTokController 的控制层（方案 D；2026-09-27 五修：可呼出控制面板）。
-
-  用户拍板的新交互逻辑：
-    单击画面 = 呼出/收起控制面板（中央暂停键 + 进度条）；
-    面板显示时：点暂停键 = 暂停/继续；拖进度条 = seek；双击 = ±10s（保留）；
-    面板显示 4 秒无操作自动隐藏；点面板以外区域 = 收起。
-
-  构成（TikTokController 填充进 layout_tiktok_control_bar）：
-    - 中央大暂停键：48dp 圆钮（半透明黑底+白图标），居中，点按 togglePlay；
-    - 进度条：4dp 细线抬离底边 32dp（贴底不好拖，用户实测反馈），宽 70% 居中；
-    - 显示/隐藏由 TikTokController.show()/hide() 驱动（BaseVideoController 自带
-      fadeOut 计时：show() 起 4s 自动 hide，进度刷新回调照旧）。
-  样式色全部走色板，不写死。
+  TikTokController 的布局（方案 D 六修后 = 空壳）：
+  面板控件（暂停键/进度条）已并入 layout_tiktok_controller.xml（TikTokView 的直接子视图，
+  事件天然可达——放本层时被 TikTokView 盖住，用户实测"键点不动、条拖不动"）。
+  保留本文件是因为 BaseVideoController.getLayoutId() 机制要求子类给一个布局 id（给 0 也行，
+  但给空壳便于将来往 controller 层加真正全局性的东西）。
 -->
 <merge xmlns:android="http://schemas.android.com/apk/res/android"
-    tools:parentTag="android.widget.FrameLayout"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- 中央暂停键：面板呼出时才可见 -->
-    <FrameLayout
-        android:id="@+id/fl_play_toggle"
-        android:layout_width="@dimen/ctrl_lg"
-        android:layout_height="@dimen/ctrl_lg"
-        android:layout_gravity="center"
-        android:background="@drawable/bg_action_circle"
-        android:clickable="true"
-        android:focusable="true"
-        android:visibility="gone">
-
-        <ImageView
-            android:id="@+id/iv_play_state"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:layout_gravity="center"
-            android:src="@drawable/dkplayer_selector_play_button"
-            android:contentDescription="播放/暂停" />
-    </FrameLayout>
-
-    <!-- 进度条：面板呼出时才可见 -->
-    <SeekBar
-        android:id="@+id/sb_progress"
-        android:layout_width="match_parent"
-        android:layout_height="4dp"
-        android:layout_gravity="bottom"
-        android:layout_marginBottom="32dp"
-        android:background="@null"
-        android:paddingStart="0dp"
-        android:paddingEnd="0dp"
-        android:paddingTop="0dp"
-        android:paddingBottom="0dp"
-        android:minHeight="0dp"
-        android:progressDrawable="@drawable/feed_seek_bar"
-        android:splitTrack="false"
-        android:thumb="@null"
-        android:max="1000"
-        android:visibility="gone" />
-</merge>
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:parentTag="android.widget.FrameLayout" />

@@ -1,39 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  刷视频页底部细进度条（方案 D；2026-09-27 三修）。
-
-  三轮迭代记录（都是真机实证的坑）：
-  1) 初版 SeekBar 高 24dp、layer-list 铺满 → 用户："粗、铺满两屏、没手表适配"。
-  2) 参考哔哩终端（用户点名"他的粗细刚刚好"，其 videoprogress = 20dp 高 + AppCompat 默认
-     2dp 细 track）：改成 20dp 高 + layer-list top/bottom 9dp 挤出 2dp track
-     → **track 被挤没了，进度条整个消失**。根因：SeekBar 实测渲染高 65px(≈15.7dp@420dpi
-     受 Material 样式内边距影响) < 9+9=18dp 的上下 padding，2dp 的 track 被裁成 0 高。
-     （教训：layer-list 的 item top/bottom 挤高度，前提是"控件高度 ≥ padding 之和 +
-     track 高"，而 SeekBar 的实际渲染高度受样式 padding 影响，dp 级估算不可靠。）
-  3) 定稿：**SeekBar 本体高度 = track 高度（4dp），直铺不挤**；触控手感由 TikTokView
-     底部 48dp 热区负责（拖动 seek 的判定在那边），SeekBar 只管"画出来"——
-     渲染与触控彻底分离，谁也不依赖谁的尺寸。
-  宽度仍由 TikTokController 收窄到父宽 70% 水平居中（圆屏左右圆形裁切区不可用）。
+  进度条 drawable（方案 D 六修配套）：track 满高直铺（SeekBar 本体 28dp 触控区，
+  视觉粗细由 item 高度控制——不再用 layer-list 挤高度的翻车写法）。
+  本版 track 渲染 12dp 居中：面板呼出后进度条要"能拖"，太细（4dp）手指找不着；
+  白 45% 底 / 白 50% 缓冲 / 品牌粉进度，圆角。
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@android:id/background">
+    <item android:id="@android:id/background"
+          android:top="8dp" android:bottom="8dp">
         <shape>
-            <corners android:radius="2dp" />
+            <corners android:radius="6dp" />
             <solid android:color="#4DFFFFFF" />
         </shape>
     </item>
-    <item android:id="@android:id/secondaryProgress">
+    <item android:id="@android:id/secondaryProgress"
+          android:top="8dp" android:bottom="8dp">
         <clip>
             <shape>
-                <corners android:radius="2dp" />
+                <corners android:radius="6dp" />
                 <solid android:color="#80FFFFFF" />
             </shape>
         </clip>
     </item>
-    <item android:id="@android:id/progress">
+    <item android:id="@android:id/progress"
+          android:top="8dp" android:bottom="8dp">
         <clip>
             <shape>
-                <corners android:radius="2dp" />
+                <corners android:radius="6dp" />
                 <solid android:color="@color/accent" />
             </shape>
         </clip>

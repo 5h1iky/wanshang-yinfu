@@ -167,4 +167,46 @@
         android:elevation="5dp"
         tools:text="标题标题标题"/>
 
+    <!--
+      ⚠️ 控制面板（2026-09-27 六修）：暂停键 + 进度条做成 TikTokView 的**直接子视图**。
+      上一版放 controller 层时被本视图（item 最上层触点）挡住事件——暂停键点不动、
+      进度条拖不动（用户实测两连报）。TikTokView 的孩子天然拿得到触摸，层级死结消除。
+      显隐由 TikTokView 内部驱动（监听 controller 的 show/hide 状态）。
+      面板显示时暂停键/进度条在本布局最后 = 天然在最上层。
+    -->
+    <FrameLayout
+        android:id="@+id/fl_play_toggle"
+        android:layout_width="@dimen/ctrl_lg"
+        android:layout_height="@dimen/ctrl_lg"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_action_circle"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="6dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/iv_play_state"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_gravity="center"
+            android:src="@drawable/dkplayer_selector_play_button"
+            android:contentDescription="播放/暂停" />
+    </FrameLayout>
+
+    <SeekBar
+        android:id="@+id/sb_progress"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="24dp"
+        android:background="@null"
+        android:minHeight="0dp"
+        android:progressDrawable="@drawable/feed_seek_bar"
+        android:splitTrack="false"
+        android:thumb="@null"
+        android:max="1000"
+        android:elevation="6dp"
+        android:visibility="gone" />
+
 </FrameLayout>
