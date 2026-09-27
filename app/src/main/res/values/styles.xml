@@ -24,4 +24,23 @@
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">@dimen/t_body</item>
     </style>
+
+    <!-- 关于页的行（方案 F）：标题行 + 副行（链接/说明），卡片底、可点 -->
+    <style name="AboutRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">@dimen/s3</item>
+        <item name="android:layout_marginEnd">@dimen/s3</item>
+        <item name="android:background">@drawable/bg_settings_row</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:minHeight">@dimen/ctrl_md</item>
+        <item name="android:paddingStart">@dimen/s4</item>
+        <item name="android:paddingEnd">@dimen/s4</item>
+        <item name="android:paddingTop">@dimen/s3</item>
+        <item name="android:paddingBottom">@dimen/s3</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">@dimen/t_body</item>
+    </style>
 </resources>

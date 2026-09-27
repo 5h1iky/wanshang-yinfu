@@ -30,6 +30,14 @@ public class MainActivity extends UiActivity {
         TextView about = findViewById(R.id.tv_about);
         if (about != null) {
             about.setText("v" + versionName() + " · 与官方无关 · 风险自负");
+            // 方案 F：版本行兼做关于页入口（主屏一级位已满 2×2，用最轻的方式加入口）
+            about.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    startActivity(new Intent(MainActivity.this,
+                            com.dywatch.app.ui.AboutActivity.class));
+                }
+            });
         }
 
         findViewById(R.id.btn_login).setOnClickListener(new View.OnClickListener() {

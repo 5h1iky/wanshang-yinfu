@@ -87,6 +87,13 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="portrait" />
+
+        <!-- 关于页（方案 F）：应用身份 + GitHub/主页/协议/免责声明 -->
+        <activity
+            android:name=".ui.AboutActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  关于页（方案 F，对齐 BiliClient activity_setting_about.xml 的卡片式）：
+  应用图标 + 名称 + 版本 → GitHub / 个人主页 / 开源协议 / 免责声明 四张卡。
+  数据不写死：版本读包信息（手写值随发版漂移的老坑），链接由 AboutActivity 兜底拼接。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base"
+    android:fillViewport="true"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingTop="@dimen/s5"
+        android:paddingBottom="@dimen/s5">
+
+        <!-- 应用身份 -->
+        <ImageView
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginTop="@dimen/s3"
+            android:contentDescription="@null"
+            android:src="@mipmap/ic_launcher" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s3"
+            android:text="@string/app_name"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_title"
+            android:textStyle="bold" />
+
+        <!-- 版本由代码写入（读包信息，不写死） -->
+        <TextView
+            android:id="@+id/tv_about_version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s1"
+            android:textColor="@color/text_muted"
+            android:textSize="@dimen/t_caption" />
+
+        <!-- GitHub 开源仓库 -->
+        <TextView
+            android:id="@+id/row_github"
+            style="@style/AboutRow"
+            android:layout_marginTop="@dimen/s4" />
+
+        <!-- 作者个人主页 -->
+        <TextView
+            android:id="@+id/row_homepage"
+            style="@style/AboutRow"
+            android:layout_marginTop="@dimen/s2" />
+
+        <!-- 开源协议 -->
+        <TextView
+            android:id="@+id/row_license"
+            style="@style/AboutRow"
+            android:layout_marginTop="@dimen/s2" />
+
+        <!-- 免责声明（复用 Disclaimer 全文弹窗） -->
+        <TextView
+            android:id="@+id/row_disclaimer"
+            style="@style/AboutRow"
+            android:layout_marginTop="@dimen/s2" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/s4"
+            android:gravity="center"
+            android:text="本应用与抖音官方无关\n仅供个人学习与朋友间使用 · 风险自负"
+            android:textColor="@color/text_faint"
+            android:textSize="@dimen/t_caption" />
+    </LinearLayout>
+</ScrollView>

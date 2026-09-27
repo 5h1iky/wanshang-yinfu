@@ -184,6 +184,13 @@ public class SettingsActivity extends UiActivity {
                         .show();
             }
         });
+        actionRow("关于腕上音符", "版本 / GitHub / 作者主页 / 免责声明", new Runnable() {
+            @Override
+            public void run() {
+                startActivity(new android.content.Intent(SettingsActivity.this,
+                        AboutActivity.class));
+            }
+        });
         actionRow("退出登录", "清除本机保存的会话", new Runnable() {
             @Override public void run() {
                 LoginManager.clear(SettingsActivity.this);
