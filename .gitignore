@@ -53,6 +53,8 @@ feedcap-*.log
 /tools/sign-src/
 
 /tools/bili-src/
+# dtrait Node 移植（内含参考实现的公钥与签名 blob 样例，发布仓库不需要）
+/tools/dtrait-port/
 
 # �Ự cookie �����������ֵ���������ض���ʵ�飩
 tools/_session_cookie.txt
