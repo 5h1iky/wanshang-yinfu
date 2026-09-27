@@ -16,11 +16,24 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.dywatch.app.R;
-import xyz.doikki.videoplayer.controller.IControlComponent;
 import xyz.doikki.videoplayer.controller.ControlWrapper;
+import xyz.doikki.videoplayer.controller.IControlComponent;
 import xyz.doikki.videoplayer.player.VideoView;
 import xyz.doikki.videoplayer.util.L;
 
+/**
+ * 抖音式 item 控制视图（方案 D，2026-09-27 五修：单击呼出面板）。
+ *
+ * 交互（用户拍板）：
+ *   单击画面 = 呼出/收起控制面板（中央暂停键 + 进度条，4s 无操作自动隐藏）；
+ *   面板里的暂停键 = 暂停/继续，进度条拖动 = seek（都在 TikTokController，面板可见时可达）；
+ *   双击左右半屏 = ±10s（本类 GestureDetector）；
+ *   上下滑切换视频 = ViewPager（本类只处理点击类手势，不碰纵向滑动）。
+ *
+ * 层级事实（真机实测）：本视图是 item 的最上层触点，TikTokController 在 VideoView 容器里
+ * 被本视图盖住——所以"呼出面板"由本类转调 controller；面板显示后其中的暂停键/SeekBar
+ * 作为 controller 的子视图在本视图之上（addView 顺序），可以直接点、可以拖。
+ */
 public class TikTokView extends FrameLayout implements IControlComponent {
 
     private final ImageView thumb;
@@ -29,9 +42,7 @@ public class TikTokView extends FrameLayout implements IControlComponent {
     private ControlWrapper mControlWrapper;
     private final int mScaledTouchSlop;
     private int mStartX, mStartY;
-    /** 双击 seek（方案 D）：挂在 TikTokView 上——它是 item 的最上层触点，
-     *  TikTokController 在 VideoView 容器里被本视图盖住，双击事件到不了它。 */
-    private final GestureDetector mDoubleTapGesture;
+    private final GestureDetector mGesture;
     /** 双击步长与 TikTokController 保持一致 */
     private static final long SEEK_STEP_MS = 10_000;
 
@@ -52,22 +63,18 @@ public class TikTokView extends FrameLayout implements IControlComponent {
         thumb = findViewById(R.id.iv_thumb);
         mPlayBtn = findViewById(R.id.play_btn);
         mScaledTouchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
-        mDoubleTapGesture = new GestureDetector(getContext(),
+        mGesture = new GestureDetector(getContext(),
                 new GestureDetector.SimpleOnGestureListener() {
                     @Override
                     public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
-                        // 单击确认（~300ms 无第二击）：真正的暂停/继续
-                        if (mToggleOnSingleTap && mControlWrapper != null) {
-                            mControlWrapper.togglePlay();
-                        }
-                        mToggleOnSingleTap = false;
+                        // 单击确认（~300ms 无第二击）：呼出/收起控制面板
+                        //（老逻辑是 togglePlay，用户拍板改为面板式：暂停键在面板里点）
+                        if (mControlWrapper != null) mControlWrapper.toggleShowState();
                         return true;
                     }
 
                     @Override
                     public boolean onDoubleTap(@NonNull MotionEvent e) {
-                        // 双击来了：取消挂起的单击 toggle
-                        mToggleOnSingleTap = false;
                         if (mControlWrapper == null) return true;
                         long duration = mControlWrapper.getDuration();
                         if (duration <= 0) return true;   // 还没 prepared
@@ -85,71 +92,21 @@ public class TikTokView extends FrameLayout implements IControlComponent {
                 });
     }
 
-    /** 单击确认锁：双击的第一击会先到 ACTION_UP，此时不能 togglePlay（否则双击必然闪一下暂停）。
-     *  onSingleTapConfirmed 在双击窗口（~300ms）过后才回调，那时才真正 toggle。 */
-    private boolean mToggleOnSingleTap;
-    /** 横向拖动 seek（方案 D）：TikTokView 是最上层触点，横向拖动在这里检测——
-     *  落在底部进度条区域（触控高 36dp）且横向位移明显、纵向位移小 → 按比例 seek。
-     *  纵向滑动不拦（ViewPager 上下滑），双击/单击走 GestureDetector。 */
-    private boolean mDraggingSeek;
-    private float mDragStartX;
-    private long mDragStartPos;
-    private long mDragDuration;
-    private static final float SEEK_ZONE_DP = 48f;     // 触控热区：SeekBar 本体 24dp + 手指容差
-    private static final float SEEK_DRAG_RATIO = 2.5f;   // 拖满一屏宽 = 2.5 倍时长
-
     /**
-     * 解决点击和VerticalViewPager滑动冲突问题。
-     * 单击 = onSingleTapConfirmed 里 togglePlay（带 ~300ms 双击窗口确认，抖音手机版同款取舍：
-     * 不确认的话双击的第一击会先暂停一下，视觉上闪一帧）。
-     * 双击 = onDoubleTap 里 seek ±10s。
-     * 底部进度条区横向拖动 = 按比例 seek（在 TikTokView 里检测——SeekBar 被本视图盖住，
-     * 触摸到不了 controller 层，这是 dkplayer 分层决定的；在此检测是唯一可达路径）。
-     * 纵向滑动不归这里：事件照旧被 ViewPager 拦截（onInterceptTouchEvent），不影响上下滑。
+     * 只做手势分发：单击/双击交 GestureDetector；纵向滑动不消费（ViewPager 拦截）。
+     * 面板呼出后，暂停键/SeekBar 是 controller 层的子视图、叠在本视图之上，
+     * 它们自己的点击/拖动由 Android 事件路由直接送达（不经过本方法）。
      */
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        mDoubleTapGesture.onTouchEvent(event);
+        mGesture.onTouchEvent(event);
         int action = event.getAction();
         switch (action) {
             case MotionEvent.ACTION_DOWN:
                 mStartX = (int) event.getX();
                 mStartY = (int) event.getY();
-                mToggleOnSingleTap = false;
-                // 底部 seek 热区：手指落在这里且后续横向移动 → 进入拖动 seek 模式。
-                // ⚠️ getY() 是视图本地坐标（屏坐标-状态栏等偏移），与 getHeight() 同系才对；
-                //    之前 36dp 热区实际只盖住本地 2159 以下，手表手指落点差几像素就 miss。
-                float zonePx = SEEK_ZONE_DP * getResources().getDisplayMetrics().density;
-                mDraggingSeek = mControlWrapper != null
-                        && event.getY() >= getHeight() - zonePx
-                        && mControlWrapper.getDuration() > 0;
-                if (mDraggingSeek) {
-                    mDragStartX = event.getX();
-                    mDragStartPos = mControlWrapper.getCurrentPosition();
-                    mDragDuration = mControlWrapper.getDuration();
-                }
                 return true;
-            case MotionEvent.ACTION_MOVE:
-                if (mDraggingSeek) {
-                    float dx = event.getX() - mDragStartX;
-                    long target = mDragStartPos
-                            + (long) (dx / getWidth() * mDragDuration * SEEK_DRAG_RATIO);
-                    if (target < 0) target = 0;
-                    if (target > mDragDuration) target = mDragDuration;
-                    mControlWrapper.seekTo(target);
-                    if (Math.abs(dx) > 40 && (mLastDragLogTarget / 1000 != target / 1000)) {
-                        mLastDragLogTarget = target;
-                        com.dywatch.app.util.AppLog.i("seek", "拖动 → "
-                                + (target / 1000) + "s/" + (mDragDuration / 1000) + "s");
-                    }
-                    return true;
-                }
-                break;
             case MotionEvent.ACTION_UP:
-                if (mDraggingSeek) {
-                    mDraggingSeek = false;
-                    return true;   // 拖动结束，这一下不是点击
-                }
                 int endX = (int) event.getX();
                 int endY = (int) event.getY();
                 if (Math.abs(endX - mStartX) < mScaledTouchSlop
@@ -157,20 +114,12 @@ public class TikTokView extends FrameLayout implements IControlComponent {
                     performClick();
                 }
                 break;
-            case MotionEvent.ACTION_CANCEL:
-                mDraggingSeek = false;
-                break;
         }
         return false;
     }
 
-    /** 拖动 seek 日志节流：同一秒内不重复记 */
-    private long mLastDragLogTarget;
-
     @Override
     public boolean performClick() {
-        // performClick 由 ACTION_UP 的位移判断触发；真正 toggle 推迟到单击确认
-        mToggleOnSingleTap = true;
         return super.performClick();
     }
 

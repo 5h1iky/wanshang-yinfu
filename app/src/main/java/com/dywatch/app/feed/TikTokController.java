@@ -5,7 +5,9 @@ import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.SeekBar;
 
 import androidx.annotation.NonNull;
@@ -17,24 +19,30 @@ import xyz.doikki.videoplayer.controller.BaseVideoController;
 import xyz.doikki.videoplayer.player.VideoView;
 
 /**
- * 抖音式控制层（方案 D 阶段 1，2026-09-27）：
- * ① 底部细长进度条：SeekBar 贴底 24dp 触控区，不挡画面；进度色走品牌点缀色。
- *    进度刷新由 BaseVideoController 的 mShowProgress 驱动（STATE_PLAYING 时 startProgress()），
- *    回调进 {@link #setProgress(int, int)}，更新 SeekBar（拖动中不吃回调防跳）。
- * ② 双击右半屏 +10s / 左半屏 -10s：GestureDetector.onDoubleTap。
- *    单击必须穿透给 item 层的 TikTokView（暂停/继续是它的 onClick）——
- *    所以本控制器不消费 DOWN（返回 false），只在 onDoubleTap 里做 seek；
- *    双击的第二击起 GestureDetector 会自动消费后续事件，不会触发 TikTokView 的单击。
- *    但垂直滑动仍归 ViewPager：我们不碰 onScroll/onFling，DOWN 返回 false 让父级正常接管。
+ * 抖音式控制层（方案 D，2026-09-27 五修：可呼出控制面板，用户拍板的交互逻辑）：
  *
- * 为什么不用 IControlComponent 拆组件：只有一个 SeekBar + 一个手势，组件化是过度设计；
- * BaseVideoController 的 getLayoutId() 机制本来就是给"整块控制层"用的。
+ *   单击画面 = 呼出控制面板（中央暂停键 + 进度条）；
+ *   面板显示时点暂停键 = 暂停/继续；拖进度条 = seek；
+ *   面板显示 4 秒无操作自动隐藏（BaseVideoController 自带 fadeOut 计时）；
+ *   双击左右半屏 = ±10s（保留，与面板显隐无关）；
+ *   上下滑切换视频仍归 ViewPager。
+ *
+ * 实现分工（触控事件的可达性是 dkplayer 分层决定的，真机实测过）：
+ *   - TikTokView（item 最上层触点）：单击确认→toggleShowState() 呼出/收起面板，
+ *     双击→±10s seek，底部热区拖动→seek；
+ *   - TikTokController（本类，被 TikTokView 盖住）：只在面板可见时接收其子控件
+ *     （暂停键/SeekBar）的点击，其余触点返回 false 让 TikTokView 继续拿事件。
+ *
+ * 面板显隐用 BaseVideoController 的 show()/hide()（内部 mShowing + 4s fadeOut），
+ * 不自造计时器；暂停键图标随播放状态切换（播放中显"暂停"icon，暂停时显"播放"icon）。
  */
 public class TikTokController extends BaseVideoController {
 
     private static final long SEEK_STEP_MS = 10_000;   // 双击快进/快退步长
 
     private SeekBar mSeekBar;
+    private View mPlayToggle;
+    private ImageView mPlayStateIcon;
     private GestureDetector mGesture;
     /** 用户拖动进度条期间：不吃 setProgress 回调（否则滑块被播放进度拽回去） */
     private boolean mFromUser;
@@ -60,18 +68,16 @@ public class TikTokController extends BaseVideoController {
                 new GestureDetector.SimpleOnGestureListener() {
                     @Override
                     public boolean onDoubleTap(@NonNull MotionEvent e) {
-                        // 布局是全屏的：x < 半宽 = 左半屏（后退），否则右半屏（前进）
                         boolean forward = e.getX() >= getWidth() / 2f;
                         doSeek(forward ? SEEK_STEP_MS : -SEEK_STEP_MS);
                         return true;
                     }
                 });
         // ⚠️ 实例初始化块在 super 构造器（含 initView()→inflate）之后执行，
-        // 所以这里 findViewById 一定拿得到 getLayoutId() inflate 进来的子视图。
-        // （此前挂在 onFinishInflate 里是无效的：本类由 Java new 出来，XML inflate 的
-        //   只是 getLayoutId() 的内容，TikTokController 自身的 onFinishInflate 永远不回调
-        //   ——mSeekBar 一直 null，进度条监听从没挂上。真机取证：日志里该行从未出现。）
+        // findViewById 一定拿得到 getLayoutId() inflate 进来的子视图。
         mSeekBar = findViewById(R.id.sb_progress);
+        mPlayToggle = findViewById(R.id.fl_play_toggle);
+        mPlayStateIcon = findViewById(R.id.iv_play_state);
         if (mSeekBar != null) {
             mSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
@@ -92,10 +98,22 @@ public class TikTokController extends BaseVideoController {
                 public void onStopTrackingTouch(SeekBar seekBar) {
                     mFromUser = false;
                     markSeekSettling();
+                    startFadeOut();   // 拖完 4s 自动收
                 }
             });
-        } else {
-            com.dywatch.app.util.AppLog.i("seek", "seekBar 未找到（布局 inflate 异常）");
+        }
+        if (mPlayToggle != null) {
+            mPlayToggle.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mControlWrapper != null) {
+                        mControlWrapper.togglePlay();
+                        // 暂停时面板保持常显（不计时收起），继续播放才重新计时
+                        if (mControlWrapper.isPlaying()) startFadeOut();
+                        else stopFadeOut();
+                    }
+                }
+            });
         }
     }
 
@@ -106,13 +124,19 @@ public class TikTokController extends BaseVideoController {
 
     @Override
     public boolean showNetWarning() {
-        //不显示移动网络播放警告
         return false;
     }
 
+    /** 面板显示/隐藏：暂停键 + 进度条一起显隐 */
+    @Override
+    protected void onVisibilityChanged(boolean isVisible, android.view.animation.Animation anim) {
+        super.onVisibilityChanged(isVisible, anim);
+        if (mPlayToggle != null) mPlayToggle.setVisibility(isVisible ? VISIBLE : GONE);
+        if (mSeekBar != null) mSeekBar.setVisibility(isVisible ? VISIBLE : GONE);
+    }
+
     /** 手表适配：进度条收窄到父宽 70% 并水平居中（圆屏左右两端被圆形边框裁切，铺满必被切）。
-     *  XML 写不了"父宽的 70%"（AAPT 不接受 percent width/margin），运行时设。
-     *  幂等：宽已是 70% 就不动；onSizeChanged 与 PREPARED 两处都会调，谁后到谁生效。 */
+     *  XML 写不了"父宽的 70%"，运行时设。幂等；onSizeChanged 与 PREPARED 双保险。 */
     private void applyWatchWidth() {
         if (mSeekBar == null || getWidth() <= 0) return;
         android.view.ViewGroup.LayoutParams raw = mSeekBar.getLayoutParams();
@@ -137,30 +161,35 @@ public class TikTokController extends BaseVideoController {
     @Override
     protected void onPlayStateChanged(int playState) {
         super.onPlayStateChanged(playState);
-        // 一次性取证：控制层与进度条的真实尺寸（uiautomator 的 bounds 对挂载中的层会报 0，
-        // 结论只认内层 getHeight/getWidth —— 项目验证纪律）
+        // 中央暂停键图标：播放中显"暂停"，暂停时显"播放"（dkplayer 的 selector 按状态切换）
+        if (mPlayStateIcon != null && mControlWrapper != null) {
+            mPlayStateIcon.setSelected(playState != VideoView.STATE_PLAYING);
+        }
+        // 面板显示中且暂停 → 停掉自动收起；恢复播放 → 重新计时
+        if (mControlWrapper != null && isShowing()) {
+            if (playState == VideoView.STATE_PAUSED) stopFadeOut();
+            else if (playState == VideoView.STATE_PLAYING) startFadeOut();
+        }
+        // 一次性取证
         if (mSeekBar != null && !mSizeLogged && playState == VideoView.STATE_PREPARED) {
             mSizeLogged = true;
             post(new Runnable() {
                 @Override
                 public void run() {
-                    applyWatchWidth();   // 布局稳定后再兜底收窄一次（时序保险）
+                    applyWatchWidth();
                     com.dywatch.app.util.AppLog.i("seek", "控制层尺寸 controller="
                             + getWidth() + "x" + getHeight() + " seekBar="
                             + mSeekBar.getWidth() + "x" + mSeekBar.getHeight()
-                            + " visible=" + (mSeekBar.getVisibility() == VISIBLE)
                             + " attached=" + mSeekBar.isAttachedToWindow());
                 }
             });
         }
-        // 手动开/关进度刷新（VodControlView 同款姿势）：只有 PLAYING 有稳定位置可刷
+        // 进度刷新开关：PLAYING/PAUSED 时刷（暂停也要把当前位置画上），缓冲/错误停
         if (mControlWrapper == null) return;
-        if (playState == VideoView.STATE_PLAYING) {
+        if (playState == VideoView.STATE_PLAYING || playState == VideoView.STATE_PAUSED) {
             mControlWrapper.startProgress();
         } else if (playState == VideoView.STATE_BUFFERING) {
             mControlWrapper.stopProgress();
-        } else if (playState == VideoView.STATE_PAUSED) {
-            mControlWrapper.startProgress();   // 暂停时也要刷一次把当前位置画上
         } else if (playState == VideoView.STATE_IDLE
                 || playState == VideoView.STATE_ERROR
                 || playState == VideoView.STATE_PLAYBACK_COMPLETED) {
@@ -182,9 +211,11 @@ public class TikTokController extends BaseVideoController {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        // DOWN 不消费：单击穿透给 TikTokView（暂停/继续），垂直滑动归 ViewPager。
-        // 双击在 onDoubleTap 里处理，第二击不再产生 TikTokView 的 onClick。
+        // 双击 ±10s 任何时候都可用
         mGesture.onTouchEvent(event);
+        // 面板显示时，点在面板子控件（暂停键/SeekBar）上的事件已被它们各自消费；
+        // 落到这里的触摸不消费（返回 false），让 TikTokView 处理（再次单击=收起面板
+        // 由 TikTokView 的 onSingleTapConfirmed→toggleShowState 完成）。
         return super.onTouchEvent(event);
     }
 
