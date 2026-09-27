@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TikTokController 的控制层（方案 D 阶段 1，2026-09-27）：
+  只有底部一条细长进度条。抖音式全屏即刷的页面，控制层必须"存在但不碍事"：
+  - 高度 24dp 触控区（SeekBar 滑块本身细），贴底不挡画面，不与右侧操作栏/标题抢空间；
+  - 进度色 = 品牌点缀色（三处特许用途之一），缓冲进度 = 白 alpha 30%；
+  - 双击 seek 的热区是 TikTokController 代码里加的两块透明 View（布局里不画），
+    单击仍穿透给 item 层的 TikTokView（暂停/继续），双击才吃掉。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <SeekBar
+        android:id="@+id/sb_progress"
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:layout_gravity="bottom"
+        android:background="@null"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:progressDrawable="@drawable/feed_seek_bar"
+        android:splitTrack="false"
+        android:thumb="@null"
+        android:max="1000" />
+</FrameLayout>

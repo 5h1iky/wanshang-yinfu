@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  刷视频页底部细进度条（方案 D）：背景/缓冲=白半透明，进度=品牌点缀色（三处特许之一）。
+  自己画一份而不引 dkplayer_layer_progress_bar：那份的主题色是 dkplayer-ui 的
+  dkplayer_theme_color，跟我们的色板是两套；进度条颜色必须跟色板走（改色只改 colors.xml）。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape>
+            <solid android:color="#4DFFFFFF" />
+        </shape>
+    </item>
+    <item android:id="@android:id/secondaryProgress">
+        <clip>
+            <shape>
+                <solid android:color="#80FFFFFF" />
+            </shape>
+        </clip>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape>
+                <solid android:color="@color/accent" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>
