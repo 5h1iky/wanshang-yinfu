@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 手表风药丸按钮底 -->
+<!-- 手表风药丸按钮底（色值走色板，2026-09-27 v2：原写死 #243040 已被色板更新甩开） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#243040" />
+    <solid android:color="@color/bg_control" />
     <corners android:radius="28dp" />
 </shape>

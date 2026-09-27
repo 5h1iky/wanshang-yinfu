@@ -167,17 +167,28 @@ public class FeedAdapter extends PagerAdapter {
         h.mTvLikeCount.setText(FeedVideo.formatCount(v.diggCount));
         h.mTvCommentCount.setText(FeedVideo.formatCount(v.commentCount));
         h.mTvCollectCount.setText(v.collected ? "已藏" : "收藏");
-        // 激活态：2026-09-27 起改为「亮度」表达，不再用红心/黄星（单色方案，见 colors.xml）。
-        // 注意**不能用 setColorFilter + 半透明白**去表达未激活：setColorFilter 走 SRC_ATOP，
-        // 结果 = src + dst*(1-srcAlpha)，叠在已经很亮的图标上几乎看不出变暗（试过，等于没区分）。
-        // setImageAlpha 是直接改视图 alpha，亮度差是真的。
-        h.mIvLike.setImageAlpha(v.liked ? STATE_ON : STATE_OFF);
-        h.mIvCollect.setImageAlpha(v.collected ? STATE_ON : STATE_OFF);
+        // 激活态：2026-09-27 v2 恢复彩色激活（方案 A.4）——品牌点缀色 Bili 粉点亮 icon，
+        // 未激活保持 45% 白。v7 的 setImageAlpha 亮度方案随单色方案一起退役：
+        // 点缀色上 icon 的可读性经真机对比确认够好（深色视频画面上粉色实心 icon 清晰）。
+        // 实现注意：setColorFilter 必须在未激活时 clear 掉，否则复用视图会把粉色带到下一页。
+        bindActivation(h.mIvLike, v.liked);
+        bindActivation(h.mIvCollect, v.collected);
     }
 
-    /** 激活/未激活的 alpha（未激活 45%：与激活态形成明显但仍柔和的亮度差） */
-    private static final int STATE_ON = 255;
-    private static final int STATE_OFF = 115;
+    /** 激活 = 品牌点缀色染色；未激活 = 清除滤镜（icon 本体已是 state_off 层次的白色） */
+    private static void bindActivation(ImageView iv, boolean active) {
+        if (iv == null) return;
+        if (active) {
+            iv.setColorFilter(androidx.core.content.ContextCompat
+                    .getColor(iv.getContext(), R.color.accent));
+        } else {
+            iv.setColorFilter(null);
+            iv.setImageAlpha(STATE_OFF_ALPHA);
+        }
+    }
+
+    /** 未激活 icon 的透明度（45% 白：与激活态的实色点缀形成明显但仍柔和的亮度差） */
+    private static final int STATE_OFF_ALPHA = 115;
 
     /**
      * 图片加载的成功/失败回调，只为了**能在日志里取证**。

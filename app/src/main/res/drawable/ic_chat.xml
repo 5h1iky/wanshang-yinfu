@@ -7,6 +7,6 @@
     android:tint="@color/icon_on_surface">
     <path android:fillColor="#FFFFFFFF"
         android:pathData="M4,4 L20,4 A2,2 0 0,1 22,6 L22,14 A2,2 0 0,1 20,16 L10,16 L5,20 L5,16 L4,16 A2,2 0 0,1 2,14 L2,6 A2,2 0 0,1 4,4 Z" />
-    <path android:fillColor="#FF0E141B"
+    <path android:fillColor="#FF000000"
         android:pathData="M6,8.5 h12 v1.6 h-12 z M6,11.6 h8 v1.6 h-8 z" />
 </vector>

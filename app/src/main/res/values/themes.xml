@@ -14,6 +14,7 @@
         <item name="colorOnSurface">@color/text_primary</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
-        <item name="android:statusBarColor">@color/bg_base</item>
+        <!-- 品牌点缀色三处之一：statusBar（Bili pink 的唯一用途，同款逻辑） -->
+        <item name="android:statusBarColor">@color/accent</item>
     </style>
 </resources>
