@@ -8,60 +8,28 @@ captures/
 keystore.properties
 keystore/
 
-# 构建产物与日志（工程根目录的 40 个 build-*.log 与两个 APK 不入库）
+# 构建产物与日志（工程根目录的 build-*.log 与 APK 不入库）
 build-*.log
 *.apk
-
-# 调试现场的敏感/二进制残留（明文 cookie、抓包 body、挑战页）
-tools/dy-cookie.txt
-tools/dy-web-params.json
-tools/webview-cookies.json
-tools/*.bin
-tools/challenge-page.html
-tools/session-monitor.log
-tools/m05-feed-result.json
-tools/dy-app-session.xml
-tools/*.xml
-tools/node_modules/
-tools/ui-*.xml
 
 # 真机截图（体积大，本地留档）
 shots/
 
-# 探针产物与会话派生落盘（含签名播放地址 / RENDER_DATA / 整页 HTML，不入库也不该入库）
-tools/detail-raw.json
-tools/dom-signed-urls.json
-tools/first-batch.json
-tools/rec-page.html
-tools/tabfeed-url.txt
-tools/jxids.txt
-tools/tf.txt
-tools/_new_comments_block.js
-tools/*.log
-probe-*.log
-test-*.log
-feedcap-*.log
+# ── 本地诊断脚本：2026-09-30 起整体不入库，只保留在开发机 ──────────────
+# 这些是排查问题时写的探针 / 抓包 / 取证脚本（probe-*.js、cdp-*.js、ui-*.js 等），
+# 属于开发期工具，不是交付物；数量多且与主代码无关，公开仓库里只会干扰阅读。
+# 注意：代码注释与历史文档里出现的 tools/xxx.js 路径，均指开发机上的本地文件。
+/tools/
 
-# Node 移植件的产物目录
+# Node 依赖
 **/node_modules/
-
-# 第三方参考克隆（各自带 .git，可随时重下；dy-spider/dyapi 无 LICENSE，不进我们将发布的仓库）
-/tools/chatkit-src/
-/tools/dkvideo-src/
-/tools/dy-spider-src/
-/tools/dyapi-src/
-/tools/sign-src/
-
-/tools/bili-src/
-# dtrait Node 移植（内含参考实现的公钥与签名 blob 样例，发布仓库不需要）
-/tools/dtrait-port/
-
-# �Ự cookie �����������ֵ���������ض���ʵ�飩
-tools/_session_cookie.txt
-tools/_session.xml
 
 # 提交信息临时文件（写完就删，别进库）
 commit-*.txt
-# 临时提交信息文件
 .git-commit-msg.txt
 .cm.txt
+
+# 零散日志
+probe-*.log
+test-*.log
+feedcap-*.log

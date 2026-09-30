@@ -5,6 +5,7 @@
 **安卓手表上的轻量抖音客户端** —— 刷视频、回私信，抬腕即达。
 
 [![Release](https://img.shields.io/github/v/release/5h1iky/wanshang-yinfu?label=%E7%89%88%E6%9C%AC)](https://github.com/5h1iky/wanshang-yinfu/releases)
+[![Build](https://github.com/5h1iky/wanshang-yinfu/actions/workflows/build.yml/badge.svg)](https://github.com/5h1iky/wanshang-yinfu/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/%E5%8D%8F%E8%AE%AE-GPL--3.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Android%205.0%2B-green.svg)](#-安装)
 [![Stars](https://img.shields.io/github/stars/5h1iky/wanshang-yinfu?style=social)](https://github.com/5h1iky/wanshang-yinfu/stargazers)
@@ -24,6 +25,19 @@
 | 学习目的的开源代码（GPL-3.0） | 破解工具或自动化脚本（无任何自动化骚扰能力） |
 
 **风险自负**：使用本应用产生的一切后果（账号限制等）由使用者自行承担，详见应用内首启的免责声明。
+
+### ⚠️ 已知局限与失效风险（请先读完再决定要不要用）
+
+| 项 | 说明 |
+|---|---|
+| **开发方式** | 本项目由**非专业开发者借助 AI 辅助**完成。功能可用、持续维护，但**不等于**专业团队的工程保障 |
+| **依赖非公开接口** | 应用依赖抖音的网页/接口行为。**抖音一改版，相关功能可能直接失效** |
+| **不保证及时修复** | 接口或页面结构变更后，**不承诺**在多久内修好——快的当天，慢的可能要等社区逆向出新方案 |
+| **谁会先挂** | ① 私信/评论（依赖网页 DOM 结构，最脆）→ ② 视频流（依赖签名算法 a_bogus，抖音大改时要等新算法）→ ③ 点赞/收藏 |
+| **失效时的表现** | 通常是"接口全部报错 / 列表空白"，而不是崩溃。App 内 **设置 → 诊断日志** 能看到线索 |
+| **不提供任何承诺** | 无技术支持、无可用性保证，随时可能停止更新 |
+
+> 换句话说：**这是一个"能用就用"的朋友间项目，不是产品。** 介意的请用官方客户端。
 
 ## ✨ 功能
 
@@ -49,14 +63,24 @@
 
 ## 🔨 自己编译
 
+**环境要求**：JDK 17 或更高（本项目用 21）+ Android SDK 36。
+
 ```bash
 git clone https://github.com/5h1iky/wanshang-yinfu.git
 cd wanshang-yinfu
-# JDK 21（Android Studio 自带 JBR 即可），Android SDK 36
 ./gradlew assembleDebug          # 出 debug 包
 ./gradlew assembleRelease        # 出 release 包（需自配 keystore.properties，见下）
-./gradlew testDebugUnitTest      # 35 项单测
+./gradlew testDebugUnitTest      # 全部单元测试
 ```
+
+> **不需要改任何配置文件就能编译**。如果你的默认 JDK 不是 17+，请在**自己的用户级**配置里
+> 指定（不要改仓库里的 `gradle.properties`）：
+>
+> ```properties
+> # Windows: %GRADLE_USER_HOME%\gradle.properties
+> # macOS / Linux: ~/.gradle/gradle.properties
+> org.gradle.java.home=/path/to/your/jdk-21
+> ```
 
 `keystore.properties`（不入库，缺失时 release 自动退化为未签名）：
 

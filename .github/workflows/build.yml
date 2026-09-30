@@ -1,0 +1,72 @@
+name: Build
+
+# 干净环境构建检查（2026-09-30 新增）
+#
+# 为什么要有它：曾经 gradle.properties 里写死了开发机的 JDK 路径，
+# 本机能编、别人 clone 就废，而这种事在本地永远发现不了。
+# 这个 workflow 在**全新虚拟机**上跑单测 + 打包，等于每次推送都替所有人生成
+# 一个"这个仓库现在能被编译吗"的答案。
+#
+# 状态徽章（README 顶部）：
+#   https://github.com/5h1iky/wanshang-yinfu/actions/workflows/build.yml/badge.svg
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 单测 + Debug 打包
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: 单元测试
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: 打包 Debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: 失败时上传测试报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            app/build/test-results/testDebugUnitTest/*.xml
+            app/build/reports/tests/testDebugUnitTest/**
+          if-no-files-found: ignore
