@@ -48,6 +48,9 @@ public class SettingsActivity extends UiActivity {
             }
         });
         buildRows();
+        // 公告（Cloudflare 三件之①）：用户拍板的第二个拉取点——进设置页刷新一次，
+        // 回到主屏即可看到新公告（主屏只负责显示，不重复打网络）。
+        com.dywatch.app.net.AnnounceStore.refreshInBackground(this, true, null);
     }
 
     private void buildRows() {

@@ -7,6 +7,7 @@
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_base"
@@ -20,6 +21,27 @@
         android:orientation="vertical"
         android:paddingTop="@dimen/s3"
         android:paddingBottom="@dimen/s4">
+
+        <!--
+          公告条（Cloudflare 三件之①）：主屏顶部**细** banner，不弹窗不打断。
+          点击 = 关闭并记 lastReadId（同一条不再提示）；无公告/拉不到 → GONE（静默）。
+          配色随 level（info 常规 / warn 品牌粉 / danger 浅红），文案由 MainActivity 填。
+        -->
+        <TextView
+            android:id="@+id/tv_announce"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="@dimen/s3"
+            android:layout_marginBottom="@dimen/s2"
+            android:background="@drawable/bg_settings_row"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="@dimen/s4"
+            android:paddingVertical="@dimen/s3"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_caption"
+            android:visibility="gone"
+            tools:text="【公告】标题 · 正文  ✕" />
 
         <TextView
             android:id="@+id/tv_title"
