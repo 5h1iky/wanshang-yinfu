@@ -1,20 +1,22 @@
 package com.dywatch.app.ui;
 
-// 公告弹窗（2026-09-30 用户拍板：banner 太不起眼 → 改弹窗）。
+// 公告弹窗（2026-09-30 用户两次拍板后的形态）：
+//   第一版 → 主屏顶部细 banner（用户："太不起眼/我根本没看到"）
+//   第二版 → 系统 AlertDialog（用户："怎么又用系统自带的那个了"）
+//   现在   → 自绘弹窗 DyDialog：深色圆角卡 + 胶囊按钮，与「设置行」同一套视觉
 //
 // 口径：
 //   - 有"未读且未过期"的公告才弹（AnnounceStore.pending 判定），同一条读过就不再打扰
-//   - 任何关闭方式（点按钮 / 返回键 / 点外部）都记 lastReadId，避免反复弹
-//   - 有 link 时给一个"查看详情"按钮（手表上多半没浏览器，失败只提示不崩）
-//   - 复用 Disclaimer 同款 Material3 AlertDialog，视觉与首启须知一致
+//   - 任何关闭方式（按钮 / 返回键 / 点外部）都记 lastReadId，避免反复弹
+//   - 有 link 时给次按钮「查看详情」（手表上多半没浏览器，失败只提示不崩）
+//   - level 只影响**标题颜色**（info 常规白 / warn 品牌粉 / danger 浅红）——
+//     不铺装饰色：色板纪律规定品牌粉只允许出现在状态栏/进度条/点赞激活三处
 
 import android.app.Activity;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
 
-import androidx.appcompat.app.AlertDialog;
-
+import com.dywatch.app.R;
 import com.dywatch.app.net.AnnounceApi;
 import com.dywatch.app.net.AnnounceStore;
 
@@ -28,26 +30,34 @@ public final class AnnounceDialog {
         final AnnounceApi.Announcement a = AnnounceStore.pending(act);
         if (a == null) return;
 
-        String body = a.text == null ? "" : a.text;
-        if (a.link != null && !a.link.isEmpty()) {
-            body = body + (body.isEmpty() ? "" : "\n\n") + "详情：" + a.link;
+        String bodyText = a.text == null ? "" : a.text;
+        final boolean hasLink = a.link != null && !a.link.isEmpty();
+        if (hasLink) {
+            bodyText = bodyText + (bodyText.isEmpty() ? "" : "\n\n") + a.link;
         }
 
-        AlertDialog.Builder b = new AlertDialog.Builder(act)
-                .setTitle(a.title)
-                .setMessage(body)
-                .setCancelable(true)
-                .setPositiveButton("知道了", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        // 关闭即已读（由 setOnDismissListener 统一记账）
+        int titleColor = R.color.text_primary;
+        if (AnnounceApi.LEVEL_DANGER.equals(a.level)) {
+            titleColor = R.color.danger;
+        } else if (AnnounceApi.LEVEL_WARN.equals(a.level)) {
+            titleColor = R.color.accent;
+        }
+
+        DyDialog.Opt o = new DyDialog.Opt()
+                .title(a.title)
+                .body(bodyText)
+                .titleColor(titleColor)
+                .positive("知道了", null)
+                .onDismiss(new Runnable() {
+                    @Override public void run() {
+                        // 任何关闭方式都记已读——否则会反复弹（用户最烦这个）
+                        AnnounceStore.markRead(act, a.id);
+                        com.dywatch.app.util.AppLog.i("announce", "公告已关闭并记已读 id=" + a.id);
                     }
                 });
-
-        if (a.link != null && !a.link.isEmpty()) {
-            b.setNeutralButton("查看详情", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
+        if (hasLink) {
+            o.negative("查看详情", new Runnable() {
+                @Override public void run() {
                     try {
                         act.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(a.link)));
                     } catch (Exception e) {
@@ -57,17 +67,7 @@ public final class AnnounceDialog {
                 }
             });
         }
-
-        final AlertDialog dlg = b.create();
-        // 任何关闭方式都记已读——否则会反复弹（用户最烦这个）
-        dlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
-            @Override
-            public void onDismiss(DialogInterface dialog) {
-                AnnounceStore.markRead(act, a.id);
-                com.dywatch.app.util.AppLog.i("announce", "公告弹窗已关闭并记已读 id=" + a.id);
-            }
-        });
-        dlg.show();
+        DyDialog.show(act, o);
         com.dywatch.app.util.AppLog.i("announce", "弹出公告 id=" + a.id + " title=" + a.title);
     }
 }

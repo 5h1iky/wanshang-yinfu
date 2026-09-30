@@ -4,10 +4,7 @@ package com.dywatch.app.util;
 // 内容要点：与官方无关 / 非官方应用 / 风险自负 / 不收费不广告 / 登录态只存本机 / 仅供学习交流。
 
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.SharedPreferences;
-
-import androidx.appcompat.app.AlertDialog;
 
 public final class Disclaimer {
 
@@ -42,35 +39,34 @@ public final class Disclaimer {
             if (onAccepted != null) onAccepted.run();
             return;
         }
-        new AlertDialog.Builder(ctx)
-                .setTitle("使用前须知")
-                .setMessage(TEXT)
-                .setCancelable(false)
-                .setPositiveButton("同意并继续", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        SharedPreferences sp = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE);
-                        sp.edit().putBoolean(KEY_ACCEPTED, true).apply();
+        if (!(ctx instanceof android.app.Activity)) return;   // 自绘弹窗要挂 Activity
+        final android.app.Activity act = (android.app.Activity) ctx;
+        com.dywatch.app.ui.DyDialog.Opt o = new com.dywatch.app.ui.DyDialog.Opt()
+                .title("使用前须知")
+                .body(TEXT)
+                .cancelable(false)                 // 红线：必须明确同意
+                .positive("同意并继续", new Runnable() {
+                    @Override public void run() {
+                        act.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                                .edit().putBoolean(KEY_ACCEPTED, true).apply();
                         if (onAccepted != null) onAccepted.run();
                     }
                 })
-                .setNegativeButton("退出", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        if (ctx instanceof android.app.Activity) {
-                            ((android.app.Activity) ctx).finish();
-                        }
+                .negative("退出", new Runnable() {
+                    @Override public void run() {
+                        act.finish();
                     }
-                })
-                .show();
+                });
+        com.dywatch.app.ui.DyDialog.show(act, o);
     }
 
     /** 供"诊断/关于"重看全文 */
     public static void show(Context ctx) {
-        new AlertDialog.Builder(ctx)
-                .setTitle("免责声明")
-                .setMessage(TEXT)
-                .setPositiveButton("知道了", null)
-                .show();
+        if (!(ctx instanceof android.app.Activity)) return;
+        com.dywatch.app.ui.DyDialog.show((android.app.Activity) ctx,
+                new com.dywatch.app.ui.DyDialog.Opt()
+                        .title("免责声明")
+                        .body(TEXT)
+                        .positive("知道了", null));
     }
 }

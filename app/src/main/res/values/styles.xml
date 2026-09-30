@@ -26,8 +26,7 @@
     </style>
 
     <!-- 关于页的行（方案 F）：标题行 + 副行（链接/说明），卡片底、可点 -->
-    <style name="AboutRow">
-        <item name="android:layout_width">match_parent</item>
+    <style name="AboutRow">        <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginStart">@dimen/s3</item>
         <item name="android:layout_marginEnd">@dimen/s3</item>
@@ -42,5 +41,30 @@
         <item name="android:paddingBottom">@dimen/s3</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">@dimen/t_body</item>
+    </style>
+
+    <!--
+      自绘弹窗按钮（2026-09-30）：胶囊 + 42dp 触摸下限（与全局 ctrl_min 一致）。
+      主按钮=实底卡片色，次按钮=仅描边；文字不随「字体大小」缩放（chrome 层，见 Fonts 的纪律）。
+    -->
+    <style name="DyDialogButton">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">@dimen/ctrl_min</item>
+        <item name="android:background">@drawable/bg_dialog_btn_primary</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minWidth">72dp</item>
+        <item name="android:paddingStart">@dimen/s5</item>
+        <item name="android:paddingEnd">@dimen/s5</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">@dimen/t_body</item>
+    </style>
+
+    <style name="DyDialogButton.Primary" />
+
+    <style name="DyDialogButton.Ghost">
+        <item name="android:background">@drawable/bg_dialog_btn_ghost</item>
+        <item name="android:textColor">@color/text_muted</item>
     </style>
 </resources>

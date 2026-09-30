@@ -69,4 +69,8 @@
 
     <!-- 加载小圆圈：中性亮灰，不抢戏 -->
     <color name="spinner">#D9EBE0E2</color>
+
+    <!-- 自绘弹窗底（2026-09-30）：比 bg_card 更实一档——弹窗压在内容之上，
+         半透明会让底下的文字透出来干扰阅读；AMOLED 上仍接近纯黑。 -->
+    <color name="bg_dialog">#F21C1C1C</color>
 </resources>
