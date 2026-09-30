@@ -17,6 +17,7 @@ import com.dywatch.app.net.DouyinApi;
 import com.dywatch.app.util.AppLog;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -87,13 +88,87 @@ public class ChatEngine {
     private ChatEngine(android.content.Context ctx, Listener listener, String homeUrl) {
         mCtx = ctx;
         mListener = listener;
+        logWebViewEnv();   // 先自述内核版本：手表上"跑不跑得动"的第一手证据
+        setupJsPatch();    // 内核过旧 → 启用私信 JS 语法补丁（方案 A）
         mWebView = new WebView(ctx);
         mWebView.addJavascriptInterface(this, BRIDGE_NAME); // JS → Java 回调
         WebSettings s = mWebView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setUserAgentString(DouyinApi.UA);
+        mWebView.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
+                // 页面脚本报错是"DOM 抓不到东西"最常见的原因（尤其老内核跑不动现代 bundle）
+                if (cm != null && cm.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
+                    AppLog.i("engine", "JS错误: " + cm.message()
+                            + " @" + cm.sourceId() + ":" + cm.lineNumber());
+                }
+                return true;
+            }
+        });
         mWebView.setWebViewClient(new WebViewClient() {
+
+            /**
+             * 老内核语法补丁（方案 A）：拦下私信 JS，把 Chromium 83 解析不了的语法改写后再喂内核。
+             * 仅在**内核过旧**时启用（内核够新就直接放过，不做无谓的搬运与改写）。
+             */
+            @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view,
+                                                                             android.webkit.WebResourceRequest req) {
+                if (!mPatchEnabled || req == null) return null;
+                String url = req.getUrl() == null ? null : req.getUrl().toString();
+                if (url == null || !isPatchTarget(url)) return null;
+                try {
+                    String js = readPatched(url);
+                    if (js == null) return null;
+                    return new android.webkit.WebResourceResponse(
+                            "application/javascript", "UTF-8",
+                            new java.io.ByteArrayInputStream(js.getBytes("UTF-8")));
+                } catch (Throwable t) {
+                    AppLog.i("engine", "JS 补丁失败，放行原始请求: " + t);
+                    return null;   // 改不动就别拦，宁可用原样（保持现有行为）
+                }
+            }
+
+            @Override
+            public void onReceivedError(WebView view, android.webkit.WebResourceRequest req,
+                                        android.webkit.WebResourceError err) {
+                if (req != null && req.isForMainFrame()) {
+                    AppLog.i("engine", "主文档加载失败 code=" + err.getErrorCode()
+                            + " " + err.getDescription() + " url=" + req.getUrl());
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest req,
+                                            android.webkit.WebResourceResponse resp) {
+                if (req != null && req.isForMainFrame()) {
+                    AppLog.i("engine", "主文档 HTTP " + resp.getStatusCode() + " url=" + req.getUrl());
+                }
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                // 手表内存小，渲染进程被系统回收是常见死法。不接管的话系统会把整个 App 一起杀掉，
+                // 用户只看到"闪退"，什么线索都没有。
+                AppLog.i("engine", "渲染进程被回收 didCrash=" + (detail != null && detail.didCrash()));
+                try {
+                    if (view != null) view.destroy();
+                } catch (Throwable ignored) {
+                }
+                mWebView = null;
+                mReady = false;
+                synchronized (ChatEngine.class) {
+                    // ⚠️ 这里在匿名内部类里，this 是 WebViewClient 不是引擎 → 必须写 ChatEngine.this
+                    if (sInstance == ChatEngine.this) sInstance = null;   // 下次 getInstance 重建
+                }
+                if (mListener != null) {
+                    mListener.onEngineError("渲染进程被系统回收（手表内存不足），已重置引擎，请重进本页");
+                }
+                return true;   // 已处理，别让系统连 App 一起杀
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 mReady = true;
@@ -126,9 +201,60 @@ public class ChatEngine {
         mWebView.loadUrl(homeUrl);
     }
 
-    /** 注入 JS 桥（幂等） */
-    private void injectBridge() {
+    /**
+     * 决定是否启用 JS 语法补丁：**只在内核确实过旧时开**。
+     * 内核够新还去拦截改写，是白白增加一次下载与一次遍历，还可能引入偏差。
+     */
+    private void setupJsPatch() {
         try {
+            String v = null;
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage();
+                if (pi != null) v = pi.versionName;
+            }
+            LegacyKernel.Kernel k = LegacyKernel.from(v, "");
+            boolean tooOld = k.known() && !k.supportsIm();
+            mPatchEnabled = tooOld;
+            if (tooOld) {
+                File dir = new File(mCtx.getCacheDir(), "js_patch");
+                mPatchCache = new JsPatchCache(dir);
+                AppLog.i("engine", "内核过旧（Chromium " + k.major + " < "
+                        + LegacyKernel.MIN_CHROME_FOR_IM + "）→ 启用私信 JS 语法补丁");
+            }
+        } catch (Throwable t) {
+            mPatchEnabled = false;   // 拿不到内核信息就不冒险改
+            AppLog.i("engine", "JS 补丁初始化失败，按默认放行: " + t);
+        }
+    }
+
+    /**
+     * 引擎环境自述（2026-09-30 加）：手表上"私信总是失败"时，最先要回答的问题是
+     * **这台设备到底有没有可用的 WebView、内核多老**——因为私信 100% 跑在 WebView 里，
+     * 而引擎会把 UA 改成 PC 版，等于拿同一份现代前端 bundle 去喂可能很老的内核。
+     */
+    private void logWebViewEnv() {
+        try {
+            String pkg = "未知";
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage();
+                pkg = (pi == null) ? "未安装/未启用" : (pi.packageName + " v" + pi.versionName);
+            }
+            String defUa = "";
+            try {
+                defUa = android.webkit.WebSettings.getDefaultUserAgent(mCtx);
+            } catch (Throwable ignored) {
+            }
+            AppLog.i("engine", "WebView内核=" + pkg + " | 默认UA=" + defUa + " | 屏="
+                    + mCtx.getResources().getDisplayMetrics().widthPixels + "x"
+                    + mCtx.getResources().getDisplayMetrics().heightPixels
+                    + "@" + mCtx.getResources().getDisplayMetrics().densityDpi + "dpi");
+        } catch (Throwable t) {
+            AppLog.i("engine", "环境自述失败: " + t);
+        }
+    }
+
+    /** 注入 JS 桥（幂等） */
+    private void injectBridge() {        try {
             String js = readAsset("chat_bridge.js");
             mWebView.evaluateJavascript(js, null);
         } catch (Exception e) {
@@ -268,6 +394,79 @@ public class ChatEngine {
     public void sendComment(String awemeId, String text) {
         runAction("ChatBridge.sendComment(" + org.json.JSONObject.quote(awemeId) + ","
                 + org.json.JSONObject.quote(text) + ");");
+    }
+
+    // ---- 老内核语法补丁（方案 A）----
+    // 手表 WebView 是 Chromium 83，抖音私信微前端（pcim）用了 83 解析不了的语法，
+    // 整块模块不执行 → 会话列表永远空。这里把 JS 拦下来改写后再喂内核。
+    // 只在内核确实过旧时启用，且只处理私信相关 JS（不碰其它资源）。
+
+    /** 是否启用补丁（内核过旧时才开） */
+    private boolean mPatchEnabled;
+    /** 补丁是否真的改写过至少一个文件（用于把"内核过旧"的锅摘掉） */
+    private volatile boolean mPatchApplied;
+
+    /** 语法补丁是否已生效（会话页据此不再把失败归咎于内核） */
+    public boolean isPatchApplied() { return mPatchApplied; }
+
+    private JsPatchCache mPatchCache;
+
+    /** 私信模块 JS 的 URL 特征（按目录匹配，不写死 hash——站方一更新 hash 就变） */
+    private static boolean isPatchTarget(String url) {
+        return url.contains("/pcim/static/js/") && url.endsWith(".js");
+    }
+
+    /** 取改写后的 JS：优先缓存；未命中则下载→改写→落盘 */
+    private String readPatched(String url) throws Exception {
+        if (mPatchCache != null) {
+            String cached = mPatchCache.load(url);
+            if (cached != null) {
+                AppLog.i("engine", "JS 补丁命中缓存: " + tail(url));
+                return cached;
+            }
+        }
+        String raw = download(url);
+        if (raw == null || raw.isEmpty()) {
+            AppLog.i("engine", "JS 补丁：下载为空 " + tail(url));
+            return null;
+        }
+        // 诊断：记下原始长度与前 60 字符，便于确认"拿到的到底是不是真文件"
+        AppLog.i("engine", "JS 补丁原始 " + tail(url) + " 长度=" + raw.length()
+                + " 头=" + raw.substring(0, Math.min(60, raw.length())).replace("\n", "\\n"));
+        JsSyntaxPatch.Result r = JsSyntaxPatch.patch(raw);
+        if (r.changed) mPatchApplied = true;
+        AppLog.i("engine", "JS 补丁改写 " + tail(url) + "：私有 " + r.privateId
+                + " / ??= " + r.logical + " / 类字段 " + r.classField);
+        if (mPatchCache != null) mPatchCache.save(url, r.js);
+        return r.js;
+    }
+
+    private static String download(String url) throws Exception {
+        java.net.HttpURLConnection c = null;
+        try {
+            c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            c.setRequestMethod("GET");
+            c.setRequestProperty("User-Agent", DouyinApi.UA);
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(20000);
+            int code = c.getResponseCode();
+            if (code != 200) return null;
+            java.io.InputStream is = c.getInputStream();
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            is.close();
+            return new String(bos.toByteArray(), "UTF-8");
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    private static String tail(String url) {
+        if (url == null) return "";
+        int i = url.lastIndexOf('/');
+        return i >= 0 ? url.substring(i + 1) : url;
     }
 
     /** JS → Java 回调入口（由 chat_bridge.js 调用，经 JavascriptInterface）。

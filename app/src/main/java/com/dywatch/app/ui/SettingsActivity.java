@@ -164,6 +164,15 @@ public class SettingsActivity extends UiActivity {
                 toast("已清除浏览记录");
             }
         });
+        // 老内核上私信 JS 会被就地改写并缓存；规则升级或怀疑改坏了时，清一下就会重新改写。
+        // 内核够新的设备这里清了也没副作用（本来就没缓存）。
+        actionRow("重建私信补丁缓存", "内核过旧时会改写抖音私信脚本；改坏了点这里重来", new Runnable() {
+            @Override public void run() {
+                new com.dywatch.app.chat.JsPatchCache(
+                        new java.io.File(getCacheDir(), "js_patch")).clear();
+                toast("已清除，下次进聊天会重新改写");
+            }
+        });
         actionRow("诊断日志", "WebView 版本 / 上次崩溃 / 最近运行记录", new Runnable() {
             @Override public void run() {
                 new AlertDialog.Builder(SettingsActivity.this)

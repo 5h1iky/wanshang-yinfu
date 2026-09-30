@@ -39,7 +39,20 @@ public class LoginActivity extends UiActivity {
     private boolean mDone;
     private boolean mWarmed;
 
-    /** 页面适配：整体缩放到屏宽，放大二维码并居中；结果回传统计值供调参 */
+    /**
+     * 页面适配：整体缩放到屏宽 + 把二维码克隆成全屏白底覆盖层。
+     *
+     * ⚠️ 2026-10-01 修复"二维码不再自动全屏"：
+     *   登录页是 SPA，实测 HTML 里 canvas/img/svg **一个都没有**（二维码 100% 由 JS 动态生成）。
+     *   旧实现在 onPageFinished 后**固定等 400ms 且只试一次**，手表（32 位 A53 + WebView 83）
+     *   渲染慢于 400ms 时就找不到二维码 → 覆盖层永远不出现。
+     *   手机渲染快所以看不出问题——这就是"某版本会自动全屏、现在又没了"的真相：
+     *   **代码一直没变，也没被删，只是手表上稳定错过那 400ms 窗口**。
+     *
+     * 修法：改成**轮询等待**（最多 8 秒，每 300ms 找一次），找到即叠加并停止；
+     *       并把候选从 img/canvas 放宽到含二维码图的元素（含 CSS background-image）。
+     * 结果仍回传 overlay=Y/N，便于真机确认（adb logcat -s dywatch 看"页面适配"）。
+     */
     private static final String FIT_QR_JS =
             "(function(){try{"
                     + "var vw=document.documentElement.clientWidth;"
@@ -47,27 +60,43 @@ public class LoginActivity extends UiActivity {
                     + "var bw=document.body?document.body.scrollWidth:0;"
                     + "var wide=Math.max(sw,bw,vw);"
                     + "var scale=Math.min(1,vw/wide);"
-                    + "if(scale<0.999){document.documentElement.style.zoom=Math.floor(scale*100)+'%';}"
-                    + "setTimeout(function(){"
-                    + "var cands=document.querySelectorAll('img,canvas');var best=null,ba=0;"
-                    + "for(var i=0;i<cands.length;i++){var r=cands[i].getBoundingClientRect();"
-                    + "var a=r.width*r.height;var sq=Math.abs(r.width-r.height)/Math.max(r.width,1);"
-                    + "if(a>ba&&sq<0.4&&r.width>=50){best=cands[i];ba=a;}}"
-                    + "var info='vw='+vw+' sw='+sw+' bw='+bw+' s='+scale.toFixed(2)+' qr='+(best?'Y':'N');"
-                    // 终极适配：把二维码克隆成全屏白底覆盖层（不依赖页面布局，永远完整可扫）
-                    // 点击覆盖层 = 刷新页面（二维码过期时用）
-                    + "if(best){document.documentElement.style.zoom='1';"
-                    + "var src=(best.tagName==='CANVAS'&&best.toDataURL)?best.toDataURL():(best.src||'');"
-                    + "if(src){var wrap=document.createElement('div');"
+                    // 找二维码：img / canvas / 带二维码背景图的元素
+                    + "function findQr(){var cands=document.querySelectorAll('img,canvas,div,span');"
+                    + "var best=null,ba=0;"
+                    + "for(var i=0;i<cands.length;i++){var e=cands[i];var r=e.getBoundingClientRect();"
+                    + "var a=r.width*r.height;if(a<=ba)continue;"
+                    + "var sq=Math.abs(r.width-r.height)/Math.max(r.width,1);"
+                    + "if(sq>=0.4||r.width<50)continue;"
+                    + "if(e.tagName==='IMG'||e.tagName==='CANVAS'){best=e;ba=a;continue;}"
+                    + "var bg=getComputedStyle(e).backgroundImage||'';"
+                    + "if(bg&&bg.indexOf('url(')===0){best=e;ba=a;}}"
+                    + "return best;}"
+                    + "function srcOf(e){if(!e)return '';"
+                    + "if(e.tagName==='CANVAS'&&e.toDataURL){try{return e.toDataURL();}catch(x){return '';}}"
+                    + "if(e.tagName==='IMG')return e.src||'';"
+                    + "var bg=getComputedStyle(e).backgroundImage||'';"
+                    + "var m=bg.match(/url\\(\"?'?([^\"')]+)/);return m?m[1]:'';}"
+                    + "var tries=0,timer=setInterval(function(){"
+                    + "tries++;var best=findQr();var src=srcOf(best);"
+                    + "if(src){clearInterval(timer);"
+                    + "document.documentElement.style.zoom='1';"
+                    + "var wrap=document.createElement('div');"
                     + "wrap.style.cssText='position:fixed;left:0;top:0;right:0;bottom:0;background:#fff;"
                     + "z-index:2147483647;display:flex;align-items:center;justify-content:center;';"
-                    + "var img=new Image();img.src=src;"
-                    + "img.style.cssText='width:84vw;height:84vw;max-width:82vh;max-height:82vh;';"
-                    + "wrap.appendChild(img);"
+                    + "var im=new Image();im.src=src;"
+                    + "im.style.cssText='width:84vw;height:84vw;max-width:82vh;max-height:82vh;';"
+                    + "wrap.appendChild(im);"
                     + "wrap.onclick=function(){location.reload();};"
-                    + "document.body.appendChild(wrap);info=info+' overlay=Y';}}"
-                    + "if(window.FitBridge){FitBridge.report(info);}"
-                    + "},400);"
+                    + "document.body.appendChild(wrap);"
+                    + "if(window.FitBridge){FitBridge.report('vw='+vw+' s='+scale.toFixed(2)"
+                    + "+' qr=Y overlay=Y tries='+tries);}"
+                    + "return;}"
+                    + "if(tries>=27){"   // 27 × 300ms ≈ 8 秒
+                    + "clearInterval(timer);"
+                    + "if(scale<0.999){document.documentElement.style.zoom=Math.floor(scale*100)+'%';}"
+                    + "if(window.FitBridge){FitBridge.report('vw='+vw+' s='+scale.toFixed(2)"
+                    + "+' qr=N overlay=N tries='+tries);}}"
+                    + "},300);"
                     + "}catch(e){if(window.FitBridge){FitBridge.report('ERR '+e);}}})();";
 
     /** JS→Java：回传页面适配统计（调参用） */
@@ -75,10 +104,18 @@ public class LoginActivity extends UiActivity {
         @android.webkit.JavascriptInterface
         public void report(String info) {
             AppLog.i("login", "页面适配: " + info);
+            // ⚠️ 别把调试串（vw=372 s=0.86 overlay=Y）直接给用户看：这是开发期调参用的。
+            //    只在没找到二维码时提示一句人话，其余保持原有引导文案。
+            final boolean hasOverlay = info != null && info.contains("overlay=Y");
+            final boolean gaveUp = info != null && info.contains("overlay=N");
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    setHint("页面适配 " + info + "（QR 可扫即可）");
+                    if (hasOverlay) {
+                        setHint("请用手机抖音「扫一扫」登录（点二维码可刷新）");
+                    } else if (gaveUp) {
+                        setHint("请用手机抖音「扫一扫」登录；若二维码太小，可点页面刷新重试");
+                    }
                 }
             });
         }

@@ -27,6 +27,10 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     private TextView mHint;
     private ChatEngine mEngine;
     private int mEmptyRetries;
+    /** 登录态是否已确认（onAuth ok=true 后置起） */
+    private boolean mAuthed;
+    /** 私信页是否已加载完成（onEngineReady 后置起） */
+    private boolean mPageReady;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +76,18 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         AppLog.i("chat", "会话列表页打开");
     }
 
+    /** 本机网页内核（用于判定私信是否可能因内核过旧而不可用） */
+    private LegacyKernel.Kernel kernel() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < 26) return null;
+            android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage();
+            if (pi == null) return null;
+            return LegacyKernel.from(pi.versionName, pi.packageName);
+        } catch (Throwable t) {
+            return null;   // 取不到就当未知，不因此崩溃
+        }
+    }
+
     /**
      * 加载小圆圈：转 = "正在取数据且还没结果"；一旦给出错误/终态提示就停，
      * 免得界面永远在转（用户看不出到底还在等还是已经失败）。
@@ -113,10 +129,22 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     private void render(List<Conversation> list) {
         if (list.isEmpty()) {
-            hint("正在等待会话数据…（自动重试）");
+            // 老内核（方案 D）：命中就给终态提示，不再无谓转圈。
+            // 以前一律写"正在等待会话数据…（自动重试）"，用户以为是自己网络不好，
+            // 实际上是本机内核太老（真机坐实：Chromium 83 解析不了抖音私信模块）。
+            LegacyKernel.Kernel k = kernel();
+            boolean patched = mEngine != null && mEngine.isPatchApplied();
+            // ⚠️ 补丁已生效时，内核不再是原因 → 别再显示"内核过旧"（那会误导）
+            if (!patched && LegacyKernel.isKernelDeadEnd(k, mEmptyRetries)) {
+                hint(LegacyKernel.kernelHint(k));
+                setLoading(false);
+                AppLog.i("chat", "私信不可用（内核过旧）: " + LegacyKernel.kernelHint(k));
+                return;
+            }
             setLoading(true);   // 还在自动重试 = 仍在加载，圆圈继续转
-            // IM 数据异步渲染，页面刚就绪时常为空 → 自动重试
+            // IM 数据异步渲染，页面刚就绪时常为空 → 自动重试；提示要说明"卡在哪一步"
             if (mEmptyRetries < 8) {
+                hint(LegacyKernel.stuckHint(k, mAuthed, mPageReady, mEmptyRetries, patched));
                 mEmptyRetries++;
                 mConvs.postDelayed(new Runnable() {
                     @Override
@@ -125,7 +153,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
                     }
                 }, 2500);
             } else {
-                hint("没有会话（可下拉重进或稍后再试）");
+                // 重试到底仍空：给出"卡在哪"的终态说明，而不是含糊的"没有会话"
+                hint(LegacyKernel.stuckHint(k, mAuthed, mPageReady, mEmptyRetries, patched));
                 setLoading(false);
             }
             return;
@@ -147,6 +176,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     @Override
     public void onEngineReady() {
+        mPageReady = true;
         // ⚠️ getInstance 同步回调时 mEngine 尚未赋值 → post 到队尾
         mHint.post(new Runnable() {
             @Override
@@ -179,6 +209,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     @Override
     public void onAuth(boolean ok, String message) {
+        mAuthed = ok;   // 供"卡在哪一步"的分级提示使用
         if (!ok) {
             hint("⚠ " + message);
             setLoading(false);   // 已给出明确失败提示 → 停止转圈

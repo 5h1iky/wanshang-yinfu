@@ -103,7 +103,10 @@
         try {
           var r = collect();
           if ((r.rows > 0 && r.pending === 0) || tries > 14) {
-            post({ type: 'conversations', items: r.items });
+            // 诊断：rows=0 说明页面根本没渲染出会话行（不是选择器写错就是模块没跑起来）。
+            // 老内核上曾因脚本解析失败导致 rows 恒为 0，界面却只显示"等待中"——看不出原因。
+            // 把 rows 报回去，卡点就一目了然。
+            post({ type: 'conversations', items: r.items, rows: r.rows, tries: tries });
             return;
           }
         } catch (e) {
