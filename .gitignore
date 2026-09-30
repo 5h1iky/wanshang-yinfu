@@ -29,7 +29,5 @@ commit-*.txt
 .git-commit-msg.txt
 .cm.txt
 
-# 零散日志
-probe-*.log
-test-*.log
-feedcap-*.log
+# 日志一律不入库（构建日志/探针输出/抓包记录都是本地产物）
+*.log
