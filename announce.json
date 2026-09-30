@@ -10,10 +10,10 @@
     "enabled": "false 时整条忽略（留空模板用）"
   },
   "enabled": true,
-  "id": "2026-09-30-01",
-  "level": "info",
-  "title": "v0.6.1 已发布",
-  "text": "正式图标 + 播放面板改进，可在设置里检查更新",
+  "id": "2026-09-30-02",
+  "level": "warn",
+  "title": "公告通道自测",
+  "text": "第二条公告（新 id）应再次弹出，验证已读记账与缓存刷新",
   "link": "https://github.com/5h1iky/wanshang-yinfu/releases",
   "showUntil": 0
 }
