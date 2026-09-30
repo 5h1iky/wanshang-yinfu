@@ -80,7 +80,7 @@ public class AnnounceApiTest {
         assertNotNull(a);
         assertTrue(AnnounceApi.shouldShow(a, "", NOW));                 // 没读过 → 显示
         assertFalse(AnnounceApi.shouldShow(a, a.id, NOW));              // 同 id 已读 → 不显示
-        assertFalse(AnnounceApi.shouldShow(a, "other-id-old", NOW) == false); // 其它已读 id 不影响
+        assertTrue(AnnounceApi.shouldShow(a, "other-id-old", NOW));     // 别的已读 id 不影响
         assertFalse(AnnounceApi.shouldShow(null, "", NOW));             // 无公告 → 不显示
         // 过期判定独立生效（即使没读过）
         AnnounceApi.Announcement exp = AnnounceApi.parse(
@@ -91,11 +91,55 @@ public class AnnounceApiTest {
     }
 
     @Test
-    public void endpoints_orderedByReachability() {
-        // 通道顺序是连通性实测的结论：jsDelivr 优先（国内可达），Worker 兜底。
-        // 这条断言防"手滑改顺序"——顺序变了必须重新测连通性。
-        assertEquals(3, AnnounceApi.ENDPOINTS.length);
-        assertTrue(AnnounceApi.ENDPOINTS[0].contains("cdn.jsdelivr.net"));
-        assertTrue(AnnounceApi.ENDPOINTS[2].contains("workers.dev"));
+    public void endpoints_orderedByFreshnessThenReachability() {
+        // 顺序是"新鲜度 + 可达性"双重实测的结论，改了必须重新测：
+        //   gh-api（无 CDN 缓存、每次都新鲜、国内可达）→ jsdelivr（可达但有 12h 分支缓存）
+        //   → jsdelivr-fastly → worker（KV 即时但本网络不可达，故排最后避免拖慢）
+        assertEquals(4, AnnounceApi.ENDPOINTS.length);
+        assertEquals("gh-api", AnnounceApi.ENDPOINTS[0].name);
+        assertTrue(AnnounceApi.ENDPOINTS[1].url.contains("cdn.jsdelivr.net"));
+        assertEquals("worker", AnnounceApi.ENDPOINTS[3].name);
+    }
+
+    @Test
+    public void githubContents_decodesBase64WithNewlines() {
+        // GitHub contents API 会把 base64 按 60 字符插换行——必须能解开
+        String inner = "{\"enabled\":true,\"id\":\"gh-1\",\"title\":\"来自 API\"}";
+        String b64 = java.util.Base64.getMimeEncoder(60, new byte[]{'\n'})
+                .encodeToString(inner.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String apiResp = "{\"name\":\"announce.json\",\"encoding\":\"base64\",\"content\":\"" + b64 + "\"}";
+        AnnounceApi.Announcement a = AnnounceApi.parseGithubContents(apiResp, NOW);
+        assertNotNull(a);
+        assertEquals("gh-1", a.id);
+        assertEquals("来自 API", a.title);
+    }
+
+    @Test
+    public void githubContents_badInputs() {
+        assertNull(AnnounceApi.parseGithubContents("not json", NOW));
+        // 非法 base64 解出的内容不是公告 JSON → null
+        assertNull(AnnounceApi.parseGithubContents("{\"content\":\"!!!\"}", NOW));
+    }
+
+    @Test
+    public void githubContents_rawVariantFallsBackToPlainParse() {
+        // 实测坑：Accept 带 vnd.github.raw+json 时 GitHub 直接返回裸文件内容（没有 content 字段）。
+        // 解析器必须兼容这种形态，否则会误判成"无有效公告"（真机 diagnostics 里就是这么暴露的）。
+        AnnounceApi.Announcement a = AnnounceApi.parseGithubContents(FULL, NOW);
+        assertNotNull(a);
+        assertEquals("2026-09-27-01", a.id);
+        // 裸的 disabled 公告照样按"无公告"处理
+        assertNull(AnnounceApi.parseGithubContents("{\"enabled\":false,\"id\":\"x\",\"title\":\"t\"}", NOW));
+    }
+
+    @Test
+    public void decodeBase64_basic() {
+        // 自实现的解码器（不用 android.util.Base64 以保 JVM 可测；不用 java.util.Base64 因 minSdk 21）
+        String src = "{\"a\":1}";
+        String enc = java.util.Base64.getEncoder().encodeToString(src.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(src, new String(AnnounceApi.decodeBase64(enc), java.nio.charset.StandardCharsets.UTF_8));
+        // 带换行也要能解
+        String wrapped = enc.substring(0, 4) + "\n" + enc.substring(4);
+        assertEquals(src, new String(AnnounceApi.decodeBase64(wrapped), java.nio.charset.StandardCharsets.UTF_8));
     }
 }
