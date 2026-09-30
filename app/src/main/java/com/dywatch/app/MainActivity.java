@@ -24,7 +24,7 @@ public class MainActivity extends UiActivity {
         // 首启强制免责声明（红线 #2：内嵌 + 确认）
         com.dywatch.app.util.Disclaimer.showIfNeeded(this, null);
 
-        setupAnnounceBanner();
+        setupAnnounce();
 
         final TextView status = findViewById(R.id.tv_status);
         refreshStatus(status);
@@ -125,58 +125,19 @@ public class MainActivity extends UiActivity {
     /** 诊断面板已收进设置页（并补了 WebView 版本/屏形/缩放/看过条数），主屏不再留重复入口 */
 
     /**
-     * 公告条（Cloudflare 三件之①）：主屏顶部细 banner。
-     * 口径（用户拍板）：启动时拉一次 + 进设置页拉一次；点击消失并记 lastReadId；不弹窗不打断；
-     * 拉不到就静默不显示。缓存里的公告回到主屏立即可见（设置页拉到的新公告不用等下次启动）。
+     * 公告（Cloudflare 三件之①）：**弹窗**形态（2026-09-30 用户拍板，banner 太不起眼）。
+     * 口径：启动时拉一次 + 进设置页拉一次；有未读公告才弹；任何关闭都记 lastReadId（不反复打扰）；
+     * 拉不到就静默。缓存里的公告回到主屏也能立刻弹（设置页拉到的新公告不用等下次启动）。
      */
-    private void setupAnnounceBanner() {
-        final TextView banner = findViewById(R.id.tv_announce);
-        if (banner == null) return;
-        banner.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Object tag = v.getTag();
-                if (tag instanceof String) {
-                    com.dywatch.app.net.AnnounceStore.markRead(MainActivity.this, (String) tag);
-                    com.dywatch.app.util.AppLog.i("announce", "用户关闭公告 " + tag);
-                }
-                v.setVisibility(View.GONE);
-            }
-        });
-        showBannerFromCache(banner);
-        // 启动时拉一次（进程内只自动拉一次，避免主屏反复 onResume 重复打网络）
+    private void setupAnnounce() {
+        // 先用缓存判定（可能是设置页刚拉的），再后台刷新一次
+        com.dywatch.app.ui.AnnounceDialog.showIfPending(this);
         com.dywatch.app.net.AnnounceStore.refreshInBackground(this, false, new Runnable() {
             @Override
             public void run() {
-                showBannerFromCache(banner);
+                com.dywatch.app.ui.AnnounceDialog.showIfPending(MainActivity.this);
             }
         });
-    }
-
-    private void showBannerFromCache(TextView banner) {
-        com.dywatch.app.net.AnnounceApi.Announcement a =
-                com.dywatch.app.net.AnnounceStore.pending(this);
-        if (a == null) {
-            banner.setVisibility(View.GONE);
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("【公告】").append(a.title);
-        if (a.text != null && !a.text.isEmpty()) sb.append(" · ").append(a.text);
-        sb.append("  ✕");
-        banner.setText(sb.toString());
-        // level 决定配色（info 常规 / warn 品牌点缀粉 / danger 浅红）——只改颜色，不动布局
-        int color;
-        if (com.dywatch.app.net.AnnounceApi.LEVEL_DANGER.equals(a.level)) {
-            color = androidx.core.content.ContextCompat.getColor(this, R.color.danger);
-        } else if (com.dywatch.app.net.AnnounceApi.LEVEL_WARN.equals(a.level)) {
-            color = androidx.core.content.ContextCompat.getColor(this, R.color.accent);
-        } else {
-            color = androidx.core.content.ContextCompat.getColor(this, R.color.text_primary);
-        }
-        banner.setTextColor(color);
-        banner.setTag(a.id);
-        banner.setVisibility(View.VISIBLE);
     }
 
     @Override
