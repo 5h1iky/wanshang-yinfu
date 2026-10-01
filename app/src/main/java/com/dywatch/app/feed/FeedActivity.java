@@ -49,6 +49,12 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     private PreloadManager mPreloadManager;
     private TikTokController mController;
     private VideoView mVideoView;
+    /** 全屏控制层（退出/进度/旋转 + 全屏手势）——挂在播放器容器里，跟着一起进全屏 */
+    private FullscreenControlView mFullscreenView;
+    /** 全屏状态（跟播放器实际状态同步；由 onPlayerStateChanged 维护） */
+    private boolean mFullscreen;
+    /** 当前 item 的 TikTokView（全屏时它其实被盖住了，但要同步"进/退全屏"的图标状态） */
+    private TikTokView mCurTikTokView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -226,11 +232,49 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         mVideoView.setRenderViewFactory(TikTokRenderViewFactory.create());
         mController = new TikTokController(this);
         mVideoView.setVideoController(mController);
+
+        // 全屏控制层（软件内问题 ⑤）：作为"非游离"组件挂进 controller（false = 视图交给 controller 管理），
+        // 这样它就在 mPlayerContainer 内部 → 进全屏时跟着容器一起搬到 DecorView，不会被留在 ViewPager 里。
+        // 它自己只在 PLAYER_FULL_SCREEN 时可见（见 FullscreenControlView.onPlayerStateChanged），
+        // 所以非全屏时对信息流零影响（包括触摸）。
+        mFullscreenView = new FullscreenControlView(this);
+        mController.addControlComponent(mFullscreenView, false);
+        mFullscreenView.setListener(new FullscreenControlView.Listener() {
+            @Override public void onExitFullscreen() {
+                exitFullscreen();
+            }
+
+            @Override public void onRotate() {
+                toggleRotation();
+            }
+        });
+        // 渲染视图每次换条会重建，所以给"取"的入口而不是缓存一个引用
+        mFullscreenView.setRenderTargetProvider(new FullscreenControlView.RenderTargetProvider() {
+            @Override public View get() {
+                return mVideoView == null ? null : mVideoView.getRenderView();
+            }
+        });
         // 播放器状态全量落日志（真机教训：拉流失败被静默吞掉=只显封面，无日志根本查不出）
         mVideoView.addOnStateChangeListener(new VideoView.OnStateChangeListener() {
             @Override
             public void onPlayerStateChanged(int playerState) {
                 com.dywatch.app.util.AppLog.i("feed", "播放器状态: " + playerStateName(playerState));
+                // 全屏状态跟**实际**走（软件内问题 ⑤）：进全屏的不一定是我们点的那个键——
+                // dkplayer 的传感器监听在横屏时也会自动进全屏（见 BaseVideoController.onOrientationLandscape）。
+                // 所以内缩清零 / 图标 / 缩放复位都挂在这里，而不是只挂在按钮回调里。
+                boolean full = playerState == VideoView.PLAYER_FULL_SCREEN;
+                if (full != mFullscreen) {
+                    mFullscreen = full;
+                    if (full) {
+                        getWindow().getDecorView().getRootView().setPadding(0, 0, 0, 0);
+                    } else {
+                        applyPageInsets();                                  // 按设置重放圆屏内缩
+                        if (mFullscreenView != null) mFullscreenView.resetZoom();
+                    }
+                    if (mCurTikTokView != null) mCurTikTokView.setFullscreenState(full);
+                    com.dywatch.app.util.AppLog.i("feed", "全屏状态变更："
+                            + (full ? "进入（内缩清零）" : "退出（内缩已重放）"));
+                }
             }
 
             @Override
@@ -336,6 +380,18 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 String playUrl = mPreloadManager.getPlayUrl(video.playUrl);
                 mVideoView.setUrl(playUrl, com.dywatch.app.net.DouyinApi.playHeaders());
                 mController.addControlComponent(viewHolder.mTikTokView, true);
+                // 全屏入口接线（每个 item 的 TikTokView 都要接：换条后拿到的是新的实例）
+                viewHolder.mTikTokView.setOnFullscreenClickListener(new TikTokView.OnFullscreenClick() {
+                    @Override public void onFullscreenClick() {
+                        if (mVideoView.isFullScreen()) {
+                            exitFullscreen();
+                        } else {
+                            enterFullscreen();
+                        }
+                    }
+                });
+                viewHolder.mTikTokView.setFullscreenState(mVideoView.isFullScreen());
+                mCurTikTokView = viewHolder.mTikTokView;
                 viewHolder.mPlayerContainer.addView(mVideoView, 0);
                 mVideoView.start();
                 mCurPos = position;
@@ -614,6 +670,59 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     @Override
     protected boolean keepScreenOnWhileVisible() {
         return true;
+    }
+
+    // ---------- 全屏（软件内问题 ⑤，2026-10-01）----------
+
+    /**
+     * 进全屏（软件内问题 ⑤，2026-10-01）。
+     *
+     * ① `mController.enterFullscreen()` 把播放器容器搬到 DecorView 并转横屏——搬完之后
+     *    ViewPager 再也收不到事件，所以"全屏里加缩放手势"对信息流手势是**零回归**的
+     *    （方案 §5.2 的关键收益，也是不必去改 2700 行 ViewPager 的原因）；
+     * ② 内缩清零 / 图标 / 缩放复位统一在 onPlayerStateChanged 里做（传感器自动全屏也走那条路）。
+     */
+    private void enterFullscreen() {
+        if (mVideoView == null || mVideoView.isFullScreen()) return;
+        mController.enterFullscreen();
+        com.dywatch.app.util.AppLog.i("feed", "点全屏键 → 进入全屏");
+    }
+
+    /** 退全屏：转回竖屏 + 内缩按设置重放（都在 dkplayer/状态回调里完成） */
+    private void exitFullscreen() {
+        if (mVideoView == null || !mVideoView.isFullScreen()) return;
+        mController.exitFullscreen();
+        com.dywatch.app.util.AppLog.i("feed", "点退出全屏");
+    }
+
+    /**
+     * 全屏里手动旋转。手表屏 372×430：横屏视频在竖屏里只占 **48.6%** 高，转成横屏后能到 **65.1%**
+     * （方案 §5.1 的实测数字）。
+     *
+     * ⚠️ 真机实测（2026-10-01）：dkplayer 的传感器监听**在全屏时是开着的**——把表转成横屏拿，
+     *    它会自动转过去（`BaseVideoController.onOrientationLandscape`）。所以这里做成"手动覆盖"：
+     *    直接读当前 requestedOrientation 决定往哪边翻，不自己维护一个可能和现实不符的布尔值。
+     *    （反过来它不会自动转回竖屏：`onOrientationPortrait` 要求 `mEnableOrientation`，默认关。）
+     */
+    private void toggleRotation() {
+        int cur = getRequestedOrientation();
+        boolean toLandscape = cur != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        setRequestedOrientation(toLandscape
+                ? android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                : android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        // 尺寸变了 → 缩放/平移的夹取范围也变了，复位免得画面跑偏
+        if (mFullscreenView != null) mFullscreenView.resetZoom();
+        com.dywatch.app.util.AppLog.i("feed", "全屏旋转：" + (toLandscape ? "横屏" : "竖屏"));
+    }
+
+    /** 全屏时返回键先退全屏（用户多半只是想回信息流，不是想退出页面） */
+    @Override
+    public void onBackPressed() {
+        if (mVideoView != null && mVideoView.isFullScreen()) {
+            exitFullscreen();
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override

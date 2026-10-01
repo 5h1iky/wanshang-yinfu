@@ -74,12 +74,23 @@ public class SettingsActivity extends UiActivity {
             }
         });
         // 快捷回复条：压成 28dp 细条之后仍给一个总开关（用户反馈"太占位置"）
+        // ⚠️ 默认值已改「关」（软件内问题 ③a）；老用户存过键的仍按存的来，不会突然消失
         row("快捷回复条", onOff(Settings.quickReplyVisible(this)), new Runnable() {
             @Override public void run() {
                 boolean v = !Settings.quickReplyVisible(SettingsActivity.this);
                 Settings.setQuickReplyVisible(SettingsActivity.this, v);
                 toast("快捷回复条：" + onOff(v));
                 buildRows();
+            }
+        });
+        // 内容可编辑（软件内问题 ③b）：聊天/评论共用这 4 个槽位
+        row("快捷回复内容", QuickReplyTexts.summary(Settings.quickReplyTexts(this)), new Runnable() {
+            @Override public void run() {
+                QuickReplyEditDialog.show(SettingsActivity.this, new QuickReplyEditDialog.OnChanged() {
+                    @Override public void onChanged() {
+                        buildRows();   // 那一行的摘要跟着变
+                    }
+                });
             }
         });
         row("屏幕形状", SHAPE_NAMES[Settings.shapeMode(this)], new Runnable() {            @Override public void run() {
@@ -90,22 +101,9 @@ public class SettingsActivity extends UiActivity {
                 recreate();
             }
         });
-        row("横向边距", percentLabel(Settings.paddingHPercent(this)), new Runnable() {
-            @Override public void run() {
-                int v = nextPercent(Settings.paddingHPercent(SettingsActivity.this));
-                Settings.setPaddingPercent(SettingsActivity.this, v, Settings.paddingVPercent(SettingsActivity.this));
-                toast("横向边距：" + v + "%");
-                recreate();
-            }
-        });
-        row("纵向边距", percentLabel(Settings.paddingVPercent(this)), new Runnable() {
-            @Override public void run() {
-                int v = nextPercent(Settings.paddingVPercent(SettingsActivity.this));
-                Settings.setPaddingPercent(SettingsActivity.this, Settings.paddingHPercent(SettingsActivity.this), v);
-                toast("纵向边距：" + v + "%");
-                recreate();
-            }
-        });
+        // 边距：点开调节面板（软件内问题 ②）——原来只能正向循环，2% 想回 0% 要点 6 次
+        addPaddingRow(true);
+        addPaddingRow(false);
         row("视频画质", QUALITY_NAMES[Settings.qualityMode(this)] + " · " + qualityHint(), new Runnable() {
             @Override public void run() {
                 int next = (Settings.qualityMode(SettingsActivity.this) + 1) % 3;
@@ -128,6 +126,16 @@ public class SettingsActivity extends UiActivity {
                 boolean v = !Settings.keepScreenOn(SettingsActivity.this);
                 Settings.setKeepScreenOn(SettingsActivity.this, v);
                 toast("刷视频常亮：" + onOff(v));
+                buildRows();
+            }
+        });
+        // 全屏手势（软件内问题 ⑤）：双指缩放/平移的开关，默认开。关掉后全屏里仍可单击显隐控件条。
+        row("全屏手势", onOff(Settings.fullscreenGesture(this)) + "（全屏里双指缩放/拖动）",
+                new Runnable() {
+            @Override public void run() {
+                boolean v = !Settings.fullscreenGesture(SettingsActivity.this);
+                Settings.setFullscreenGesture(SettingsActivity.this, v);
+                toast("全屏手势：" + onOff(v));
                 buildRows();
             }
         });
@@ -220,7 +228,9 @@ public class SettingsActivity extends UiActivity {
                 Settings.setKeepScreenOn(SettingsActivity.this, true);
                 Settings.setRotaryEnabled(SettingsActivity.this, false);
                 Settings.setRotarySensitivity(SettingsActivity.this, 1.0f);
-                Settings.setQuickReplyVisible(SettingsActivity.this, true);
+                // 快捷回复：默认关闭 + 文案回默认（软件内问题 ③a/③b 后"默认"就是这个意思）
+                Settings.setQuickReplyVisible(SettingsActivity.this, false);
+                Settings.resetQuickReplyTexts(SettingsActivity.this);
                 DouyinApi.sQuality = Settings.Q_SAVE;
                 toast("已恢复默认");
                 recreate();
@@ -230,6 +240,41 @@ public class SettingsActivity extends UiActivity {
         // 于是设置页一直挂着 0.1.0（正是主屏注释里说要避免的"手写值随发版漂移"）。
         infoRow("腕上音符 v" + versionName()
                 + "\n与抖音官方无关 · 仅供个人学习 · 风险自负");
+    }
+
+    /**
+     * 边距行 → 点开调节面板（软件内问题 ②，2026-10-01）。
+     *
+     * 三条要点：
+     *  ① 步进 1%、范围 0~30%——上限跟 `Settings.clampPercent` 对齐（原来 UI 只到 14，存储允许 30，
+     *     两边不一致）；1% ≈ 3.7px（372px 宽），肉眼可见。
+     *  ② 面板每次改值都回调到这里：先落盘 → 再 `applyPageInsets()` 重放内缩（当场内缩/展开），
+     *     最后刷新本行文字（不再需要 recreate()，页面动画也不闪）。
+     *  ③ 行文字格式与其它行一致（"标签\n值"），面板关掉后设置页显示的就是当前真值。
+     */
+    private void addPaddingRow(final boolean horizontal) {
+        final String label = horizontal ? "横向边距" : "纵向边距";
+        final TextView tv = row(label, percentLabel(paddingOf(horizontal)), null);
+        tv.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                DyAdjustDialog.show(SettingsActivity.this, label, paddingOf(horizontal),
+                        1, 0, 30, "%", new DyAdjustDialog.OnValueChange() {
+                            @Override
+                            public void onChange(int value) {
+                                int h = horizontal ? value : Settings.paddingHPercent(SettingsActivity.this);
+                                int vv = horizontal ? Settings.paddingVPercent(SettingsActivity.this) : value;
+                                Settings.setPaddingPercent(SettingsActivity.this, h, vv);
+                                applyPageInsets();                                  // 实时预览
+                                tv.setText(label + "\n" + percentLabel(value));
+                            }
+                        });
+            }
+        });
+    }
+
+    private int paddingOf(boolean horizontal) {
+        return horizontal ? Settings.paddingHPercent(this) : Settings.paddingVPercent(this);
     }
 
     /** 读本机包版本号（与 MainActivity.versionName 同一口径：都以包信息为准） */
@@ -261,16 +306,7 @@ public class SettingsActivity extends UiActivity {
         return q == Settings.Q_SAVE ? "540p" : (q == Settings.Q_BALANCED ? "720p" : "1080p");
     }
 
-    /** 边距档位：0 就是铺满，圆屏一般 4~8% 收得住；上限留给 14 免得调到没法用 */
-    private static final int[] PERCENTS = {0, 2, 4, 6, 8, 10, 14};
-
-    private static int nextPercent(int cur) {
-        for (int i = 0; i < PERCENTS.length; i++) {
-            if (PERCENTS[i] == cur) return PERCENTS[(i + 1) % PERCENTS.length];
-        }
-        return 0;
-    }
-
+    /** 边距档位提示：0 就是铺满（真正的档位/步进已移到调节面板，见 addPaddingRow） */
     private static String percentLabel(int v) {
         return v == 0 ? "0%（铺满）" : v + "%";
     }
@@ -295,8 +331,9 @@ public class SettingsActivity extends UiActivity {
         return 1;
     }
 
-    private void row(String label, String value, Runnable onClick) {
-        addBase(label + "\n" + value, onClick);
+    /** 普通设置行；onClick 为 null 时只建行不接线（边距行要自己拿到 TextView 做实时刷新） */
+    private TextView row(String label, String value, Runnable onClick) {
+        return addBase(label + "\n" + value, onClick);
     }
 
     private void actionRow(String label, String sub, Runnable onClick) {
@@ -314,7 +351,7 @@ public class SettingsActivity extends UiActivity {
         mRoot.addView(tv);
     }
 
-    private void addBase(String text, final Runnable onClick) {
+    private TextView addBase(String text, final Runnable onClick) {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
@@ -328,10 +365,13 @@ public class SettingsActivity extends UiActivity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 0, 0, dp(6));
         tv.setLayoutParams(lp);
-        tv.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { onClick.run(); }
-        });
+        if (onClick != null) {
+            tv.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { onClick.run(); }
+            });
+        }
         mRoot.addView(tv);
+        return tv;
     }
 
     private int dp(int v) {

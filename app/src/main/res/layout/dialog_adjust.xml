@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  数值调节面板（软件内问题 ②/④，2026-10-01）。
+  为什么要有它：边距原来只有 {0,2,4,6,8,10,14} 七档且**只前进不后退**——从 2% 回 0% 要点 6 次。
+
+  视觉沿用 DyDialog：深色圆角卡 + 胶囊按钮（bg_dialog / DyDialogButton），
+  ⚠️ 不用系统控件（用户否定过两次的红线）；不铺品牌粉（色板纪律）。
+  手表屏矮：结构尽量扁平——标题 1 行 + 一行步进 + 一行提示 + 一行按钮。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/s5"
+    android:paddingEnd="@dimen/s5"
+    android:paddingTop="@dimen/s4"
+    android:paddingBottom="@dimen/s4">
+
+    <TextView
+        android:id="@+id/adj_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/t_title"
+        android:textStyle="bold" />
+
+    <!-- 一步进：− / 当前值 / +（值居中占最大权重，数字跳动时不挤到按钮） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s3"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/adj_minus"
+            style="@style/DyDialogButton.Ghost"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:text="−"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_display" />
+
+        <TextView
+            android:id="@+id/adj_value"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.4"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_display"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/adj_plus"
+            style="@style/DyDialogButton.Ghost"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:text="+"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_display" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/adj_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s2"
+        android:gravity="center"
+        android:textColor="@color/text_faint"
+        android:textSize="@dimen/t_caption" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s4"
+        android:gravity="end"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/adj_reset"
+            style="@style/DyDialogButton.Ghost"
+            android:layout_marginEnd="@dimen/s3"
+            android:text="归零" />
+
+        <TextView
+            android:id="@+id/adj_done"
+            style="@style/DyDialogButton.Primary"
+            android:text="完成" />
+    </LinearLayout>
+</LinearLayout>

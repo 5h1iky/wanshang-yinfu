@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/5h1iky/wanshang-yinfu?label=%E7%89%88%E6%9C%AC)](https://github.com/5h1iky/wanshang-yinfu/releases)
 [![Build](https://github.com/5h1iky/wanshang-yinfu/actions/workflows/build.yml/badge.svg)](https://github.com/5h1iky/wanshang-yinfu/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/%E5%8D%8F%E8%AE%AE-GPL--3.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Android%205.0%2B-green.svg)](#-安装)
+[![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Android%205.0%2B-green.svg)](#安装)
 [![Stars](https://img.shields.io/github/stars/5h1iky/wanshang-yinfu?style=social)](https://github.com/5h1iky/wanshang-yinfu/stargazers)
 
 *纯手动操作 · 免费无广告 · 登录态只存本机*
@@ -16,7 +16,7 @@
 
 ---
 
-## ⚠️ 这是什么 / 不是什么
+## 这是什么 / 不是什么
 
 | 是 | 不是 |
 |---|---|
@@ -26,7 +26,7 @@
 
 **风险自负**：使用本应用产生的一切后果（账号限制等）由使用者自行承担，详见应用内首启的免责声明。
 
-### ⚠️ 已知局限与失效风险（请先读完再决定要不要用）
+### 已知局限与失效风险（请先读完再决定要不要用）
 
 | 项 | 说明 |
 |---|---|
@@ -39,21 +39,22 @@
 
 > 换句话说：**这是一个"能用就用"的朋友间项目，不是产品。** 介意的请用官方客户端。
 
-## ✨ 功能
+## 功能
 
 | 模块 | 说明 |
 |---|---|
-| 🎬 刷视频 | 上下滑切换 · 预加载缓冲 · H.264 / 540p 省流选档（AMOLED 省电）· 登录态个性化推荐 |
-| ▶️ 播放控制 | 单击呼出面板（暂停键 + 进度条）· 双击左右半屏 ±10s · 拖动进度条跳转 |
-| 💬 私信 | 会话列表 → 选人 → 聊天 · 文字收发 · 快捷回复（手表输入层） |
-| ❤️ 互动 | 点赞 / 收藏 / 评论（看 + 发）/ 分享=复制作品链接 |
-| 👤 我的 | 喜欢历史（服务端拉取）· 看过记录（本地账本）· 作者主页 |
-| ⌚ 手表适配 | 圆屏边距百分比可调 · 界面缩放与字体大小独立调节 · 表冠滚动（可选开关）· **无手势无按键设备完整可用**（全页面可见返回键）· 刷视频常亮开关 |
-| 🔄 更新 | GitHub Releases 静默检测，不打扰 |
+| 刷视频 | 上下滑切换 · 预加载缓冲 · H.264 / 540p 省流选档（AMOLED 省电）· 登录态个性化推荐 |
+| 播放控制 | 单击呼出面板（暂停键 + 进度条）· 双击左右半屏 ±10s · 拖动进度条跳转 |
+| 全屏播放 | 进度条左侧一键全屏（画质不变大，但能腾出手势位并转横屏：横屏视频占屏高 48.6% → 65%）· 全屏内双指缩放 1x~5x · 放大后单指拖动画面 · 「复位」键或双击复位 · 手动旋转（横竖屏切换） |
+| 私信 | 会话列表 → 选人 → 聊天 · 文字收发 · 快捷回复（4 个槽位可自编，聊天与评论共用；留空即隐藏该按钮；默认关闭可在设置里打开） |
+| 互动 | 点赞 / 收藏 / 评论（看 + 发）/ 分享=复制作品链接 |
+| 我的 | 喜欢历史（服务端拉取）· 看过记录（本地账本）· 作者主页 |
+| 手表适配 | 圆屏边距百分比可调（点开面板用 − / + 步进 1%，0~30%，调的时候页面实时内缩）· 界面缩放与字体大小独立调节 · 表冠滚动（可选开关）· **无手势无按键设备完整可用**（全页面可见返回键）· 刷视频常亮开关 |
+| 更新 | GitHub Releases 静默检测，不打扰 |
 
 **架构一句话**：读取类请求（视频流 / 评论列表 / 喜欢 / 主页）走**原生 API 直连**（App 内 Rhino 跑 a_bogus 签名，零后端、快首屏、省电）；写入类操作（点赞 / 评论 / 私信 / 登录）走 **App 内单例 WebView 引擎**（官方页面 SDK 承担全部签名与风控票据，零复刻成本）。这是本项目在"协议复刻风险"与"手表性能基线"之间取得的平衡，详见下方[技术](#-参考与致谢)一节。
 
-## 📲 安装
+## 安装
 
 1. 到 [**Releases**](https://github.com/5h1iky/wanshang-yinfu/releases) 下载 `wanshang-yinfu-vX.Y.Z-release.apk`
 2. 传到手机/手表上，用文件管理器侧载安装（Android 5.0+；MIUI 等系统需允许"安装未知应用"）
@@ -61,7 +62,7 @@
 
 > 表上没有浏览器？应用内的链接点击在无浏览器设备上会静默提示，不影响其它功能。
 
-## 🔨 自己编译
+## 自己编译
 
 **环境要求**：JDK 17 或更高（本项目用 21）+ Android SDK 36。
 
@@ -91,7 +92,7 @@ keyAlias=...
 keyPassword=...
 ```
 
-## 🙏 参考与致谢
+## 参考与致谢
 
 本项目站在这些开源项目的肩膀上，按许可要求使用并致谢：
 
@@ -121,17 +122,17 @@ keyPassword=...
 
 > 许可合规：本项目 GPL-3.0，可合法吸收 GPL / Apache-2.0 / MIT 组件；无 LICENSE 项目只参考思路、不复制代码（上表已逐一标注）。若你是上述项目作者且认为引用方式不妥，请提 issue，我会立即处理。
 
-## 🔒 隐私承诺
+## 隐私承诺
 
 - 扫码登录产生的会话 **只存在设备本机**（SharedPreferences / WebView CookieStore）
 - **不收集、不上传、不打点**：无账号信息、无聊天内容、无设备指纹、无崩溃上报
 - 应用只有一个网络出口：抖音的接口本身
 - 想验证？代码全开源，`LoginManager` / `DouyinApi` / `ChatEngine` 三处网络出口逐行可审
 
-## 📄 协议
+## 协议
 
 [GPL-3.0](LICENSE)。使用到的第三方组件及其协议在源码头部与 `lib/LICENSE-DKVideoPlayer.txt` 中保留署名。
 
-## 💬 联系
+## 联系
 
 GitHub [@5h1iky](https://github.com/5h1iky) · [作者主页](https://5h1iky.github.io/portfolio/)

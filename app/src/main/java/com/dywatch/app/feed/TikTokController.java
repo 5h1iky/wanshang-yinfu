@@ -60,6 +60,21 @@ public class TikTokController extends BaseVideoController {
         return R.layout.layout_tiktok_control_bar;
     }
 
+    /**
+     * 进 / 退全屏（软件内问题 ⑤，2026-10-01）。
+     *
+     * ⚠️ 为什么转调 dkplayer 的 `startFullScreen()/stopFullScreen()`，而不是直接
+     *    `mVideoView.startFullScreen()`：控制器那一版会**一并 setRequestedOrientation**
+     *    （进=横屏 / 退=竖屏）——少了这一步，退出全屏后信息流会留在横屏。
+     */
+    public void enterFullscreen() {
+        startFullScreen();
+    }
+
+    public void exitFullscreen() {
+        stopFullScreen();
+    }
+
     @Override
     public boolean showNetWarning() {
         return false;

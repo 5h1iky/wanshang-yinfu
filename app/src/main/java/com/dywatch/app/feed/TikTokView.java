@@ -50,6 +50,16 @@ public class TikTokView extends FrameLayout implements IControlComponent {
     private View mPlayToggle;
     private ImageView mPlayStateIcon;
     private SeekBar mSeekBar;
+    /** 进度行（2026-10-01：进度条 + 左侧全屏键，见 layout_tiktok_controller.xml 注释） */
+    private View mProgressRow;
+    private ImageView mFullscreenBtn;
+    /** 全屏入口回调（页面接：进/退全屏都走它） */
+    public interface OnFullscreenClick {
+        void onFullscreenClick();
+    }
+    private OnFullscreenClick mFullscreenClick;
+    /** 当前是否全屏：决定按钮图标（进=四角向外 / 退=四角向内） */
+    private boolean mFullscreen;
     /** 拖动进度条中：吃掉手势（不触发单击收起），不吃进度回调 */
     private boolean mFromUser;
     /** seek 落定窗口：窗口内忽略进度回调（MediaPlayer 位置没跳过去会闪回） */
@@ -74,7 +84,22 @@ public class TikTokView extends FrameLayout implements IControlComponent {
         mPlayToggle = findViewById(R.id.fl_play_toggle);
         mPlayStateIcon = findViewById(R.id.iv_play_state);
         mSeekBar = findViewById(R.id.sb_progress);
+        mProgressRow = findViewById(R.id.ll_progress_row);
+        mFullscreenBtn = findViewById(R.id.btn_fullscreen);
         mScaledTouchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+
+        // 全屏入口（2026-10-01 软件内问题 ⑤）：进度条左侧那个键。
+        // 只发通知，进/退全屏由页面（FeedActivity）统一处理——播放器实例在页面手里。
+        if (mFullscreenBtn != null) {
+            mFullscreenBtn.setOnClickListener(new OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    com.dywatch.app.util.AppLog.i("feed", "全屏键被点击（回调"
+                            + (mFullscreenClick == null ? "为空！" : "已接") + "）");
+                    if (mFullscreenClick != null) mFullscreenClick.onFullscreenClick();
+                }
+            });
+        }
 
         // 暂停键：就在本视图的孩子上，点击一定可达（六修核心修复）
         if (mPlayToggle != null) {
@@ -175,17 +200,39 @@ public class TikTokView extends FrameLayout implements IControlComponent {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        // 手表适配：进度条收窄到父宽 70% 水平居中（圆屏左右是圆形裁切区，铺满必被切）。
-        // 六修后 SeekBar 是本视图孩子，这里能直接拿到它的 LayoutParams。
-        if (mSeekBar != null && w > 0) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) mSeekBar.getLayoutParams();
+        // 手表适配：**进度行**收窄到父宽 70% 水平居中（圆屏左右是圆形裁切区，铺满必被切）。
+        // ⚠️ 2026-10-01（软件内问题 ⑤）连带修复：进度条挪进横向容器后，SeekBar 的
+        //    LayoutParams 变成 LinearLayout.LayoutParams —— 老代码在这里强转成
+        //    FrameLayout.LayoutParams 会**直接 ClassCastException 崩掉**。
+        //    现在只改"行"自己的参数（行是 FrameLayout 的孩子），SeekBar 宽度交给 weight。
+        if (mProgressRow != null && w > 0) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) mProgressRow.getLayoutParams();
             int target = (int) (w * 0.7f);
             if (lp.width != target) {
                 lp.width = target;
                 lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL;
-                mSeekBar.setLayoutParams(lp);
+                mProgressRow.setLayoutParams(lp);
             }
         }
+    }
+
+    /** 页面接线：全屏键回调 */
+    public void setOnFullscreenClickListener(OnFullscreenClick l) {
+        mFullscreenClick = l;
+    }
+
+    /** 页面告知当前是否全屏（换图标：进=四角向外 / 退=四角向内） */
+    public void setFullscreenState(boolean fullscreen) {
+        mFullscreen = fullscreen;
+        if (mFullscreenBtn != null) {
+            mFullscreenBtn.setImageResource(fullscreen
+                    ? R.drawable.ic_fullscreen_exit : R.drawable.ic_fullscreen);
+            mFullscreenBtn.setContentDescription(fullscreen ? "退出全屏" : "全屏");
+        }
+    }
+
+    public boolean isFullscreenState() {
+        return mFullscreen;
     }
 
     /** 暂停键图标随播放态切换（selected=true=暂停 icon，false=播放 icon，selector 定义） */
@@ -244,8 +291,9 @@ public class TikTokView extends FrameLayout implements IControlComponent {
     @Override
     public void onVisibilityChanged(boolean isVisible, Animation anim) {
         // controller.show()/hide() 分发到这里：同步面板子视图显隐 + 图标态
+        // ⚠️ 显隐的单位是**进度行**（进度条 + 全屏键一起）——只藏 SeekBar 会让全屏键孤零零留着
         if (mPlayToggle != null) mPlayToggle.setVisibility(isVisible ? VISIBLE : GONE);
-        if (mSeekBar != null) mSeekBar.setVisibility(isVisible ? VISIBLE : GONE);
+        if (mProgressRow != null) mProgressRow.setVisibility(isVisible ? VISIBLE : GONE);
         if (isVisible) refreshPlayIcon();
     }
 

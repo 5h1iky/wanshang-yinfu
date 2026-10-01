@@ -8,13 +8,25 @@
            手表 275dp 可用宽下每个只有 ~68dp，稍长的短语就被截断）。
     新版 = 一条 28dp 细胶囊条，按钮按内容宽度、横向可滚 ——
            纵向省下约 1/3，长短语也不再被挤断（横滑看全）。
-  ⚠️ 想彻底不要它：设置里有「快捷回复条」开关，不必改布局。
-  文案由代码 QuickReply.wire() 注入，所以这里不写死 text。
+
+  ⚠️ 2026-10-01 修（软件内问题 ③c）——"看着被输入框遮挡"的真因**不在两个 View 重叠**
+  （实测 bounds：快捷条 338..371，输入行 376..425，根本不重叠），而在**控件内部**：
+    <Button> 在 Material3 主题下会被 ViewInflater 换成 MaterialButton，于是
+      ① MaterialButton **自己管背景**，我们的 @drawable/bg_pill 被忽略 → 药丸底根本不画
+         （像素实测：按钮 33px 高，矩形内 bg_control 灰阶 0 像素；对照输入框药丸 49px 满高）
+      ② 它自带 insetTop/insetBottom=6dp 与 buttonBarButtonStyle 的上下 padding，
+         33px 高里只剩 ~19px 内容区 → 12sp 文字被裁到只剩 7~8px 亮像素（对照输入框文字 14px）
+    三个现象（没药丸底 / 字被裁一半 / 看着像被下面盖住）同一个根因。
+  修法：改用 AppCompatButton（不会被换），去掉 AOSP 的 buttonBarButtonStyle，
+        并把上下 padding、inset、includeFontPadding 显式归零 —— 药丸满高、文字居中不裁。
+        另加 s2 上边距，与下方输入行留出明确间隙。
+  文案由代码 QuickReply.wire() 注入（4 个槽位来自 Settings.quickReplyTexts），这里不写死 text。
 -->
 <HorizontalScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/quick_reply_bar"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:layout_marginTop="@dimen/s2"
     android:paddingStart="@dimen/s3"
     android:paddingEnd="@dimen/s3"
     android:scrollbars="none">
@@ -24,66 +36,78 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal">
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/qr1"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="@dimen/qr_height"
             android:background="@drawable/bg_pill"
             android:backgroundTint="@null"
+            android:gravity="center"
+            android:includeFontPadding="false"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:paddingStart="@dimen/s4"
             android:paddingEnd="@dimen/s4"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
             android:singleLine="true"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/qr_text" />
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/qr2"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="@dimen/qr_height"
             android:layout_marginStart="@dimen/s2"
             android:background="@drawable/bg_pill"
             android:backgroundTint="@null"
+            android:gravity="center"
+            android:includeFontPadding="false"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:paddingStart="@dimen/s4"
             android:paddingEnd="@dimen/s4"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
             android:singleLine="true"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/qr_text" />
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/qr3"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="@dimen/qr_height"
             android:layout_marginStart="@dimen/s2"
             android:background="@drawable/bg_pill"
             android:backgroundTint="@null"
+            android:gravity="center"
+            android:includeFontPadding="false"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:paddingStart="@dimen/s4"
             android:paddingEnd="@dimen/s4"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
             android:singleLine="true"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/qr_text" />
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/qr4"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="@dimen/qr_height"
             android:layout_marginStart="@dimen/s2"
             android:layout_marginEnd="@dimen/s2"
             android:background="@drawable/bg_pill"
             android:backgroundTint="@null"
+            android:gravity="center"
+            android:includeFontPadding="false"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:paddingStart="@dimen/s4"
             android:paddingEnd="@dimen/s4"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
             android:singleLine="true"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/qr_text" />

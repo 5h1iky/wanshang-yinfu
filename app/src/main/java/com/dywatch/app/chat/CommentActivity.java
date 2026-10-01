@@ -116,8 +116,9 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
             }
         });
 
+        // 文案与聊天页**共用一套**（软件内问题 ③b：原来两页各写死一份）
         com.dywatch.app.ui.QuickReply.wire(this,
-                new String[]{"好看！", "求BGM", "赞了", "哈哈哈"},
+                com.dywatch.app.ui.Settings.quickReplyTexts(this),
                 new com.dywatch.app.ui.QuickReply.Pick() {
                     @Override
                     public void onPick(String t) {

@@ -90,8 +90,11 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         // 手表快捷回复（输入层自研部分：先给常用短语，语音后补）
         // ⚠️ 传页面根（this）而不是 bar 自己：wire() 里要按 id 找 bar 来控制整条显隐，
         //    传 bar 时靠"findViewById 命中自身"这条边角行为才能work，太脆。
+        // ⚠️ 文案不再写死（软件内问题 ③b）：从 Settings 读用户自己编辑的那 4 个槽位，
+        //    默认值就是原来写死这套（好/在忙/稍等/😂）；留空的槽位 wire() 会自动隐藏按钮。
         com.dywatch.app.ui.QuickReply.wire(this,
-                new String[]{"好", "在忙", "稍等", "😂"}, new com.dywatch.app.ui.QuickReply.Pick() {
+                com.dywatch.app.ui.Settings.quickReplyTexts(this),
+                new com.dywatch.app.ui.QuickReply.Pick() {
                     @Override
                     public void onPick(String t) {
                         safeSend(t);

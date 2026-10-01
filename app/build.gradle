@@ -21,8 +21,8 @@ android {
         applicationId 'com.dywatch.app'
         minSdk 21
         targetSdk 36
-        versionCode 8
-        versionName '0.7.0'
+        versionCode 9
+        versionName '0.8.0'
     }
 
     signingConfigs {
@@ -40,6 +40,21 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+
+        // ⚠️ 仅供**真机验证**的构建，不发布、不参与 Release、不进 releases/latest。
+        //    release 同签名（可覆盖安装 → 登录态不掉）+ debuggable（可用 run-as 读写
+        //    /data/data/com.dywatch.app/shared_prefs → 在不 pm clear 的前提下模拟"全新安装"、
+        //    注入公告缓存），专门解决"验证要清数据、清数据又掉登录"的死结。
+        //    打包： gradlew :app:assembleDevdiag
+        devdiag {
+            initWith(buildTypes.release)
+            debuggable true
+            // 子模块（dkplayer-*）只有 debug/release 两个变体 → 让它们回退到 release
+            matchingFallbacks = ['release']
             if (hasKeystore) {
                 signingConfig signingConfigs.release
             }

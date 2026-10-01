@@ -824,6 +824,16 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
     }
 
     /**
+     * 渲染视图（视频画面本体，不含控件层）。
+     * 本项目加这一个 getter（2026-10-01）是为了全屏双指缩放：缩放要作用在**画面**上，
+     * 作用在 mPlayerContainer 会把按钮和进度条一起放大。换条后渲染视图会重建，
+     * 调用方每次手势现取即可（别缓存）。
+     */
+    public View getRenderView() {
+        return mRenderView == null ? null : mRenderView.getView();
+    }
+
+    /**
      * 开启小屏
      */
     public void startTinyScreen() {

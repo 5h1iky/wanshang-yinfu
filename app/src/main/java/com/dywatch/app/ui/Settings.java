@@ -51,16 +51,69 @@ public final class Settings {
     }
 
     /**
-     * 快捷回复条是否显示（2026-09-27 新增）。
-     * 用户反馈"快捷回复不需要太占位置"——已经把它压成 28dp 细条，
-     * 再给一个总开关：嫌占地方就整条收掉，输入框独占那一行。
+     * 快捷回复条是否显示。
+     * ⚠️ 默认 **false**（软件内问题 ③a，2026-10-01 用户拍板"默认改关"）：
+     * 它是"省打字"的辅助，不是每个人都想要，默认别占那一行。
+     * 注意这里**只改默认值**：老用户 SharedPreferences 里已经有这个键（true/false），
+     * 读取时一律以存的值为准 → 已装旧版的人不会因为升级而突然发现快捷条消失。
      */
     public static boolean quickReplyVisible(Context c) {
-        return sp(c).getBoolean("quick_reply_visible", true);
+        return sp(c).getBoolean("quick_reply_visible", false);
     }
 
     public static void setQuickReplyVisible(Context c, boolean v) {
         sp(c).edit().putBoolean("quick_reply_visible", v).apply();
+    }
+
+    /**
+     * 一次性迁移（0.8.0 起，软件内问题 ③a）。
+     *
+     * 起因：把「快捷回复条」的默认值从 true 改成 false 时，**只改默认值是不够的**——
+     * 老用户里凡是**从没点过那个开关**的人，存储里压根没有这个键，于是升级后
+     * 会跟着新默认值变成"关"，快捷条凭空消失。方案里承诺的"老用户不受影响"就不成立。
+     *
+     * 做法：老安装（判定 = 免责声明已同意过，说明这个 App 数据早就存在）若从没存过这个键，
+     * 就补写 `true`——保持它原来的观感；全新安装（还没同意过声明）不写 → 用新默认 false，
+     * 这就是用户要的"默认改关"。用独立键记"迁移已做"，只跑一次，之后用户怎么改都不会被覆盖。
+     *
+     * 调用点：MainActivity.onCreate 最前面（早于任何设置读写）。
+     */
+    public static void migrateQuickReplyDefaultOnce(Context c) {
+        SharedPreferences p = sp(c);
+        if (p.getBoolean("migrate_qr_default_080", false)) return;
+        boolean hasOldData = com.dywatch.app.util.Disclaimer.isAccepted(c);
+        SharedPreferences.Editor e = p.edit().putBoolean("migrate_qr_default_080", true);
+        if (hasOldData && !p.contains("quick_reply_visible")) {
+            e.putBoolean("quick_reply_visible", true);   // 老用户：保持原样（别拿走他已在用的东西）
+        }
+        e.apply();
+    }
+
+    /**
+     * 快捷回复的 4 个槽位文案（软件内问题 ③b，2026-10-01）。
+     * 聊天页与评论页**共用这一套**；某个槽位留空 → 该按钮隐藏（所以无需"数量"设置）。
+     * 键是 4 个独立的 `qr_1..qr_4`（不拼字符串、无转义坑）。
+     */
+    public static String[] quickReplyTexts(Context c) {
+        SharedPreferences p = sp(c);
+        String[] raw = new String[QuickReplyTexts.SLOTS];
+        for (int i = 1; i <= QuickReplyTexts.SLOTS; i++) {
+            raw[i - 1] = p.getString(QuickReplyTexts.key(i), QuickReplyTexts.defaultOf(i));
+        }
+        return QuickReplyTexts.normalize(raw);
+    }
+
+    /** 改单个槽位（slot 从 1 开始；传空串 = 隐藏该按钮） */
+    public static void setQuickReplyText(Context c, int slot, String text) {
+        if (slot < 1 || slot > QuickReplyTexts.SLOTS) return;
+        sp(c).edit().putString(QuickReplyTexts.key(slot), QuickReplyTexts.sanitize(text)).apply();
+    }
+
+    /** 恢复出厂文案：把 4 个键删掉（删掉即回到默认值，不给老用户留脏数据） */
+    public static void resetQuickReplyTexts(Context c) {
+        SharedPreferences.Editor e = sp(c).edit();
+        for (int i = 1; i <= QuickReplyTexts.SLOTS; i++) e.remove(QuickReplyTexts.key(i));
+        e.apply();
     }
 
     public static int shapeMode(Context c) {
@@ -155,5 +208,20 @@ public final class Settings {
 
     public static void setRotarySensitivity(Context c, float v) {
         sp(c).edit().putFloat("rotary_sens", v).apply();
+    }
+
+    /**
+     * 全屏手势开关（软件内问题 ⑤，2026-10-01，默认开）。
+     *
+     * 借鉴 BiliClient 的 `player_scale` / `player_doublemove` 开关思路：双指缩放/平移是"用得上的人
+     * 很需要、用不上的人会误触"的功能，给一个总开关比争论默认值省事。
+     * 关掉后全屏里仍可单击显隐控件条、按钮照常可用，只是不再缩放/平移。
+     */
+    public static boolean fullscreenGesture(Context c) {
+        return sp(c).getBoolean("fullscreen_gesture", true);
+    }
+
+    public static void setFullscreenGesture(Context c, boolean v) {
+        sp(c).edit().putBoolean("fullscreen_gesture", v).apply();
     }
 }

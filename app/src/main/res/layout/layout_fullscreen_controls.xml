@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  全屏控制层（软件内问题 ⑤，2026-10-01）。
+
+  为什么**另做一层**而不是复用信息流里那套面板：
+  信息流的面板（TikTokView）是 **item 的视图**，全屏时播放器容器被搬到 DecorView 之后，
+  item 连同它的面板都留在了 ViewPager 里（被全屏画面盖住）——panel 根本看不见、也点不到。
+  所以全屏必须有自己的控制层，并且它得挂在**播放器容器内部**才会跟着一起进全屏。
+  做法：本视图作为"非游离"控制组件挂到 controller（`addControlComponent(v, false)`），
+  它就在 mPlayerContainer 里；非全屏时整体 GONE，不影响信息流。
+
+  结构：
+    · fs_gesture_layer —— 全屏手势层（双指缩放/平移/双击复位；单击可显隐下面的条）
+    · fs_bar           —— 底部控件条：退出全屏 / 进度条 / 旋转
+  层级：XML 里 bar 写在手势层**之后** = 在它上面，所以按钮与进度条先拿到触摸。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <View
+        android:id="@+id/fs_gesture_layer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <LinearLayout
+        android:id="@+id/fs_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="@dimen/s2"
+        android:layout_marginEnd="@dimen/s2"
+        android:layout_marginBottom="@dimen/s3"
+        android:background="@drawable/bg_fs_bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/s3"
+        android:paddingEnd="@dimen/s3"
+        android:paddingTop="@dimen/s2"
+        android:paddingBottom="@dimen/s2">
+
+        <TextView
+            android:id="@+id/fs_exit"
+            style="@style/DyDialogButton.Ghost"
+            android:minWidth="0dp"
+            android:paddingStart="@dimen/s4"
+            android:paddingEnd="@dimen/s4"
+            android:text="退出"
+            android:textSize="@dimen/t_body" />
+
+        <SeekBar
+            android:id="@+id/fs_seek"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="@dimen/s3"
+            android:layout_marginEnd="@dimen/s3"
+            android:layout_weight="1"
+            android:background="@null"
+            android:max="1000"
+            android:minHeight="0dp"
+            android:progressDrawable="@drawable/feed_seek_bar"
+            android:splitTrack="false"
+            android:thumb="@null" />
+
+        <!--
+          复位键（2026-10-01 用户真机验收时提的）：双击画面本来也能复位，
+          但"双击复位"没有任何可见提示，用户不可能猜到 → 给一个看得见的按钮。
+        -->
+        <TextView
+            android:id="@+id/fs_reset"
+            style="@style/DyDialogButton.Ghost"
+            android:minWidth="0dp"
+            android:paddingStart="@dimen/s4"
+            android:paddingEnd="@dimen/s4"
+            android:text="复位"
+            android:textSize="@dimen/t_body" />
+
+        <TextView
+            android:id="@+id/fs_rotate"
+            style="@style/DyDialogButton.Ghost"
+            android:layout_marginStart="@dimen/s3"
+            android:minWidth="0dp"
+            android:paddingStart="@dimen/s4"
+            android:paddingEnd="@dimen/s4"
+            android:text="旋转"
+            android:textSize="@dimen/t_body" />
+    </LinearLayout>
+</FrameLayout>

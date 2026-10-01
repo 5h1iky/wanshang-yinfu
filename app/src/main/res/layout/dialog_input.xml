@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  单行输入弹窗（软件内问题 ③b，2026-10-01）：给快捷回复槽位改文案用。
+  视觉沿用 DyDialog 一套：深色圆角卡 + 胶囊按钮。
+  ⚠️ 不能用系统 AlertDialog（用户否定过两次的红线）。
+  EditText 用 bg_pill 与聊天页输入框同语言；单行 + IME 动作键=完成。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/s5"
+    android:paddingEnd="@dimen/s5"
+    android:paddingTop="@dimen/s4"
+    android:paddingBottom="@dimen/s4">
+
+    <TextView
+        android:id="@+id/input_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/t_title"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/input_et"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s3"
+        android:background="@drawable/bg_pill"
+        android:gravity="center_vertical"
+        android:imeOptions="actionDone"
+        android:inputType="text"
+        android:maxLines="1"
+        android:minHeight="@dimen/input_min_h"
+        android:paddingStart="@dimen/s5"
+        android:paddingEnd="@dimen/s5"
+        android:singleLine="true"
+        android:textColor="@color/text_primary"
+        android:textColorHint="@color/text_muted"
+        android:textSize="@dimen/t_body" />
+
+    <TextView
+        android:id="@+id/input_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s2"
+        android:textColor="@color/text_faint"
+        android:textSize="@dimen/t_caption" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/s4"
+        android:gravity="end"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/input_cancel"
+            style="@style/DyDialogButton.Ghost"
+            android:layout_marginEnd="@dimen/s3"
+            android:text="取消" />
+
+        <TextView
+            android:id="@+id/input_ok"
+            style="@style/DyDialogButton.Primary"
+            android:text="保存" />
+    </LinearLayout>
+</LinearLayout>

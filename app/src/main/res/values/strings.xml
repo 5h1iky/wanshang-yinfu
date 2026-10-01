@@ -4,4 +4,8 @@
     <string name="hello_m0">M0 骨架已就绪</string>
     <!-- DKVideoPlayer demo 引用的字符串（原在 sample 的 strings.xml） -->
     <string name="dkplayer_error_message">播放出错，请稍后重试</string>
+    <!-- 快捷回复内容编辑面板（软件内问题 ③b，2026-10-01） -->
+    <string name="quick_reply_content">快捷回复内容</string>
+    <string name="quick_reply_hint">聊天页与评论页共用这 4 个；点一行改文案，留空即隐藏该按钮</string>
+    <string name="quick_reply_restore">恢复默认</string>
 </resources>

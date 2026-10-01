@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  全屏控件条的底（2026-10-01 软件内问题 ⑤，看图看出来的问题）。
+
+  为什么必须有底：第一版控件条是**透明**的，按钮文字压在明亮的视频画面上几乎读不出来
+  （像素统计显示按钮在、bounds 也对，但截图里"退出/旋转"根本认不出——这就是"数字全对、
+  肉眼不能用"的典型）。信息流里的标题/点赞数早就用 textShadow 解决同一件事，
+  这里是整条控件，用一层半透明黑底更省事，也和圆角卡片语言一致。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#B3000000" />
+    <corners android:radius="@dimen/r_control" />
+</shape>

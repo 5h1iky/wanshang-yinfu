@@ -16,15 +16,31 @@ import com.dywatch.app.login.LoginManager;
  */
 public class MainActivity extends UiActivity {
 
+    /**
+     * 公告闸门（软件内问题 ①）：免责声明通过前一律为 false。
+     * 说明：声明是红线且不可取消，公告是可延后的信息 → 只能 声明 → 公告 串行。
+     */
+    private boolean announceGateOpen;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 首启强制免责声明（红线 #2：内嵌 + 确认）
-        com.dywatch.app.util.Disclaimer.showIfNeeded(this, null);
+        // 一次性设置迁移（必须早于任何设置读取；0.8.0 起：快捷回复条默认值变更的兜底，见 Settings）
+        com.dywatch.app.ui.Settings.migrateQuickReplyDefaultOnce(this);
 
-        setupAnnounce();
+        // 首启强制免责声明（红线 #2：内嵌 + 确认）
+        // ⚠️ 弹窗串行化（软件内问题 ①）：**声明通过后才弹公告**。
+        // 老写法是 showIfNeeded(this, null) + 紧接着 setupAnnounce()——两个弹窗同时发起，
+        // 首启时公告盖在声明上（用户看到"两个弹窗叠一起"）。声明是红线且不可取消，
+        // 公告是可延后的信息 → 顺序只能是 声明 → 公告。
+        com.dywatch.app.util.Disclaimer.showIfNeeded(this, new Runnable() {
+            @Override public void run() {
+                announceGateOpen = true;   // 声明已通过（或本来已同意过）→ 放行公告
+                setupAnnounce();
+            }
+        });
 
         final TextView status = findViewById(R.id.tv_status);
         refreshStatus(status);
@@ -128,13 +144,21 @@ public class MainActivity extends UiActivity {
      * 公告（Cloudflare 三件之①）：**弹窗**形态（2026-09-30 用户拍板，banner 太不起眼）。
      * 口径：启动时拉一次 + 进设置页拉一次；有未读公告才弹；任何关闭都记 lastReadId（不反复打扰）；
      * 拉不到就静默。缓存里的公告回到主屏也能立刻弹（设置页拉到的新公告不用等下次启动）。
+     *
+     * ⚠️ 串行化（软件内问题 ①）：`announceGateOpen` 由免责声明的 onAccepted 置位。
+     * 下面两处都要判——**异步回调（网络回来）也要挡**，否则声明还开着的时候公告就冒出来了。
      */
     private void setupAnnounce() {
+        if (!announceGateOpen) {
+            com.dywatch.app.util.AppLog.i("announce", "声明未通过 → 本次不弹公告");
+            return;
+        }
         // 先用缓存判定（可能是设置页刚拉的），再后台刷新一次
         com.dywatch.app.ui.AnnounceDialog.showIfPending(this);
         com.dywatch.app.net.AnnounceStore.refreshInBackground(this, false, new Runnable() {
             @Override
             public void run() {
+                if (!announceGateOpen) return;   // 期间声明若被放弃（Activity 已结束）也不再弹
                 com.dywatch.app.ui.AnnounceDialog.showIfPending(MainActivity.this);
             }
         });

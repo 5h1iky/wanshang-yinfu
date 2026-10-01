@@ -194,19 +194,44 @@
             android:contentDescription="播放/暂停" />
     </FrameLayout>
 
-    <SeekBar
-        android:id="@+id/sb_progress"
+    <!--
+      进度行（2026-10-01 软件内问题 ⑤）：进度条左侧加**全屏入口**，所以它和全屏键一起
+      放进一个横向容器里（原来 SeekBar 是本视图的直接孩子、宽 70%）。
+      ⚠️ 连带必改：TikTokView.onSizeChanged() 原来把 SeekBar 的 LayoutParams 强转成
+      FrameLayout.LayoutParams 再手动设宽 —— 换了父容器这会直接 ClassCastException；
+      现在只改**本行**的参数（行是 FrameLayout 的孩子），SeekBar 宽度交给 layout_weight。
+    -->
+    <LinearLayout
+        android:id="@+id/ll_progress_row"
         android:layout_width="match_parent"
-        android:layout_height="28dp"
+        android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:layout_marginBottom="24dp"
-        android:background="@null"
-        android:minHeight="0dp"
-        android:progressDrawable="@drawable/feed_seek_bar"
-        android:splitTrack="false"
-        android:thumb="@null"
-        android:max="1000"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:elevation="6dp"
-        android:visibility="gone" />
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/btn_fullscreen"
+            android:layout_width="@dimen/ctrl_min"
+            android:layout_height="@dimen/ctrl_min"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="全屏"
+            android:padding="@dimen/s3"
+            android:src="@drawable/ic_fullscreen" />
+
+        <SeekBar
+            android:id="@+id/sb_progress"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:background="@null"
+            android:max="1000"
+            android:minHeight="0dp"
+            android:progressDrawable="@drawable/feed_seek_bar"
+            android:splitTrack="false"
+            android:thumb="@null" />
+    </LinearLayout>
 
 </FrameLayout>

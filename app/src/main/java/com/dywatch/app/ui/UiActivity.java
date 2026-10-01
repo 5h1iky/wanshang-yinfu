@@ -27,8 +27,12 @@ public class UiActivity extends AppCompatActivity {
     /**
      * 圆屏/异形屏的内缩统一施加在 DecorView 根上：一处生效，不必每页布局各写一套 padding，
      * 也不会漏掉新页面。圆屏底部再多留一点——圆形边缘在下巴处切得最深。
+     *
+     * ⚠️ **可重复调用**（软件内问题 ②，2026-10-01）：设置页的调节面板每改一次边距就重放一次
+     * → 用户当场看到页面内缩/展开（实时预览）。弹窗是**独立窗口**，不受这个 padding 影响，
+     * 所以面板自己不会被推走。setPadding 是幂等的，重复调不会累积。
      */
-    private void applyPageInsets() {
+    public final void applyPageInsets() {
         int ph = Settings.paddingHPercent(this);
         int pv = Settings.paddingVPercent(this);
         android.view.View root = getWindow().getDecorView().getRootView();
