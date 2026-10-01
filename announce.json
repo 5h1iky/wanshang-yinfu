@@ -10,10 +10,10 @@
     "enabled": "false 时整条忽略（留空模板用）"
   },
   "enabled": true,
-  "id": "2026-09-30-04",
+  "id": "2026-10-01-05",
   "level": "info",
-  "title": "公告功能上线",
-  "text": "以后重要通知会像这样弹出来。点「知道了」关闭，同一条不会重复打扰。",
-  "link": "https://github.com/5h1iky/wanshang-yinfu/releases",
+  "title": "0.8.0 已发布",
+  "text": "新增：全屏播放（双指缩放 / 复位 / 旋转）、快捷回复可自己改文案、边距可逐格调。到 Release 页下载新的 APK，覆盖安装即可，登录不用重扫。",
+  "link": "https://github.com/5h1iky/wanshang-yinfu/releases/latest",
   "showUntil": 0
 }
