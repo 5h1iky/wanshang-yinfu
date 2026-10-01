@@ -10,10 +10,10 @@
     "enabled": "false 时整条忽略（留空模板用）"
   },
   "enabled": true,
-  "id": "2026-10-01-05",
+  "id": "2026-10-01-06",
   "level": "info",
-  "title": "0.8.0 已发布",
-  "text": "新增：全屏播放（双指缩放 / 复位 / 旋转）、快捷回复可自己改文案、边距可逐格调。到 Release 页下载新的 APK，覆盖安装即可，登录不用重扫。",
+  "title": "0.8.1 已发布",
+  "text": "修了三处：聊天页提示误导、退出登录没退干净、日志缓存只涨不降。到 Release 页下载新的 APK，覆盖安装即可，登录不用重扫。",
   "link": "https://github.com/5h1iky/wanshang-yinfu/releases/latest",
   "showUntil": 0
 }
