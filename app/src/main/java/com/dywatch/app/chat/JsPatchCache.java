@@ -86,6 +86,66 @@ public final class JsPatchCache {
         }
     }
 
+    /**
+     * 清理过期产物（2026-10-01，用户问"这东西会不会一直留在本地、应用不会变大吗"——会的）。
+     *
+     * 两个来源：
+     *  ① **旧补丁版本**：文件名里带 `PATCH_VERSION`，版本一升，旧文件再也不会被读到，
+     *     却一直占地方。真机实测：v2 与 v3 各存一份，同一个 4.9MB 的 bundle 存了两遍，
+     *     整个目录 ~13MB（手表存储本就紧张）。
+     *  ② **失控增长**：站方一换 bundle，旧文件就成了死重量。
+     * 做法：先删非当前版本的文件；再看总量，超上限就从最旧的开始删。
+     * 纯 java.io（可 JVM 单测）；失败一律静默——缓存不是正确性依赖。
+     *
+     * @param maxTotalBytes 保留上限（字节）；<=0 表示只清旧版本、不设总量上限
+     * @return 删掉的文件数
+     */
+    public int pruneStale(long maxTotalBytes) {
+        if (mDir == null) return 0;
+        File[] fs = mDir.listFiles();
+        if (fs == null) return 0;
+        int deleted = 0;
+        final String keepPrefix = "jsp_v" + PATCH_VERSION + "_";
+        java.util.List<File> alive = new java.util.ArrayList<>();
+        for (File f : fs) {
+            if (!f.isFile()) continue;
+            if (!f.getName().startsWith(keepPrefix)) {
+                if (delete(f)) deleted++;
+            } else {
+                alive.add(f);
+            }
+        }
+        if (maxTotalBytes > 0) {
+            long total = 0;
+            for (File f : alive) total += f.length();
+            if (total > maxTotalBytes) {
+                // 最旧的先走（lastModified 升序）
+                java.util.Collections.sort(alive, new java.util.Comparator<File>() {
+                    @Override public int compare(File a, File b) {
+                        return Long.compare(a.lastModified(), b.lastModified());
+                    }
+                });
+                for (File f : alive) {
+                    if (total <= maxTotalBytes) break;
+                    long len = f.length();
+                    if (delete(f)) {
+                        total -= len;
+                        deleted++;
+                    }
+                }
+            }
+        }
+        return deleted;
+    }
+
+    private static boolean delete(File f) {
+        try {
+            return f.delete();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private File fileFor(String url) {
         if (mDir == null) return null;
         return new File(mDir, "jsp_" + keyOf(url) + ".js");

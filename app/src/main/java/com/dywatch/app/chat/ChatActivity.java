@@ -34,6 +34,8 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     /** 上次渲染的消息条数：只有真的变多了才自动滚到底，否则每 5s 轮询都会把用户拽回底部 */
     private int mLastCount = -1;
     private String mConvName;
+    /** 本页打开时刻：首屏预算（LegacyKernel.FIRST_LOAD_BUDGET_MS）从这一刻算起 */
+    private long mOpenedAt;
     private final SimpleDateFormat mFmt = new SimpleDateFormat("HH:mm", Locale.US);
     private final android.os.Handler mPoll = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable mPollTask = new Runnable() {
@@ -49,6 +51,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
         setPageTitle("聊天");
+        mOpenedAt = System.currentTimeMillis();   // 首屏预算起点（提示状态机用）
 
         mMessages = findViewById(R.id.rv_messages);
         mMessages.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
@@ -221,11 +224,32 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         }
     }
 
+    /**
+     * 引擎还在热身（2026-10-01）：等待 ≠ 失败。
+     * 会话列表页同样改过这一点——用户反馈"刚进页面就报通道异常，几秒后自己又好了"。
+     */
+    @Override
+    public void onEngineWaiting(String why) {
+        if (System.currentTimeMillis() - mOpenedAt < LegacyKernel.FIRST_LOAD_BUDGET_MS) {
+            hint(LegacyKernel.progressHint(false, 1));
+            com.dywatch.app.ui.Loading.show(this, true);
+        }
+    }
+
+    /**
+     * 真·错误：**首屏预算内不当失败显示**（真机实测这类错误常常只是"页面还没就绪"的连带反应），
+     * 预算内显示加载进度并继续转圈；真错误照原样进日志。预算耗尽才是终态。
+     */
     @Override
     public void onEngineError(String err) {
+        AppLog.i("chat", "通道异常: " + err);
+        if (System.currentTimeMillis() - mOpenedAt < LegacyKernel.FIRST_LOAD_BUDGET_MS) {
+            hint(LegacyKernel.progressHint(false, 1));
+            com.dywatch.app.ui.Loading.show(this, true);
+            return;
+        }
         hint("通道异常: " + err);
         com.dywatch.app.ui.Loading.show(this, false);
-        AppLog.i("chat", "通道异常: " + err);
     }
 
     @Override

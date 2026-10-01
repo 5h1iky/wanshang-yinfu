@@ -31,12 +31,17 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     private boolean mAuthed;
     /** 私信页是否已加载完成（onEngineReady 后置起） */
     private boolean mPageReady;
+    /** 本页打开时刻：首屏预算（LegacyKernel.FIRST_LOAD_BUDGET_MS）从这一刻算起 */
+    private long mOpenedAt;
+    /** 空列表自动重试的上限（之后不再加新请求，但"加载中"的提示与转圈继续） */
+    private static final int MAX_EMPTY_RETRIES = 8;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_convlist);
         setPageTitle("会话");
+        mOpenedAt = System.currentTimeMillis();
 
         mConvs = findViewById(R.id.rv_convs);
         mConvs.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
@@ -123,39 +128,56 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         mHint.setVisibility(android.view.View.VISIBLE);
     }
 
+    /**
+     * 加载态提示：文案 + **转圈**（2026-10-01）。
+     * 用户反馈"只有正在拉取那一段有圆圈"——原因就是老代码在错误/终态提示里都会
+     * setLoading(false)，而唯一的加载提示没管转圈状态。现在加载态统一走这里。
+     */
+    private void loadingHint(String text) {
+        hint(text);
+        setLoading(true);
+    }
+
+    /** 终态提示：说明卡在哪一步，并停下转圈（别再让用户空等） */
+    private void terminalHint(String text) {
+        hint(text);
+        setLoading(false);
+    }
+
     private void clearHint() {
         if (mHint != null) mHint.setVisibility(android.view.View.GONE);
     }
 
     private void render(List<Conversation> list) {
         if (list.isEmpty()) {
-            // 老内核（方案 D）：命中就给终态提示，不再无谓转圈。
-            // 以前一律写"正在等待会话数据…（自动重试）"，用户以为是自己网络不好，
-            // 实际上是本机内核太老（真机坐实：Chromium 83 解析不了抖音私信模块）。
+            // ⚠️ 2026-10-01 重做（用户反馈："三个提示里两个在否定加载成功"）：
+            //    老逻辑只要重试 2 次（≈5 秒）就敢下"内核过旧 / 脚本解析失败"的结论，
+            //    而真机冷启动要 35~40 秒才拿到数据 → 提示先否定、几秒后又加载成功，自打脸。
+            //    现在分两段：**首屏预算内只报进度（且一直转圈）**，预算耗尽才给"卡在哪一步"的终态。
+            long waited = System.currentTimeMillis() - mOpenedAt;
+            int attempts = mEmptyRetries + 1;          // 本次是第几次尝试（渲染发生在自增之前）
             LegacyKernel.Kernel k = kernel();
             boolean patched = mEngine != null && mEngine.isPatchApplied();
-            // ⚠️ 补丁已生效时，内核不再是原因 → 别再显示"内核过旧"（那会误导）
-            if (!patched && LegacyKernel.isKernelDeadEnd(k, mEmptyRetries)) {
-                hint(LegacyKernel.kernelHint(k));
-                setLoading(false);
-                AppLog.i("chat", "私信不可用（内核过旧）: " + LegacyKernel.kernelHint(k));
+            if (LegacyKernel.stillLoading(waited)) {
+                loadingHint(LegacyKernel.progressHint(mPageReady, attempts));
+            } else if (!patched && LegacyKernel.isKernelDeadEnd(k, mEmptyRetries)) {
+                terminalHint(LegacyKernel.kernelHint(k));
+                AppLog.i("chat", "私信不可用（内核过旧，已等 " + (waited / 1000) + "s）: "
+                        + LegacyKernel.kernelHint(k));
                 return;
+            } else {
+                terminalHint(LegacyKernel.stuckHint(k, mAuthed, mPageReady, attempts, patched));
             }
-            setLoading(true);   // 还在自动重试 = 仍在加载，圆圈继续转
-            // IM 数据异步渲染，页面刚就绪时常为空 → 自动重试；提示要说明"卡在哪一步"
-            if (mEmptyRetries < 8) {
-                hint(LegacyKernel.stuckHint(k, mAuthed, mPageReady, mEmptyRetries, patched));
-                mEmptyRetries++;
+            // 预算内继续自动重试；到底了（MAX_EMPTY_RETRIES）就不再加新请求，
+            // 但页面仍由 bridge 自己的轮询兜着（真机上数据就是这么在 30~40s 到的）。
+            mEmptyRetries++;
+            if (mEmptyRetries <= MAX_EMPTY_RETRIES) {
                 mConvs.postDelayed(new Runnable() {
                     @Override
                     public void run() {
                         if (mEngine != null && !isFinishing()) mEngine.fetchConversations();
                     }
                 }, 2500);
-            } else {
-                // 重试到底仍空：给出"卡在哪"的终态说明，而不是含糊的"没有会话"
-                hint(LegacyKernel.stuckHint(k, mAuthed, mPageReady, mEmptyRetries, patched));
-                setLoading(false);
             }
             return;
         }
@@ -181,10 +203,19 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         mHint.post(new Runnable() {
             @Override
             public void run() {
-                hint("通道就绪，拉取会话…");
+                loadingHint("通道就绪，拉取会话…");   // 加载态：继续转圈（用户反馈的那段）
                 if (mEngine != null) mEngine.fetchConversations();
             }
         });
+    }
+
+    /**
+     * 引擎还在热身（2026-10-01）：这是**等待**不是错误 —— 显示进度 + 转圈，
+     * 绝不出现"异常/失败"字样（用户反馈：刚进页面就报"通道异常: 通道未就绪"，几秒后就好了）。
+     */
+    @Override
+    public void onEngineWaiting(String why) {
+        loadingHint(LegacyKernel.progressHint(false, mEmptyRetries + 1));
     }
 
     @Override
@@ -211,17 +242,29 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     public void onAuth(boolean ok, String message) {
         mAuthed = ok;   // 供"卡在哪一步"的分级提示使用
         if (!ok) {
-            hint("⚠ " + message);
-            setLoading(false);   // 已给出明确失败提示 → 停止转圈
+            // 登录态失败是**用户要动手**的事（去扫码登录），立刻给终态，不套首屏预算
+            terminalHint("⚠ " + message);
             if (mEngine != null) mEngine.fetchConversations();
         }
     }
 
+    /**
+     * 真·错误（引擎自己报的；"未就绪"那种正常等待已经改走 onEngineWaiting）。
+     *
+     * ⚠️ 但**首屏预算内仍不当失败显示**：老代码在这里直接写"通道异常: …"并停转圈，
+     *    而这类错误常常只是"页面还没就绪"的连带反应（真机实测：报完几秒数据就来了）。
+     *    预算内一律显示加载进度 + 继续转圈，同时把真错误**照原样打进日志**（排查不受影响）；
+     *    预算耗尽后才是真的终态。
+     */
     @Override
     public void onEngineError(String err) {
-        hint("通道异常: " + err);
-        setLoading(false);       // 同上：有明确提示就不再转
         AppLog.i("chat", "会话列表异常: " + err);
+        long waited = System.currentTimeMillis() - mOpenedAt;
+        if (LegacyKernel.stillLoading(waited)) {
+            loadingHint(LegacyKernel.progressHint(mPageReady, mEmptyRetries + 1));
+        } else {
+            terminalHint("通道异常: " + err);
+        }
         // 页面可能未就绪，稍后自动重试
         mConvs.postDelayed(new Runnable() {
             @Override

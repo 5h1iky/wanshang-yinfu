@@ -26,10 +26,28 @@ public final class AppLog {
     private static final int MAX = 200;
     private static Context sCtx;
 
+    /**
+     * 落盘日志的上限（2026-10-01，用户问"日志会不会一直存着、应用不会变大吗"——会，已修）。
+     *
+     * 老实现是 `openFileOutput(MODE_APPEND)` 一路追加，**永不清理**：内存环形缓冲有 200 条上限，
+     * 文件却没有。引擎每次进私信页都会刷几十上百行（含长 URL），手表存储又紧张，于是只涨不降。
+     * 现在：超过 {@link #MAX_FILE_BYTES} 就砍掉前半段、只留最后 {@link #KEEP_FILE_BYTES}
+     * （一次砍一半，避免每写一行都裁一次文件）。诊断页读的是内存环形缓冲，不受影响。
+     */
+    private static final long MAX_FILE_BYTES = 256 * 1024L;
+    private static final long KEEP_FILE_BYTES = 128 * 1024L;
+    private static final String LOG_FILE = "app.log";
+
     private AppLog() {}
 
     public static synchronized void init(Context ctx) {
         sCtx = ctx.getApplicationContext();
+        // 启动时就先看一次（上次运行可能已经涨过线）
+        try {
+            java.io.File f = new java.io.File(sCtx.getFilesDir(), LOG_FILE);
+            if (f.length() > MAX_FILE_BYTES) trim(f, KEEP_FILE_BYTES);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static synchronized void i(String tag, String msg) {
@@ -43,9 +61,51 @@ public final class AppLog {
         } catch (Throwable ignored) {
         }
         if (sCtx != null) {
-            try (FileOutputStream fos = sCtx.openFileOutput("app.log", Context.MODE_APPEND)) {
+            try {
+                java.io.File f = new java.io.File(sCtx.getFilesDir(), LOG_FILE);
+                if (f.length() > MAX_FILE_BYTES) trim(f, KEEP_FILE_BYTES);
+            } catch (Throwable ignored) {
+            }
+            try (FileOutputStream fos = sCtx.openFileOutput(LOG_FILE, Context.MODE_APPEND)) {
                 fos.write((line + "\n").getBytes("UTF-8"));
             } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * 把日志文件砍到只剩最后 keepBytes 字节，**按行对齐**（丢掉第一行那个被切一半的残行，
+     * 否则 UTF-8 多字节字符会被截断成乱码）。纯 java.io，不依赖 Android → 可 JVM 单测。
+     *
+     * @return 是否真的裁剪过
+     */
+    static boolean trim(java.io.File f, long keepBytes) {
+        if (f == null || !f.isFile() || keepBytes <= 0) return false;
+        long len = f.length();
+        if (len <= keepBytes) return false;
+        java.io.RandomAccessFile raf = null;
+        try {
+            raf = new java.io.RandomAccessFile(f, "rw");
+            long start = len - keepBytes;
+            raf.seek(start);
+            byte[] buf = new byte[(int) (len - start)];
+            raf.readFully(buf);
+            String tail = new String(buf, "UTF-8");
+            int nl = tail.indexOf('\n');
+            if (nl >= 0) {
+                tail = tail.substring(nl + 1);   // 丢掉被切一半的那行
+            }
+            byte[] out = tail.getBytes("UTF-8");
+            raf.setLength(0);
+            raf.seek(0);
+            raf.write(out);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            try {
+                if (raf != null) raf.close();
+            } catch (Throwable ignored) {
             }
         }
     }

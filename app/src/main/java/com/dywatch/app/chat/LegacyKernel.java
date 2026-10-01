@@ -120,8 +120,51 @@ public final class LegacyKernel {
     /**
      * 是否应判定为"内核导致的永久失败"（命中就不再无谓重试，直接给终态提示）。
      * 重试 8 次仍空 + 内核不足 → 认定无解，别再转圈。
+     *
+     * ⚠️ 2026-10-01：调用方必须**先过首屏预算**（{@link #stillLoading}）再问这个，
+     *    否则会在"只是慢"的时候给出"没救"的结论（用户已反馈过这个误导）。
      */
     public static boolean isKernelDeadEnd(Kernel k, int retries) {
         return k != null && k.known() && !k.supportsIm() && retries >= 2;
+    }
+
+    // ---------- 加载态 / 终态的判据（2026-10-01 新增，纯函数可 JVM 单测）----------
+
+    /**
+     * 首屏预算：这段时间内**一律只报进度、不许下结论**。
+     *
+     * 为什么需要：真机实测（2026-10-01，用户反馈 + 我的时间线观测）从进聊天页到会话数据回来，
+     * 冷启动要 **35~40 秒**（引擎启动 ~10s + 抖音私信页 SPA 渲染 + 桥轮询），
+     * 而老代码在 ~5 秒时就敢说"本机内核过旧、脚本解析失败"，紧接着数据又出来了 ——
+     * 三条提示里两条在否定加载成功，直接打击等待意愿。
+     *
+     * ⚠️ 30 秒、60 秒都不够：实测冷启动最慢一次 **61 秒**才拿到数据（30s 那版出现过
+     *    "先说卡住、两秒后加载好"；60s 那版数据正好在第 61 秒到，仍是擦边）。
+     *    现在设 90 秒（≈ 观测最慢值的 1.5 倍）：预算内只显示"正在……"并保持转圈。
+     */
+    public static final long FIRST_LOAD_BUDGET_MS = 90_000L;
+
+    /** 还在首屏预算内 = 加载中（调用方据此决定"报进度"还是"下结论"） */
+    public static boolean stillLoading(long elapsedMs) {
+        return elapsedMs < FIRST_LOAD_BUDGET_MS;
+    }
+
+    /**
+     * 加载中的进度文案（纯函数）。
+     * ⚠️ 单测锁死：这些文案**不许**出现"失败 / 异常 / 过旧 / 不可用 / 卡在"这类否定词——
+     * 它们只在预算耗尽后的终态里出现。
+     *
+     * @param engineReady 引擎是否已就绪（false = 通道还在启动）
+     * @param attempts    已尝试拉取次数（含首次）
+     */
+    public static String progressHint(boolean engineReady, int attempts) {
+        if (!engineReady) {
+            return "正在启动通道…（首次打开较慢，请稍等）";
+        }
+        if (attempts <= 1) {
+            return "正在拉取会话…";
+        }
+        // 说"在等"而不是"卡住"：抖音私信页本身就要几十秒，中途下结论必被打脸
+        return "正在拉取会话…（抖音私信页较慢，已重试 " + attempts + " 次）";
     }
 }

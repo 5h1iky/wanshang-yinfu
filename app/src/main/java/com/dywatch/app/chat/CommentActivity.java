@@ -466,6 +466,19 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         AppLog.i("chat", "评论页异常: " + err);
     }
 
+    /**
+     * 引擎还在热身（2026-10-01）：等待 ≠ 失败。
+     * 评论页本来就有"正在加载评论…"的常规提示，这里只在还没拿到数据时补一句，
+     * **不显示"异常/失败"字样**（用户反馈过"刚进页面就报通道异常、几秒后又好了"）。
+     */
+    @Override
+    public void onEngineWaiting(String why) {
+        if (mAdapter == null || mAdapter.getItemCount() == 0) {
+            hint(LegacyKernel.progressHint(false, 1));
+            com.dywatch.app.ui.Loading.show(this, true);
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();

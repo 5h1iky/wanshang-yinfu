@@ -33,6 +33,16 @@ public class ChatEngine {
         void onCommentsMore(List<com.dywatch.app.chat.model.Comment> list, boolean atEnd);
         void onAuth(boolean ok, String message);
         void onEngineError(String err);
+        /**
+         * 引擎还在热身（2026-10-01 新增，用户反馈"刚进聊天页就报通道异常"）。
+         *
+         * ⚠️ 为什么不能复用 onEngineError：刚进页面时"引擎尚未 ready"是**完全正常**的状态
+         * （真机实测：进页面 → onEngineReady 要十几秒），把它当错误显示，用户看到的就是
+         * "通道异常: 通道未就绪"，紧接着几秒后列表又出来了 —— 提示自己在打自己的脸。
+         * 语义分家：本回调 = **等待中**（页面应显示进度 + 转圈），onEngineError = 真出问题了。
+         * （不用接口 default 方法：本项目 minSdk 21，显式实现更稳。）
+         */
+        void onEngineWaiting(String why);
     }
 
     /** 一次性互动动作（点赞/收藏）结果回调 */
@@ -218,8 +228,12 @@ public class ChatEngine {
             if (tooOld) {
                 File dir = new File(mCtx.getCacheDir(), "js_patch");
                 mPatchCache = new JsPatchCache(dir);
+                // 顺手清掉过期产物（2026-10-01）：旧补丁版本的文件永远不会再被读到，
+                // 真机实测 v2+v3 两份共 ~13MB（同一个 4.9MB bundle 存了两遍）→ 白占手表空间
+                int pruned = mPatchCache.pruneStale(PATCH_CACHE_MAX_BYTES);
                 AppLog.i("engine", "内核过旧（Chromium " + k.major + " < "
-                        + LegacyKernel.MIN_CHROME_FOR_IM + "）→ 启用私信 JS 语法补丁");
+                        + LegacyKernel.MIN_CHROME_FOR_IM + "）→ 启用私信 JS 语法补丁"
+                        + (pruned > 0 ? "（清理过期缓存 " + pruned + " 个文件）" : ""));
             }
         } catch (Throwable t) {
             mPatchEnabled = false;   // 拿不到内核信息就不冒险改
@@ -411,6 +425,12 @@ public class ChatEngine {
 
     private JsPatchCache mPatchCache;
 
+    /**
+     * 补丁缓存总量上限（2026-10-01）：当前版本的一套产物约 6.6MB（最大那个 bundle 4.9MB），
+     * 留 24MB 够两三轮兜底，再多就是站方换 bundle 留下的死重量了。
+     */
+    private static final long PATCH_CACHE_MAX_BYTES = 24L * 1024 * 1024;
+
     /** 私信模块 JS 的 URL 特征（按目录匹配，不写死 hash——站方一更新 hash 就变） */
     private static boolean isPatchTarget(String url) {
         return url.contains("/pcim/static/js/") && url.endsWith(".js");
@@ -422,6 +442,12 @@ public class ChatEngine {
             String cached = mPatchCache.load(url);
             if (cached != null) {
                 AppLog.i("engine", "JS 补丁命中缓存: " + tail(url));
+                // ⚠️ 2026-10-01 修（用户反馈"提示说脚本解析失败，几秒后却加载出来了"）：
+                //    缓存里存的就是**改写后**的 JS —— 命中缓存等于补丁正在生效，必须置位。
+                //    老代码只在"下载+改写"那条路置 mPatchApplied，于是第二次以后进页面
+                //    isPatchApplied() 恒为 false → 会话页把失败归咎"内核过旧、脚本解析失败"，
+                //    而实际上补丁跑得好好的。一个漏赋值，造成一句假话。
+                mPatchApplied = true;
                 return cached;
             }
         }
@@ -570,7 +596,8 @@ public class ChatEngine {
             public void run() {
                 if (mWebView == null) return;
                 if (!mReady) {
-                    if (mListener != null) mListener.onEngineError("通道未就绪");
+                    // 等待 ≠ 失败：走等待回调（页面显示"正在启动通道…"+ 转圈），不再报错
+                    if (mListener != null) mListener.onEngineWaiting("引擎尚未就绪");
                     return;
                 }
                 mWebView.evaluateJavascript(script, null);
@@ -586,6 +613,28 @@ public class ChatEngine {
         while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
         is.close();
         return new String(bos.toByteArray(), "UTF-8");
+    }
+
+    /**
+     * 退出登录时调用（2026-10-01）：把单例引擎整个销毁，下次谁要谁重建。
+     *
+     * 为什么不能只清 cookie：**已经加载在内存里的页面还带着旧会话**（JS 侧状态、已建立的连接），
+     * 只删 cookie 不重建，页面照旧能用 —— 用户会以为"退出登录没生效"。
+     * 主线程执行：WebView.destroy() 必须在主线程，且要先把宿主视图摘下来（destroy() 内部做了）。
+     */
+    public static void resetForLogout() {
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override public void run() {
+                try {
+                    if (sInstance != null) {
+                        sInstance.destroy();
+                        com.dywatch.app.util.AppLog.i("engine", "退出登录：引擎已销毁，下次重建");
+                    }
+                } catch (Throwable t) {
+                    com.dywatch.app.util.AppLog.i("engine", "退出登录销毁引擎失败: " + t);
+                }
+            }
+        });
     }
 
     public void destroy() {
