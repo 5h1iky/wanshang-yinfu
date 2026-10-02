@@ -116,6 +116,7 @@ keyPassword=...
 |---|---|---|
 | [BiliClient 哔哩终端](https://github.com/huanli233/BiliClient) | **手表适配的参照系**：单行页头（返回箭头兼热区）、圆屏边距百分比方案、表冠滚动（RotaryScrollView 移植自它）、配色逻辑（Bili 色板）、以及"读接口直连 + 官方 Web 会话"的可行性先例 | GPL-3.0 |
 | [DKVideoPlayer](https://github.com/Doikki/DKVideoPlayer) | **播放内核整库使用**：`dkplayer-java` / `dkplayer-ui` / `dkplayer-videocache` 三模块源码内嵌（`lib/` 目录），其 TikTok2 demo 是刷视频页（上下滑 + 预加载 + 单播放器复用）的原始蓝本 | Apache-2.0 |
+| [VerticalViewPager](https://github.com/castorflex/VerticalViewPager) | 纵向翻页容器（`widget/VerticalViewPager.java`，源码内嵌并做过本项目改造）。2026-10-02 补登：此前只在文件头保留了原作者署名，漏在致谢表里 | Apache-2.0 |
 
 ### 签名与协议
 
@@ -138,10 +139,20 @@ keyPassword=...
 
 ## 隐私承诺
 
-- 扫码登录产生的会话 **只存在设备本机**（SharedPreferences / WebView CookieStore）
+- 扫码登录产生的会话 **只存在设备本机**（SharedPreferences / WebView CookieStore）。
+  2026-10-02 起进一步落实：应用已关闭 `allowBackup`，并在 `dataExtractionRules` 里
+  排除了全部数据域 —— 云备份与换机直传都**不会**把会话带走（代价：换设备要重新扫码一次；
+  同设备覆盖安装不受影响）
 - **不收集、不上传、不打点**：无账号信息、无聊天内容、无设备指纹、无崩溃上报
-- 应用只有一个网络出口：抖音的接口本身
-- 想验证？代码全开源，`LoginManager` / `DouyinApi` / `ChatEngine` 三处网络出口逐行可审
+- 网络出口只有两类，**都不携带账号身份**：
+  1. **抖音域**（`*.douyin.com` 等）：视频流 / 评论 / 喜欢 / 主页等读取接口，以及承载登录与
+     点赞/评论/私信的网页引擎。Cookie 只发给抖音自家域 —— 出站有 `CookieHostGuard`
+     拦截器逐跳校验，重定向到站外会把 Cookie 摘掉
+  2. **更新与公告**（`api.github.com`、`cdn.jsdelivr.net`、`fastly.jsdelivr.net`、
+     `dy-announce.sharkyline.workers.dev`）：只 GET 公开的版本号 / 公告 JSON，
+     不带 Cookie、不带任何标识（User-Agent 只有应用名与版本号）
+- 想验证？代码全开源：`LoginManager`（会话存取）/ `DouyinApi`（接口直连）/
+  `ChatEngine`（网页引擎）/ `UpdateChecker` + `AnnounceApi`（更新与公告）逐行可审
 
 ## 协议
 

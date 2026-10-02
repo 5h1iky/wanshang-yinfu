@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    备份/迁移排除清单（2026-10-02，代码审计 H1）。
+
+    应用里最值钱的东西是 filesDir/shared_prefs 里的**抖音会话 cookie**（明文）与
+    app.log / crash.log 里的私信、评论正文。这些一律不允许离开设备：
+      · cloud-backup  = 云备份（Google/厂商云）
+      · device-transfer = 换机直传
+    全部 exclude 掉，等于"任何自动迁移都不带这个应用的数据"。
+
+    ⚠️ 只在 allowBackup="true" 时才起作用（当前 manifest 已设 false，这里是第二道锁）：
+    将来谁把 allowBackup 改回 true，也不会因此把会话漏出去。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

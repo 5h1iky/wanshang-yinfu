@@ -42,8 +42,17 @@ public final class Signer {
         }
     }
 
-    /** 对原始 query 串生成 a_bogus */
-    public String makeABogus(String query) {
+    /**
+     * 对原始 query 串生成 a_bogus。
+     *
+     * ⚠️ 2026-10-02 加 synchronized（代码审计 M3）：整个 App 只建一个 Signer（"我的"页喜欢/看过
+     * 两条线程共用一个 mApi），而 Rhino 的 `scope` 是**共享可变对象**——两个线程同时在一个
+     * scope 上执行 JS，会互相踩隐式全局变量（assets/sign/utils.js 里就有 `x = ...` 这种写法），
+     * 结果是签名算错 → 服务端返回空数据 / 拉取失败。
+     * 症状极像"抖音改版了"，会把真正的失效信号淹没，所以在这里一刀切掉。
+     * 签名本身是毫秒级，串行化的代价可以忽略。
+     */
+    public synchronized String makeABogus(String query) {
         Context cx = Context.enter();
         try {
             cx.setOptimizationLevel(-1);

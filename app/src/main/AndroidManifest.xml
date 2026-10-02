@@ -13,9 +13,23 @@
         android:largeScreens="true"
         android:xlargeScreens="true" />
 
+    <!--
+        android:allowBackup="false"（2026-10-02，代码审计 H1）
+
+        为什么必须关：应用把抖音会话 cookie 明文存在 SharedPreferences（dywatch_session），
+        日志目录里还有私信/评论正文。而 allowBackup 默认 true 意味着这些会进
+        adb backup / 云备份 / 换机迁移——README 与免责声明里写的
+        "登录态仅保存在您本人的设备上""会话只存在设备本机"就成了假话：
+        二手转卖、送修、借用时，接手的人能把会话原样恢复出来。
+        dataExtractionRules 再显式排除一次（API 31+ 的口径），将来谁把 allowBackup 改回去也不会漏。
+
+        ⚠️ 用户可感知的后果（要写进发布说明）：换设备/恢复备份不再带走登录态与本地账本，
+        新设备需要重新扫码登录一次。同设备覆盖安装（同签名）不受影响，登录态照旧不丢。
+    -->
     <application
         android:name=".DyApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"

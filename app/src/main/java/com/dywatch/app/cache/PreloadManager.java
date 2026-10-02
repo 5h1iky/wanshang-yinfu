@@ -35,6 +35,15 @@ public class PreloadManager {
      */
     private boolean mIsStartPreload = true;
 
+    /**
+     * 宿主页面是否退到了后台（2026-10-02，代码审计 L6/L8）。
+     *
+     * 原来只有一个"滑动暂停/恢复"的语义：手指松开就恢复。而用户**按 Home 键走人**时，
+     * 没人通知预加载停下 —— 已提交的任务会把队列里剩下的都下完（每条最多 1MB），
+     * 用户看到的是"我没在看，流量和电还在掉"。现在宿主 onPause 整队停、onResume 再续。
+     */
+    private boolean mHostPaused;
+
     private final HttpProxyCacheServer mHttpProxyCacheServer;
 
     /**
@@ -134,6 +143,8 @@ public class PreloadManager {
      */
     public void resumePreload(int position, boolean isReverseScroll) {
         L.d("resumePreload：" + position + " isReverseScroll: " + isReverseScroll);
+        // 后台时不许被"滑动恢复"把预加载又拉起来（审计 L6/L8）
+        if (mHostPaused) return;
         mIsStartPreload = true;
         for (Map.Entry<String, PreloadTask> next : mPreloadTasks.entrySet()) {
             PreloadTask task = next.getValue();
@@ -176,6 +187,32 @@ public class PreloadManager {
             PreloadTask task = next.getValue();
             task.cancel();
             iterator.remove();
+        }
+    }
+
+    /**
+     * 整队暂停（宿主 onPause）：取消在跑的任务，并拦住后续提交。
+     * 任务本身留在表里，回到前台由 {@link #resumeAll()} 续上（executeOn 自带去重）。
+     */
+    public void pauseAll() {
+        mHostPaused = true;
+        mIsStartPreload = false;
+        for (Map.Entry<String, PreloadTask> next : mPreloadTasks.entrySet()) {
+            next.getValue().cancel();
+        }
+    }
+
+    /**
+     * 整队恢复（宿主 onResume）：只补那些"确实还没预加载好"的。
+     * 为什么不是简单地把标志位打开：那样只有下一次滑动才会重启预加载，
+     * 用户从后台回来不滑动的话，"下一条"就一直是没预热的。
+     */
+    public void resumeAll() {
+        mHostPaused = false;
+        mIsStartPreload = true;
+        for (Map.Entry<String, PreloadTask> next : mPreloadTasks.entrySet()) {
+            PreloadTask task = next.getValue();
+            if (!isPreloaded(task.mRawUrl)) task.executeOn(mExecutorService);
         }
     }
 

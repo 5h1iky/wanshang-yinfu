@@ -17,11 +17,16 @@
 //   ⑤ 评论提交：不硬编码 hash 类名，改为枚举 commentInput-right-ct 内可点 span 逐个试 + 回车兜底，
 //      判定用 Draft 的 [data-text] 镜像与 textContent 双通道是否清空（DOM 直改会让 Draft state 脱钩，禁用）。
 (function () {
-  if (window.ChatBridge && window.ChatBridge.__v4) return;
+  if (window.ChatBridge && window.ChatBridge.__v5) return;
 
   function post(obj) {
     try {
       if (window.AndroidBridge && AndroidBridge.onBridgeEvent) {
+        // 文档密钥：注入时由原生侧写进 window.__dywatch_key。
+        // 每条事件都带上它，原生侧只认带对密钥的事件 —— 页面里的第三方 iframe
+        // 拿不到主文档的变量，于是"伪造点赞成功/评论已发"这条路被堵上。
+        // ⚠️ 每次 post 时才读，不能闭包捕获：同一文档可能被重复注入（换 key）。
+        obj.doc = window.__dywatch_key || '';
         AndroidBridge.onBridgeEvent(JSON.stringify(obj));
       }
     } catch (e) {}
@@ -44,7 +49,7 @@
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   window.ChatBridge = {
-    __v4: true,
+    __v5: true,
 
     // 登录态检查（DOM 登录墙 + profile/self 双重验证）
     checkAuth: function () {
@@ -160,11 +165,11 @@
     // video-player-collect=收藏 video-player-share=分享
     // ⚠️ 该交互区祖先为 display:none（immersive-player-switch-on-hide-interaction-area），
     //    元素 rect 全 0 → 真实坐标点击不可能命中，只能派发事件序列（实测有效）。
-    likeVideo: function (awemeId, want) {
-      ChatBridge.__doVideoAction('like', awemeId, want);
+    likeVideo: function (awemeId, want, reqId) {
+      ChatBridge.__doVideoAction('like', awemeId, want, reqId);
     },
-    collectVideo: function (awemeId, want) {
-      ChatBridge.__doVideoAction('collect', awemeId, want);
+    collectVideo: function (awemeId, want, reqId) {
+      ChatBridge.__doVideoAction('collect', awemeId, want, reqId);
     },
     // 拉评论（DOM 抓取：昵称/文本/时间/赞数）
     fetchComments: function (awemeId) {
@@ -176,8 +181,8 @@
       ChatBridge.__doVideoAction('commentsMore', awemeId, true);
     },
     // 发评论（激活 Draft.js 框 → 粘贴注入 → 枚举提交面）
-    sendComment: function (awemeId, text) {
-      ChatBridge.__doVideoAction('sendComment', awemeId, text);
+    sendComment: function (awemeId, text, reqId) {
+      ChatBridge.__doVideoAction('sendComment', awemeId, text, reqId);
     },
 
     // 状态指纹：类名 token 集合 + 计数文本。
@@ -267,29 +272,33 @@
       });
     },
 
-    __doVideoAction: function (kind, awemeId, payload) {
+    __doVideoAction: function (kind, awemeId, payload, reqId) {
       var self = this;
       var e2e = kind === 'like' ? 'video-player-digg' : 'video-player-collect';
       // 不在该视频页 → 跳转；待办动作存 sessionStorage（同域跨页存续），下页注入后自续
       if (location.href.indexOf('/video/' + awemeId) < 0 && location.href.indexOf('modal_id=' + awemeId) < 0) {
         try {
-          sessionStorage.setItem('__dywatch_action', JSON.stringify({ kind: kind, awemeId: awemeId, payload: payload }));
+          // reqId 一起存：跨页续跑后回报的结果，仍然要能对回原来那次请求
+          sessionStorage.setItem('__dywatch_action',
+            JSON.stringify({ kind: kind, awemeId: awemeId, payload: payload, reqId: reqId }));
         } catch (e) {}
         location.href = 'https://www.douyin.com/video/' + awemeId;
-        post({ type: 'action', action: kind, phase: 'navigating' });
+        post({ type: 'action', action: kind, phase: 'navigating', reqId: reqId });
         return;
       }
       if (kind === 'comments') return this.__scrapeComments();
       if (kind === 'commentsMore') return this.__loadMoreComments();
-      if (kind === 'sendComment') return this.__doSendComment(payload);
+      if (kind === 'sendComment') return this.__doSendComment(payload, reqId);
       var key = kind + ':' + awemeId;
       if (this.__inFlight[key]) {
-        post({ type: 'action', action: kind, ok: false, skipped: true, detail: '上一次同动作仍在执行中，已忽略' });
+        post({ type: 'action', action: kind, ok: false, skipped: true, reqId: reqId,
+               detail: '上一次同动作仍在执行中，已忽略' });
         return;
       }
       this.__inFlight[key] = true;
       this.__clickAndJudge(kind, e2e, payload, 0).then(function (r) {
         delete self.__inFlight[key];
+        r.reqId = reqId;   // 结果带上请求号：原生侧据此投递，不再靠"当前唯一那个回调"猜
         post(r);
       });
     },
@@ -421,7 +430,7 @@
 
     // 发评论：激活 Draft.js 框 → 粘贴注入 → 枚举提交面（right-ct 内可点 span 逐个试）→ 回车兜底
     // 判定 = 编辑器清空（清空即已被页面消费=已发出）；不再用「未找到即失败」的假阴性口径
-    __doSendComment: function (text) {
+    __doSendComment: function (text, reqId) {
       var self = this;
       // 评论框要等 SPA 渲染（实测：跳页后 4s 才起页面、评论框还没挂载，旧版直接报"未找到评论框"）
       var boxTries = 0;
@@ -431,17 +440,18 @@
         if (!b) {
           if (boxTries > 40) {
             clearInterval(boxTimer);
-            post({ type: 'action', action: 'sendComment', ok: false, detail: '等 20s 仍无评论框（页面未渲染完）' });
+            post({ type: 'action', action: 'sendComment', ok: false, reqId: reqId,
+                   detail: '等 20s 仍无评论框（页面未渲染完）' });
           }
           return;
         }
         clearInterval(boxTimer);
         fireClick(b);
-        self.__doSendCommentEdit(text);
+        self.__doSendCommentEdit(text, reqId);
       }, 500);
     },
 
-    __doSendCommentEdit: function (text) {
+    __doSendCommentEdit: function (text, reqId) {
       var self = this;
       var tries = 0;
       var timer = setInterval(function () {
@@ -449,7 +459,10 @@
         var editor = document.querySelector('.public-DraftEditor-content[contenteditable="true"]');
         if (editor || tries > 25) {
           clearInterval(timer);
-          if (!editor) { post({ type: 'action', action: 'sendComment', ok: false, detail: '编辑器未出现' }); return; }
+          if (!editor) {
+            post({ type: 'action', action: 'sendComment', ok: false, reqId: reqId, detail: '编辑器未出现' });
+            return;
+          }
           editor.focus();
           try {
             var dt = new DataTransfer();
@@ -465,7 +478,8 @@
           }).then(function () {
             var injected = self.__editorText(editor);
             if (injected.indexOf(text) < 0) {
-              post({ type: 'action', action: 'sendComment', ok: false, detail: '文本未进入编辑器（state=' + injected + '）' });
+              post({ type: 'action', action: 'sendComment', ok: false, reqId: reqId,
+                     detail: '文本未进入编辑器（state=' + injected + '）' });
               return;
             }
             // 提交面枚举（真机实测纠版）：right-ct 里 3 个 span = 表情 / @提及 / 发送。
@@ -479,8 +493,9 @@
               var op = parseFloat(cs.opacity || '1');
               if (cs.cursor === 'pointer' || op >= 0.9) cands.push(nodes[i]);
             }
-            post({ type: 'action', action: 'sendComment', phase: 'submitting', cands: cands.length, injected: injected });
-            return self.__trySubmit(editor, cands, 0);
+            post({ type: 'action', action: 'sendComment', phase: 'submitting', reqId: reqId,
+                   cands: cands.length, injected: injected });
+            return self.__trySubmit(editor, cands, 0, reqId);
           }).then(function (r) {
             if (r) post(r);
           });
@@ -489,10 +504,11 @@
     },
 
     // 依次尝试：每个候选钮（pointer+mouse 事件全序列）→ 回车；每次试完看编辑器是否清空
-    __trySubmit: function (editor, cands, idx) {
+    __trySubmit: function (editor, cands, idx, reqId) {
       var self = this;
       if (this.__editorText(editor).length === 0) {
-        return Promise.resolve({ type: 'action', action: 'sendComment', ok: true, detail: '已发送（编辑器已清空）' });
+        return Promise.resolve({ type: 'action', action: 'sendComment', ok: true, reqId: reqId,
+                                 detail: '已发送（编辑器已清空）' });
       }
       if (idx < cands.length) {
         var beforeText = self.__editorText(editor);
@@ -500,7 +516,8 @@
         return wait(1500).then(function () {
           var nowText = self.__editorText(editor);
           if (nowText.length === 0) {
-            return { type: 'action', action: 'sendComment', ok: true, via: 'click#' + idx, detail: '已发送（点提交钮第' + (cands.length - idx) + '个）' };
+            return { type: 'action', action: 'sendComment', ok: true, via: 'click#' + idx, reqId: reqId,
+                     detail: '已发送（点提交钮第' + (cands.length - idx) + '个）' };
           }
           // 文本变长 = 点到了“插入型”钮（表情/@ 提及）→ 把插入的字符删掉再试下一个，
           // 绝不带着它提交（这就是用户看到尾@ 的那一步）
@@ -511,10 +528,10 @@
               try { document.execCommand('delete', false, null); } catch (e) {}
             }
             return wait(400).then(function () {
-              return self.__trySubmit(editor, cands, idx + 1);
+              return self.__trySubmit(editor, cands, idx + 1, reqId);
             });
           }
-          return self.__trySubmit(editor, cands, idx + 1);
+          return self.__trySubmit(editor, cands, idx + 1, reqId);
         });
       }
       // 回车兜底（私信侧实测有效；Draft 可能绑在 keydown 上）
@@ -524,7 +541,7 @@
       return wait(1500).then(function () {
         var left = self.__editorText(editor);
         return {
-          type: 'action', action: 'sendComment', ok: left.length === 0,
+          type: 'action', action: 'sendComment', ok: left.length === 0, reqId: reqId,
           triedClicks: cands.length,
           detail: left.length === 0 ? '已发送（回车）' : ('提交未生效：编辑器仍有内容「' + left.slice(0, 12) + '」，已试 ' + cands.length + ' 个候选钮')
         };
@@ -610,10 +627,11 @@
       var a = JSON.parse(raw);
       if (a && a.kind && a.awemeId) {
         setTimeout(function () {
-          if (a.kind === 'like') ChatBridge.likeVideo(a.awemeId, a.payload);
-          else if (a.kind === 'collect') ChatBridge.collectVideo(a.awemeId, a.payload);
+          // reqId 原样带回：跨页续跑的结果仍然投给当初发起的那次请求
+          if (a.kind === 'like') ChatBridge.likeVideo(a.awemeId, a.payload, a.reqId);
+          else if (a.kind === 'collect') ChatBridge.collectVideo(a.awemeId, a.payload, a.reqId);
           else if (a.kind === 'comments') ChatBridge.fetchComments(a.awemeId);
-          else if (a.kind === 'sendComment') ChatBridge.sendComment(a.awemeId, a.payload);
+          else if (a.kind === 'sendComment') ChatBridge.sendComment(a.awemeId, a.payload, a.reqId);
         }, 800);
       }
     }

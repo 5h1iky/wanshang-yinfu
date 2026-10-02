@@ -191,7 +191,31 @@ public final class AnnounceApi {
         String text = opt(o, "text");
         if (text.length() > 300) text = text.substring(0, 300) + "…";
 
-        return new Announcement(id, level, title, text, opt(o, "link"), showUntil);
+        return new Announcement(id, level, title, text, safeLink(opt(o, "link")), showUntil);
+    }
+
+    /**
+     * 公告外链白名单（2026-10-02，代码审计 M4）。
+     *
+     * 公告 JSON 来自网络（四个端点，任何一个被投毒或中间人改写都算），而它的 link 会被
+     * 直接丢给 `Intent.ACTION_VIEW` —— 等于"远端内容决定本机打开什么"。收紧到
+     * **https + GitHub 域**：公告要跳的地方只有我们自己的发布页，别的都不认。
+     * 不合法就返回空串，界面自然不显示"查看详情"按钮（而不是弹一个可疑的跳转）。
+     */
+    static String safeLink(String link) {
+        if (link == null || link.isEmpty()) return "";
+        try {
+            java.net.URI u = new java.net.URI(link.trim());
+            String scheme = u.getScheme();
+            String host = u.getHost();
+            if (scheme == null || host == null) return "";
+            if (!"https".equalsIgnoreCase(scheme)) return "";
+            host = host.toLowerCase(java.util.Locale.US);
+            if (host.equals("github.com") || host.endsWith(".github.com")) return link.trim();
+            return "";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /** 是否该向用户展示（纯函数）：有内容 且 未被标记已读 且 未过期 */

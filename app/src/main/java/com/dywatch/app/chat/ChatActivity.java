@@ -216,7 +216,9 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
 
     @Override
     public void onAuth(boolean ok, String message) {
-        AppLog.i("chat", "登录态: ok=" + ok + " " + message);
+        // 脱敏（审计 H3）：成功那一路的 message 是"已登录 <昵称>"，昵称属于账号身份，不落盘；
+        // 失败那一路的 message 是诊断信息（状态码/异常），过一遍 safeText 去掉可能夹带的内容。
+        AppLog.i("chat", "登录态: ok=" + ok + (ok ? "（已带昵称）" : " " + BridgeLog.safeText(message)));
         // 登录正常不占提示行；只有异常才提示（旧版一律写一行，白吃手表高度）
         if (!ok) {
             hint("⚠ " + message);

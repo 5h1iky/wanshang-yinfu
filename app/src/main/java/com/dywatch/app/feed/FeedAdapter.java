@@ -178,10 +178,15 @@ public class FeedAdapter extends PagerAdapter {
         bindActivation(h.mIvCollect, v.collected);
     }
 
-    /** 激活 = 品牌点缀色染色；未激活 = 清除滤镜（icon 本体已是 state_off 层次的白色） */
+    /** 激活 = 品牌点缀色染色；未激活 = 清除滤镜 + 降透明度 */
     private static void bindActivation(ImageView iv, boolean active) {
         if (iv == null) return;
         if (active) {
+            // ⚠️ 2026-10-02 修（代码审计 L1）：激活分支原本只 setColorFilter，**没把透明度调回来**。
+            // 而 STATE_OFF_ALPHA 是设在 ImageView 自己身上的（不是 drawable），setColorFilter(null)
+            // 并不会重置它 —— 于是"点过赞 → 取消 → 再点赞"或者复用视图时，图标会停在
+            // 45% 透明上：明明已激活，看着却发暗，用户会以为没点上。
+            iv.setImageAlpha(255);
             iv.setColorFilter(androidx.core.content.ContextCompat
                     .getColor(iv.getContext(), R.color.accent));
         } else {

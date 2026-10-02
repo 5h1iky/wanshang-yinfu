@@ -181,6 +181,17 @@ public class SettingsActivity extends UiActivity {
                 toast("已清除，下次进聊天会重新改写");
             }
         });
+        // 视频缓存（2026-10-02，代码审计 M7）：库里只会按上限自动淘汰，且淘汰是异步的、
+        // 失败还是静默的；用户此前**没有任何手动回收空间的手段**。
+        actionRow("清空视频缓存", com.dywatch.app.cache.ProxyVideoCacheManager
+                .formatSize(com.dywatch.app.cache.ProxyVideoCacheManager.cacheSize(this))
+                + "（正在播放的那条会重下）", new Runnable() {
+            @Override public void run() {
+                boolean ok = com.dywatch.app.cache.ProxyVideoCacheManager.clearAllCache(SettingsActivity.this);
+                toast(ok ? "已清空视频缓存" : "部分文件没删掉，稍后再试");
+                buildRows();   // 这一行的容量数字跟着刷新
+            }
+        });
         actionRow("诊断日志", "WebView 版本 / 上次崩溃 / 最近运行记录", new Runnable() {
             @Override public void run() {
                 new AlertDialog.Builder(SettingsActivity.this)
@@ -192,6 +203,9 @@ public class SettingsActivity extends UiActivity {
                                 + "  边距 " + Settings.paddingHPercent(SettingsActivity.this)
                                 + "/" + Settings.paddingVPercent(SettingsActivity.this) + "%"
                                 + "\n【看过记录】" + com.dywatch.app.feed.SeenStore.size(SettingsActivity.this) + " 条"
+                                + "\n【视频缓存】" + com.dywatch.app.cache.ProxyVideoCacheManager
+                                        .formatSize(com.dywatch.app.cache.ProxyVideoCacheManager
+                                                .cacheSize(SettingsActivity.this))
                                 + "\n【上次崩溃】\n" + CrashShield.lastCrash(SettingsActivity.this)
                                 + "\n【最近日志】\n" + AppLog.tail(25))
                         .setPositiveButton("关闭", null)

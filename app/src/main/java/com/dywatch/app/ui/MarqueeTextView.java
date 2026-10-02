@@ -38,6 +38,24 @@ public class MarqueeTextView extends TextView implements Runnable {
     private float mLimit;
     /** 供验证用：末尾文字是否已停在视口内（日志取证） */
     private boolean mTailShown;
+    /** 复用矩形：可见性判断每帧都要用，别每帧 new */
+    private final android.graphics.Rect mVisibleRect = new android.graphics.Rect();
+    /** 已离开视口（用于"只记一次状态变化"的日志取证） */
+    private boolean mOffscreen;
+
+    /**
+     * 离开视口时的轮询间隔（2026-10-02，代码审计 L4）。
+     *
+     * 问题：刷视频页的 VerticalViewPager 设了 offscreenPageLimit=3，最多 7 个页面同时挂在
+     * 视图树里，而它们**同属一个窗口** → onWindowVisibilityChanged 全是 VISIBLE，
+     * 于是每页标题各跑一条 25Hz 的跑马灯（STEP_DELAY=40ms），7 页 ≈ 175 次
+     * post+invalidate/秒，绝大多数在屏幕上根本看不见。手表上这就是白耗电。
+     *
+     * 解法：滚动前先问一句"我真在视口里吗"（getLocalVisibleRect 会把祖先的滚动/裁剪算进去）。
+     * 不在就改成低频轮询（2Hz 而不是 25Hz，省 12 倍），等滑回来自己续上——
+     * 不需要页面配合，也不会出现"滑回来标题永远不滚了"的死状态。
+     */
+    private static final int OFFSCREEN_CHECK_DELAY = 500;
 
     public MarqueeTextView(Context c) {
         super(c);
@@ -139,6 +157,21 @@ public class MarqueeTextView extends TextView implements Runnable {
             mRunning = false;   // 文本没超宽：不再自我调度，避免空转耗电
             return;
         }
+        // 不在视口里就别画了（审计 L4）：ViewPager 的相邻页同属一个可见窗口，
+        // 光靠 onWindowVisibilityChanged 挡不住它们空转。
+        if (!isVisibleInViewport()) {
+            if (!mOffscreen) {
+                mOffscreen = true;
+                com.dywatch.app.util.AppLog.i("marquee", "离开视口，暂停滚动");
+            }
+            removeCallbacks(this);
+            postDelayed(this, OFFSCREEN_CHECK_DELAY);
+            return;
+        }
+        if (mOffscreen) {
+            mOffscreen = false;
+            com.dywatch.app.util.AppLog.i("marquee", "回到视口，恢复滚动");
+        }
         mOffset += mStepPx;
         if (mOffset >= mLimit) {
             // 滚到终点：末段完整贴视口右缘静止 → 停顿可读 → 弹回开头循环
@@ -186,5 +219,15 @@ public class MarqueeTextView extends TextView implements Runnable {
     /** 验证用：末尾文字是否已停在视口内（日志取证） */
     public boolean isTailShown() {
         return mTailShown;
+    }
+
+    /**
+     * 这个 View 当前是否真的落在视口里（把祖先的滚动与裁剪都算进去）。
+     * 拿不到 attach 信息 / 尺寸为 0 时按"不显示"处理——那种情况下滚动本来也没意义。
+     */
+    private boolean isVisibleInViewport() {
+        if (getWidth() <= 0 || getHeight() <= 0) return false;
+        if (!isShown()) return false;
+        return getLocalVisibleRect(mVisibleRect);
     }
 }

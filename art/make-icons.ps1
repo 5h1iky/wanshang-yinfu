@@ -15,8 +15,13 @@
 
 Add-Type -AssemblyName System.Drawing
 
-$srcPath = "D:\dev\dywatch\art\icon_raw.jpg"
-$outRoot = "D:\dev\dywatch\app\src\main\res"
+# Paths are derived from this script's own location (2026-10-02, code audit low-severity item):
+# they used to be hardcoded to D:\dev\dywatch, so a clone elsewhere could not regenerate icons.
+# $PSScriptRoot = <repo>\art  ->  repo root is its parent.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$srcPath = Join-Path $PSScriptRoot "icon_raw.jpg"
+$outRoot = Join-Path $repoRoot "app\src\main\res"
+Write-Host ("repo: {0}" -f $repoRoot)
 
 $src = [System.Drawing.Bitmap]::FromFile($srcPath)
 $w = $src.Width
@@ -68,7 +73,7 @@ if ($mode -eq "crop-top") {
     $gb.DrawImage($src, 0, 0, $square, $square)
 }
 $gb.Dispose()
-$base.Save("D:\dev\dywatch\art\icon_square.png", [System.Drawing.Imaging.ImageFormat]::Png)
+$base.Save((Join-Path $PSScriptRoot "icon_square.png"), [System.Drawing.Imaging.ImageFormat]::Png)
 Write-Host "master square saved: art/icon_square.png"
 
 # ---- 3. Per-density export ----

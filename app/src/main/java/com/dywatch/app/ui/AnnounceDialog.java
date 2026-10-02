@@ -79,7 +79,15 @@ public final class AnnounceDialog {
             o.negative("查看详情", new Runnable() {
                 @Override public void run() {
                     try {
-                        act.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(a.link)));
+                        // 双保险（审计 M4）：AnnounceApi 已按白名单过滤过 link，这里再确认一次
+                        // scheme 是 https —— 无论如何不让 http/自定义 scheme 进 ACTION_VIEW。
+                        android.net.Uri u = android.net.Uri.parse(a.link);
+                        if (u == null || !"https".equalsIgnoreCase(u.getScheme())) {
+                            android.widget.Toast.makeText(act, "链接不可用",
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        act.startActivity(new Intent(Intent.ACTION_VIEW, u));
                     } catch (Exception e) {
                         android.widget.Toast.makeText(act, "本机没有可打开链接的应用",
                                 android.widget.Toast.LENGTH_SHORT).show();

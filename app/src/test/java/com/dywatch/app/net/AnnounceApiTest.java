@@ -16,10 +16,13 @@ public class AnnounceApiTest {
 
     private static final long NOW = 1_790_000_000_000L;
 
+    private static final String RELEASE_URL =
+            "https://github.com/5h1iky/wanshang-yinfu/releases/latest";
+
     private static final String FULL =
             "{\"enabled\":true,\"id\":\"2026-09-27-01\",\"level\":\"warn\","
                     + "\"title\":\"签名已更新\",\"text\":\"已自动修复，无需操作\","
-                    + "\"link\":\"https://example.com/n\",\"showUntil\":0}";
+                    + "\"link\":\"" + RELEASE_URL + "\",\"showUntil\":0}";
 
     @Test
     public void parse_full() {
@@ -29,8 +32,42 @@ public class AnnounceApiTest {
         assertEquals(AnnounceApi.LEVEL_WARN, a.level);
         assertEquals("签名已更新", a.title);
         assertEquals("已自动修复，无需操作", a.text);
-        assertEquals("https://example.com/n", a.link);
+        assertEquals(RELEASE_URL, a.link);
         assertEquals(0L, a.showUntil);
+    }
+
+    // ---- 外链白名单（2026-10-02，代码审计 M4）----
+    // 公告 JSON 来自网络，link 会被直接交给 ACTION_VIEW。只认 https + GitHub 域。
+    @Test
+    public void safeLink_只放行https的github链接() {
+        assertEquals(RELEASE_URL, AnnounceApi.safeLink(RELEASE_URL));
+        assertEquals("https://github.com/a/b", AnnounceApi.safeLink("https://github.com/a/b"));
+        // 子域也放行（GitHub 的下载会跳到 objects.githubusercontent.com 之类，
+        // 但公告这里只用到 github.com；保留子域是为了将来放行 gist 等）
+        assertEquals("https://gist.github.com/x", AnnounceApi.safeLink("https://gist.github.com/x"));
+    }
+
+    @Test
+    public void safeLink_拒绝http与非github域() {
+        assertEquals("", AnnounceApi.safeLink("http://github.com/a/b"));          // 降级到明文
+        assertEquals("", AnnounceApi.safeLink("https://example.com/n"));
+        assertEquals("", AnnounceApi.safeLink("https://github.com.evil.net/x")); // 后缀伪装
+        assertEquals("", AnnounceApi.safeLink("https://evil-github.com/x"));
+        assertEquals("", AnnounceApi.safeLink("javascript:alert(1)"));
+        assertEquals("", AnnounceApi.safeLink("intent://x#Intent;scheme=http;end"));
+        assertEquals("", AnnounceApi.safeLink("file:///etc/passwd"));
+        assertEquals("", AnnounceApi.safeLink("/releases/latest"));               // 相对路径
+        assertEquals("", AnnounceApi.safeLink(""));
+        assertEquals("", AnnounceApi.safeLink(null));
+    }
+
+    @Test
+    public void parse_站外link被清空但公告照常显示() {
+        String json = "{\"enabled\":true,\"id\":\"x1\",\"title\":\"标题\","
+                + "\"text\":\"正文\",\"link\":\"https://phish.example/x\"}";
+        AnnounceApi.Announcement a = AnnounceApi.parse(json, NOW);
+        assertNotNull("公告本身要正常显示", a);
+        assertEquals("", a.link);
     }
 
     @Test

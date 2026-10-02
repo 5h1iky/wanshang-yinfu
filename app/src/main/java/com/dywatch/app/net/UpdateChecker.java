@@ -42,7 +42,15 @@ public final class UpdateChecker {
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .build();
 
-    /** 解析 GitHub Releases latest JSON；纯函数，非法输入返回 null */
+    /**
+     * 解析 GitHub Releases latest JSON；纯函数，非法输入返回 null。
+     *
+     * ⚠️ 2026-10-02 修（代码审计 M5）：Gson 的 getAsJsonArray/getAsJsonObject/getAsString
+     * 在**类型不符**时抛的是 UnsupportedOperationException / IllegalStateException，
+     * 而这里原来一个 try 都没有 —— 只要 GitHub 那边的 JSON 形状变一点（限流返回对象、
+     * assets 变成 null/字符串），异常就会一路穿到 "update-check" 线程顶层 →
+     * **启动瞬间闪退**，且用户完全不知道为什么。现在所有取值都过类型判断 + 兜底。
+     */
     public static UpdateInfo parseRelease(String json) {
         JsonElement el;
         try {
@@ -50,7 +58,7 @@ public final class UpdateChecker {
         } catch (Exception e) {
             return null;
         }
-        if (!el.isJsonObject()) return null;
+        if (el == null || !el.isJsonObject()) return null;
         JsonObject o = el.getAsJsonObject();
         String tag = opt(o, "tag_name");
         if (tag.isEmpty()) return null;
@@ -58,16 +66,21 @@ public final class UpdateChecker {
         String notes = opt(o, "body");
         if (notes.length() > 200) notes = notes.substring(0, 200) + "…";
         String apkUrl = "";
-        JsonArray assets = o.getAsJsonArray("assets");
-        if (assets != null) {
-            for (JsonElement a : assets) {
-                JsonObject ao = a.getAsJsonObject();
-                String name = opt(ao, "name");
-                if (name.endsWith(".apk")) {
-                    apkUrl = opt(ao, "browser_download_url");
-                    break;
+        try {
+            JsonElement ae = o.get("assets");
+            if (ae != null && ae.isJsonArray()) {
+                for (JsonElement a : ae.getAsJsonArray()) {
+                    if (a == null || !a.isJsonObject()) continue;
+                    JsonObject ao = a.getAsJsonObject();
+                    String name = opt(ao, "name");
+                    if (name.endsWith(".apk")) {
+                        apkUrl = opt(ao, "browser_download_url");
+                        break;
+                    }
                 }
             }
+        } catch (Throwable ignored) {
+            // assets 形状不对就当"没有下载地址"，不要因此让整个更新检查炸掉
         }
         return new UpdateInfo(version, notes, apkUrl, opt(o, "html_url"));
     }
@@ -98,14 +111,21 @@ public final class UpdateChecker {
                 if (info == null) return null;
                 return isNewer(info.version, currentVersion) ? info : null;
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
+            // 宽catch（审计 M5）：这条路径跑在一个裸线程上，漏出去任何异常都是启动闪退。
+            // 更新检查失败的正确表现是"安静地什么都不显示"。
             return null;
         }
     }
 
     private static String opt(JsonObject o, String key) {
-        JsonElement e = o.get(key);
-        return e == null || e.isJsonNull() ? "" : e.getAsString();
+        try {
+            JsonElement e = o.get(key);
+            // isJsonPrimitive 判断不能省：对 JsonObject/JsonArray 调 getAsString() 会抛
+            return (e == null || e.isJsonNull() || !e.isJsonPrimitive()) ? "" : e.getAsString();
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     private static int parse(String s) {

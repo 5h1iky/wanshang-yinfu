@@ -236,6 +236,15 @@ public class HttpProxyCacheServer {
             Logger.debug("Closing socket… Socket is closed by client.");
         } catch (ProxyCacheException | IOException e) {
             onError(new ProxyCacheException("Error processing request", e));
+        } catch (Throwable t) {
+            // ⚠️ 本地修改（2026-10-02，代码审计 M1）：
+            // 这一段能抛出的受检异常只有 SocketException / ProxyCacheException / IOException，
+            // 但 GetRequest 的非法请求（IAE）、Range 解析（NFE）、ProxyCacheUtils.decode 的
+            // 非法百分号转义（IAE）全是**非受检**的 —— 原来它们会一路穿出 processSocket。
+            // 之所以没把 App 搞崩，只是因为任务是用 submit() 提交的、异常被 FutureTask 吞了；
+            // 也就是说：既没有响应，也没有任何日志（库的 Logger 默认全关）。
+            // 这里显式兜住并记一笔，让"这个视频放不出来"至少有个线索。
+            Logger.error("处理请求时发生未预期异常: " + t);
         } finally {
             releaseSocket(socket);
             Logger.debug("Opened connections: " + getClientsCount());

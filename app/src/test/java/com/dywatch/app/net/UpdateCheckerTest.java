@@ -34,6 +34,45 @@ public class UpdateCheckerTest {
         assertNull(UpdateChecker.parseRelease("not json"));
     }
 
+    // ---- 形状守卫（2026-10-02，代码审计 M5）----
+    // 这几条原来会**抛异常**而不是返回 null，而 check() 跑在一个裸线程上 →
+    // 异常 = 启动瞬间闪退。GitHub 的返回形状不由我们控制（限流/降级/字段改名都会变）。
+    @Test
+    public void parseRelease_assets形状异常不炸() {
+        // assets 是对象 → 旧实现 getAsJsonArray 直接抛 UnsupportedOperationException
+        UpdateChecker.UpdateInfo a = UpdateChecker.parseRelease(
+                "{\"tag_name\":\"v0.3.0\",\"assets\":{\"oops\":1}}");
+        assertNotNull("应该保住版本号，只是没有下载地址", a);
+        assertEquals("0.3.0", a.version);
+        assertEquals("", a.apkUrl);
+    }
+
+    @Test
+    public void parseRelease_assets元素不是对象不炸() {
+        UpdateChecker.UpdateInfo a = UpdateChecker.parseRelease(
+                "{\"tag_name\":\"v0.3.1\",\"assets\":[\"字符串\",null,42]}");
+        assertNotNull(a);
+        assertEquals("", a.apkUrl);
+    }
+
+    @Test
+    public void parseRelease_文本字段是对象不炸() {
+        // body/tag_name 被换成对象时，getAsString 会抛
+        UpdateChecker.UpdateInfo a = UpdateChecker.parseRelease(
+                "{\"tag_name\":\"v0.4.0\",\"body\":{\"x\":1},\"html_url\":[1,2]}");
+        assertNotNull(a);
+        assertEquals("0.4.0", a.version);
+        assertEquals("", a.notes);
+        assertEquals("", a.htmlUrl);
+    }
+
+    @Test
+    public void parseRelease_顶层不是对象返回null() {
+        assertNull(UpdateChecker.parseRelease("[1,2,3]"));
+        assertNull(UpdateChecker.parseRelease("null"));
+        assertNull(UpdateChecker.parseRelease(""));
+    }
+
     @Test
     public void isNewer_compares() {
         assertTrue(UpdateChecker.isNewer("0.2.0", "0.1.0"));

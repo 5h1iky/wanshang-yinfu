@@ -58,6 +58,9 @@ public final class DouyinApi {
                 .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                 .followRedirects(true)
+                // Cookie 出站守卫（代码审计 M2）：注册成**网络拦截器**才能逐跳生效——
+                // 手工塞的 Cookie 头会被 OkHttp 在 302 时原样复制到站外主机上。
+                .addNetworkInterceptor(new CookieHostGuard())
                 .build();
     }
 

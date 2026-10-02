@@ -45,15 +45,40 @@ public class ChatEngine {
         void onEngineWaiting(String why);
     }
 
-    /** 一次性互动动作（点赞/收藏）结果回调 */
+    /** 一次性互动动作（点赞/收藏/发评论）结果回调 */
     public interface ActionListener {
         void onActionResult(String action, boolean ok, String detail);
     }
 
-    private ActionListener mActionListener;
+    /**
+     * 动作回调登记表：reqId → 发起方。
+     *
+     * ⚠️ 2026-10-02 修（代码审计 M17）：原来这里是一个**单槽** `mActionListener`，
+     * 于是"同一条视频先点赞、再收藏"时，第二次注册会把第一次的回调顶掉——
+     * 结果就是：点赞的结果被当成收藏的结果处理（弹错 toast、回滚错的状态），
+     * 而收藏的结果**谁都收不到**（槽已被置空），只能等 30 秒兜底解锁，
+     * 界面上永久留着一个"看着已收藏、其实没收藏"的假状态。
+     *
+     * 现在每个动作有独立请求号（reqId），桥把它原样回传（含跨页 sessionStorage 续跑那条路），
+     * 引擎按 reqId 精确投递，互不覆盖。reqId 单调递增、永不复用，所以迟到的结果
+     * 也不会被投给后来同 key 的请求。
+     */
+    private final java.util.Map<String, ActionListener> mActionCallbacks = new java.util.HashMap<>();
+    private long mReqSeq;
 
-    public void setActionListener(ActionListener l) {
-        mActionListener = l;
+    /** 取一个请求号；cb 非空时登记回调 */
+    private String registerAction(ActionListener cb) {
+        String id = "r" + (++mReqSeq);
+        if (cb != null) mActionCallbacks.put(id, cb);
+        return id;
+    }
+
+    /**
+     * 撤销某次动作的回调登记（页面销毁时调用）。
+     * 不撤销的话：回调对象会一直被引擎强引用到结果回来为止（页面已销毁 = 白留一串视图树）。
+     */
+    public void cancelAction(String reqId) {
+        if (reqId != null) mActionCallbacks.remove(reqId);
     }
 
     // ⚠️ 私信入口是 /chat（实测 200+SPA）；/messages 是 404 死路由（调研报告过时勿信）
@@ -88,11 +113,21 @@ public class ChatEngine {
     private Listener mListener;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private WebView mWebView;
+    /** 触摸盾：只吃触摸的容器，包住引擎（见构造器注释） */
+    private final android.widget.FrameLayout mShield;
+    /** 本次注入的文档密钥；桥事件必须带着它（防页面内第三方框架伪造） */
+    private volatile String mBridgeKey = "";
     private boolean mReady;
     /** 桥在文档里生成的令牌；同一个文档的重复 onPageFinished 靠它判重 */
     private String mDocToken = "";
-    /** 未就绪期间暂存的一次性动作（就绪后补发一次；跨页续跑由桥 sessionStorage 负责） */
-    private volatile String mPendingJs;
+    /**
+     * 未就绪期间暂存的一次性动作（就绪后按序补发；跨页续跑由桥 sessionStorage 负责）。
+     *
+     * ⚠️ 2026-10-02 修：原来是一个 volatile String 单槽，未就绪时连点两次互动，
+     * 第一次的动作会被第二次直接覆盖 —— 第一次永远发不出去，用户等 30 秒兜底。
+     * 现在排队，按发起顺序补发。
+     */
+    private final java.util.ArrayDeque<String> mPendingJs = new java.util.ArrayDeque<>();
 
     @SuppressLint("SetJavaScriptEnabled")
     private ChatEngine(android.content.Context ctx, Listener listener, String homeUrl) {
@@ -102,6 +137,15 @@ public class ChatEngine {
         setupJsPatch();    // 内核过旧 → 启用私信 JS 语法补丁（方案 A）
         mWebView = new WebView(ctx);
         mWebView.addJavascriptInterface(this, BRIDGE_NAME); // JS → Java 回调
+        // 触摸盾（2026-10-02，代码审计 H4-b）：引擎挂在内容层 index 0，页面根布局**不消费**的
+        // 触摸会继续下发给下一个兄弟 —— 也就是这个网页。用户"点页头/时钟/空白处"时，网页
+        // 会真的收到点击：可能把引擎导航走（聊天/评论 DOM 从此抓空）、弹出网页键盘，
+        // 甚至看不见地对自己账号做了点赞/关注。加一层只吃触摸、不碰渲染的容器即可根治：
+        // 尺寸/可见性/visibilityState 全不变（页面照常加载），但网页再也收不到手指事件。
+        mShield = new TouchShield(ctx);
+        mShield.addView(mWebView, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
         WebSettings s = mWebView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -111,13 +155,47 @@ public class ChatEngine {
             public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
                 // 页面脚本报错是"DOM 抓不到东西"最常见的原因（尤其老内核跑不动现代 bundle）
                 if (cm != null && cm.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
-                    AppLog.i("engine", "JS错误: " + cm.message()
+                    // 同样脱敏：页面报错里可能夹着带正文的 DOM 片段（审计 H3）
+                    AppLog.i("engine", "JS错误: " + BridgeLog.safeText(cm.message())
                             + " @" + cm.sourceId() + ":" + cm.lineNumber());
                 }
                 return true;
             }
         });
         mWebView.setWebViewClient(new WebViewClient() {
+
+            /**
+             * 导航白名单（2026-10-02，代码审计 H4-a）。
+             *
+             * 原来没有这个覆写 = 引擎里发生的**任何**导航都会被照单全收：页面自己跳、
+             * 被触摸穿透误触发的跳转、甚至广告/短链跳到站外，都会把这个"带着登录态的
+             * 真浏览器"开到任意网址上去。而这个 WebView 里挂着 AndroidBridge，
+             * 一旦停在非抖音页面上，等于把一个能回调原生协议的网页容器交给了别人。
+             *
+             * 口径：只放行抖音自家域（含登录/风控用到的同族域），其余一律拦下、只记 host
+             * （不记完整 URL —— URL 的 query 里可能有搜索词等用户内容）。
+             * 子框架不拦：iframe 里的第三方资源是页面正常渲染的一部分，不涉及本引擎的会话与桥。
+             */
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest req) {
+                if (req == null) return false;
+                if (!req.isForMainFrame()) return false;   // 子框架照旧
+                return blockIfOutside(req.getUrl() == null ? null : req.getUrl().toString());
+            }
+
+            /** API 21~23 走这个（minSdk 21 必须一起覆写，否则老设备上白名单形同虚设） */
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return blockIfOutside(url);
+            }
+
+            /** @return true = 拦下（WebView 不再加载） */
+            private boolean blockIfOutside(String url) {
+                if (isAllowedNavUrl(url)) return false;
+                AppLog.i("engine", "拦下站外导航 host=" + hostOf(url));
+                return true;
+            }
 
             /**
              * 老内核语法补丁（方案 A）：拦下私信 JS，把 Chromium 83 解析不了的语法改写后再喂内核。
@@ -182,7 +260,13 @@ public class ChatEngine {
             @Override
             public void onPageFinished(WebView view, String url) {
                 mReady = true;
-                injectBridge();
+                // 只在白名单域注入桥（审计 H4-c）：原来无条件注入，等于把 AndroidBridge
+                // 送到任何被导航到的页面上。不是自家域就只记一笔，不注入。
+                if (isAllowedNavUrl(url)) {
+                    injectBridge();
+                } else {
+                    AppLog.i("engine", "非白名单域，跳过桥注入 host=" + hostOf(url));
+                }
                 // SPA 换路由会让同一个文档反复回调 onPageFinished；桥自带重入保护，但原生侧
                 // 若照样跑完整流程，就会重复通知 onEngineReady → 各页重复拉数据、auth 连发多条。
                 // 用桥生成的文档令牌判重：同文档只处理一次，真换页/刷新令牌必然变。
@@ -267,10 +351,71 @@ public class ChatEngine {
         }
     }
 
-    /** 注入 JS 桥（幂等） */
-    private void injectBridge() {        try {
+    /**
+     * 允许引擎停留/导航的域名（2026-10-02，审计 H4-a）。
+     * 只放抖音自家域：主站 + 同族登录/风控/接口域。**不放任何第三方**——
+     * 引擎里带着真实登录态，且挂着 JS 桥，它不该出现在别人家的页面上。
+     */
+    private static final String[] ALLOWED_HOST_SUFFIX = {
+            "douyin.com",       // 主站与 sso/login 等同族子域
+            "snssdk.com",       // 风控/接口域（页面跳转链路上出现过）
+            "bytedance.com",    // 风控域
+            "amemv.com",        // 抖音早期域名，部分重定向仍指向它
+    };
+
+    static boolean isAllowedNavUrl(String url) {
+        String host = hostOf(url);
+        if (host.isEmpty()) return false;
+        for (String suffix : ALLOWED_HOST_SUFFIX) {
+            if (host.equals(suffix) || host.endsWith("." + suffix)) return true;
+        }
+        return false;
+    }
+
+    /** 只取 host（日志里不写完整 URL：query 可能含搜索词等用户内容） */
+    static String hostOf(String url) {
+        if (url == null) return "";
+        try {
+            String host = android.net.Uri.parse(url).getHost();
+            return host == null ? "" : host.toLowerCase(java.util.Locale.US);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * 触摸盾：吃掉所有触摸，永不透传给引擎（审计 H4-b）。
+     *
+     * 为什么用"容器拦截"而不是给 WebView 设 setClickable(false)：
+     * WebView 的 onTouchEvent 对多数事件都返回 true（它自己就是个滚动容器），
+     * 靠 clickable 挡不住；而 onInterceptTouchEvent 返回 true 是 ViewGroup 契约里
+     * 最硬的"到此为止"——子视图连 DOWN 都收不到。
+     * 引擎的全部操作都走 JS 注入（element.click()），本来就不需要真手指，所以零功能损失。
+     */
+    private static final class TouchShield extends android.widget.FrameLayout {
+        TouchShield(android.content.Context c) {
+            super(c);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(android.view.MotionEvent ev) {
+            return true;   // 拦下：不发给子视图（WebView）
+        }
+
+        @Override
+        public boolean onTouchEvent(android.view.MotionEvent ev) {
+            return true;   // 自己消费：父容器认为这次手势有主了，不会再去找别的兄弟
+        }
+    }
+
+    /** 注入 JS 桥（幂等）。注入前先放一个本文档专用的随机密钥，桥的每条事件都要带回它。 */
+    private void injectBridge() {
+        try {
+            String key = Long.toHexString(new java.util.Random().nextLong())
+                    + Long.toHexString(System.nanoTime());
             String js = readAsset("chat_bridge.js");
-            mWebView.evaluateJavascript(js, null);
+            mBridgeKey = key;
+            mWebView.evaluateJavascript("window.__dywatch_key=" + org.json.JSONObject.quote(key) + ";\n" + js, null);
         } catch (Exception e) {
             AppLog.i("engine", "桥注入失败: " + e);
         }
@@ -335,19 +480,19 @@ public class ChatEngine {
 
     private android.app.Activity mHost;
 
-    /** 把引擎挂到该 Activity 的内容层底下（获得真实尺寸，用户看不见、点不到） */
+    /** 把引擎挂到该 Activity 的内容层底下（获得真实尺寸，用户看不见、也点不到） */
     public static void attachTo(android.app.Activity a) {
         final ChatEngine e = sInstance;
         if (e == null || a == null || a.isFinishing() || e.mWebView == null) return;
         final android.view.ViewGroup content =
                 (android.view.ViewGroup) a.findViewById(android.R.id.content);
         if (content == null) return;
-        if (e.mHost == a && e.mWebView.getParent() == content) return;
+        if (e.mHost == a && e.mShield.getParent() == content) return;
         e.detachFromView();
         android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT);
-        content.addView(e.mWebView, 0, lp); // index 0 → 被页面根布局盖住
+        content.addView(e.mShield, 0, lp); // index 0 → 被页面根布局盖住（触摸也被触摸盾吃掉）
         e.mHost = a;
         AppLog.i("engine", "引擎已挂载获得真视口");
     }
@@ -361,8 +506,8 @@ public class ChatEngine {
     }
 
     private void detachFromView() {
-        if (mWebView != null && mWebView.getParent() instanceof android.view.ViewGroup) {
-            ((android.view.ViewGroup) mWebView.getParent()).removeView(mWebView);
+        if (mShield != null && mShield.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) mShield.getParent()).removeView(mShield);
         }
     }
 
@@ -371,27 +516,31 @@ public class ChatEngine {
         return mWebView == null ? "" : mWebView.getUrl();
     }
 
-    /** 一次性动作：未就绪先暂存，就绪后补发（只补一次，跨页自续由桥负责） */
+    /** 一次性动作：未就绪先排队，就绪后按序补发（跨页自续由桥 sessionStorage 负责） */
     private void runAction(String js) {
-        mPendingJs = js;
+        mPendingJs.addLast(js);
         tryRunPending();
     }
 
     private void tryRunPending() {
-        String js = mPendingJs;
-        if (js == null || !mReady) return;
-        mPendingJs = null;
-        runJs(js);
+        if (!mReady) return;
+        while (!mPendingJs.isEmpty()) runJs(mPendingJs.pollFirst());
     }
 
     /** 点赞/取消点赞（复用引擎开视频页，点页面自带按钮；页面 SDK 承担全部风控） */
-    public void likeVideo(String awemeId, boolean want) {
-        runAction("ChatBridge.likeVideo(" + org.json.JSONObject.quote(awemeId) + "," + want + ");");
+    public String likeVideo(String awemeId, boolean want, ActionListener cb) {
+        String reqId = registerAction(cb);
+        runAction("ChatBridge.likeVideo(" + org.json.JSONObject.quote(awemeId) + "," + want
+                + "," + org.json.JSONObject.quote(reqId) + ");");
+        return reqId;
     }
 
     /** 收藏/取消收藏 */
-    public void collectVideo(String awemeId, boolean want) {
-        runAction("ChatBridge.collectVideo(" + org.json.JSONObject.quote(awemeId) + "," + want + ");");
+    public String collectVideo(String awemeId, boolean want, ActionListener cb) {
+        String reqId = registerAction(cb);
+        runAction("ChatBridge.collectVideo(" + org.json.JSONObject.quote(awemeId) + "," + want
+                + "," + org.json.JSONObject.quote(reqId) + ");");
+        return reqId;
     }
 
     /** 拉取视频评论（结果经 onComments 回调） */
@@ -404,10 +553,12 @@ public class ChatEngine {
         runAction("ChatBridge.loadMoreComments(" + org.json.JSONObject.quote(awemeId) + ");");
     }
 
-    /** 发表视频评论 */
-    public void sendComment(String awemeId, String text) {
+    /** 发表视频评论（结果经 cb 回调） */
+    public String sendComment(String awemeId, String text, ActionListener cb) {
+        String reqId = registerAction(cb);
         runAction("ChatBridge.sendComment(" + org.json.JSONObject.quote(awemeId) + ","
-                + org.json.JSONObject.quote(text) + ");");
+                + org.json.JSONObject.quote(text) + "," + org.json.JSONObject.quote(reqId) + ");");
+        return reqId;
     }
 
     // ---- 老内核语法补丁（方案 A）----
@@ -499,13 +650,36 @@ public class ChatEngine {
      *  ⚠️ 此回调在 WebView JavaBridge 线程，更新 UI 必须切主线程（真机踩过 CalledFromWrongThreadException）。 */
     @android.webkit.JavascriptInterface
     public void onBridgeEvent(final String json) {
-        AppLog.i("engine", "桥事件: " + json);
+        // 密钥校验（2026-10-02，代码审计 H4-c）：addJavascriptInterface 的对象在**所有框架**里都可见，
+        // 页面里任何第三方 iframe 都能调 onBridgeEvent 伪造"点赞成功/评论已发"。
+        // 桥在注入时被塞进一个只存在于**本文档**的随机密钥，事件必须带着它；
+        // 跨域 iframe 读不到主文档的变量，于是伪造这条路被堵上。
+        if (!hasValidKey(json)) {
+            AppLog.i("engine", "桥事件密钥不符，已丢弃（可能来自页面内的第三方框架）");
+            return;
+        }
+        // 脱敏后再落盘/进 logcat（审计 H3：原来整条 JSON 原样写，私信正文与 uid 全进去）
+        AppLog.i("engine", "桥事件: " + BridgeLog.summarize(json));
         mHandler.post(new Runnable() {
             @Override
             public void run() {
                 dispatchBridgeEvent(json);
             }
         });
+    }
+
+    /** 事件里的 doc 字段是否等于本引擎本次注入的文档密钥 */
+    private boolean hasValidKey(String json) {
+        String key = mBridgeKey;
+        if (key == null || key.isEmpty()) return false;
+        try {
+            com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(json);
+            if (!el.isJsonObject()) return false;
+            com.google.gson.JsonElement d = el.getAsJsonObject().get("doc");
+            return d != null && d.isJsonPrimitive() && key.equals(d.getAsString());
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private void dispatchBridgeEvent(String json) {
@@ -574,12 +748,19 @@ public class ChatEngine {
                     String detail = o.optString("detail", o.optString("after", ""));
                     AppLog.i("engine", "互动结果: " + o.optString("action") + " ok=" + ok
                             + " " + o.optString("before", "") + "→" + o.optString("after", "") + " " + detail);
-                    if (mActionListener != null) {
-                        mActionListener.onActionResult(o.optString("action"), ok, detail);
+                    // 按 reqId 精确投递（审计 M17）：拿到就撤登记，一次性；
+                    // 没有 reqId（或页面已撤销登记）就只记日志，绝不猜着投给"当前那一个"回调。
+                    String reqId = o.optString("reqId", "");
+                    ActionListener cb = reqId.isEmpty() ? null : mActionCallbacks.remove(reqId);
+                    if (cb != null) {
+                        cb.onActionResult(o.optString("action"), ok, detail);
+                    } else {
+                        AppLog.i("engine", "互动结果无接收方（reqId="
+                                + (reqId.isEmpty() ? "缺失" : reqId) + "），仅记录");
                     }
                 }
             } else if ("opened".equals(type) || "back".equals(type)) {
-                AppLog.i("engine", "导航事件: " + json);
+                AppLog.i("engine", "导航事件: " + type);
             } else if ("home".equals(type)) {
                 AppLog.i("engine", o.optBoolean("ok") ? "引擎已在私信页" : "引擎归位：导航回 /chat");
             } else if ("error".equals(type)) {

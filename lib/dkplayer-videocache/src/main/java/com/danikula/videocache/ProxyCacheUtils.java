@@ -55,11 +55,18 @@ public class ProxyCacheUtils {
         }
     }
 
-    static String decode(String url) {
+    static String decode(String url) throws ProxyCacheException {
         try {
             return URLDecoder.decode(url, "utf-8");
         } catch (UnsupportedEncodingException e) {
-            throw new RuntimeException("Error decoding url", e);
+            throw new ProxyCacheException("Error decoding url", e);
+        } catch (IllegalArgumentException e) {
+            // ⚠️ 本地修改（2026-10-02，代码审计 M1）：非法百分号转义（`GET /%zz HTTP`）
+            // 会让 URLDecoder.decode 抛 IllegalArgumentException（非受检）。
+            // 正常路径下 uri 是我们自己 encode 出来的，永远合法；不合法说明这条请求
+            // 不是我们发的。原来它会一路穿出去被 FutureTask 静默吞掉（无响应、无日志），
+            // 现在抛受检异常，由上层按"处理请求失败"记进 logcat。
+            throw new ProxyCacheException("Illegal url to decode: " + url, e);
         }
     }
 

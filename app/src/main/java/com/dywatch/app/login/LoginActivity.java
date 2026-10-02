@@ -161,7 +161,7 @@ public class LoginActivity extends UiActivity {
             String cookies = CookieManager.getInstance().getCookie(HOME_URL);
             LoginManager.saveCookies(LoginActivity.this, cookies);
             LoginManager.setVerified(LoginActivity.this, true);
-            AppLog.i("login", "会话校验通过（" + r + "），登录完成");
+            AppLog.i("login", "会话校验通过（昵称=" + (r.length() > 3 ? "有" : "无") + "），登录完成");
             startActivity(new android.content.Intent(LoginActivity.this, FeedActivity.class));
             finish();
             return;

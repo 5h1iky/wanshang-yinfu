@@ -36,16 +36,26 @@ public class PreloadTask implements Runnable {
     public HttpProxyCacheServer mCacheServer;
 
     /**
-     * 是否被取消
+     * 是否被取消（2026-10-02：加 volatile —— 写它的是主线程的 cancel()，
+     * 读它的是预加载线程的 run()/start()，没有可见性保证时"取消"可能迟迟不生效）
      */
-    private boolean mIsCanceled;
+    private volatile boolean mIsCanceled;
 
     /**
-     * 是否正在预加载
+     * 是否正在预加载（同上：executeOn 在主线程判，run 在工作线程清）
      */
-    private boolean mIsExecuted;
+    private volatile boolean mIsExecuted;
 
+    /**
+     * 预加载失败过的地址（"小黑屋"，不再重试）。
+     *
+     * ⚠️ 2026-10-02（代码审计 M7 同类）：这是个**静态列表**，原来只增不减 ——
+     * 进程活得越久、遇到失败的 URL 越多，它就越大（每个 URL 一两百字节，外加常驻字符串）。
+     * 而且它是进程级的、清不掉。加个上限，只保留最近失败的这批：
+     * 目的只是"别对同一个坏地址反复重试"，不需要记住历史上所有的失败。
+     */
     private final static List<String> blackList = new ArrayList<>();
+    private static final int BLACKLIST_MAX = 300;
 
     @Override
     public void run() {
@@ -61,7 +71,9 @@ public class PreloadTask implements Runnable {
      */
     private void start() {
         // 如果在小黑屋里不加载
-        if (blackList.contains(mRawUrl)) return;
+        synchronized (blackList) {
+            if (blackList.contains(mRawUrl)) return;
+        }
         L.i("预加载开始：" + mPosition);
         HttpURLConnection connection = null;
         try {
@@ -89,8 +101,13 @@ public class PreloadTask implements Runnable {
             }
         } catch (Exception e) {
             L.i("预加载异常：" + mPosition + " 异常信息："+ e.getMessage());
-            // 关入小黑屋
-            blackList.add(mRawUrl);
+            // 关入小黑屋（带上限：见 blackList 注释）
+            synchronized (blackList) {
+                if (!blackList.contains(mRawUrl)) {
+                    if (blackList.size() >= BLACKLIST_MAX) blackList.remove(0);
+                    blackList.add(mRawUrl);
+                }
+            }
         } finally {
             if (connection != null) {
                 connection.disconnect();

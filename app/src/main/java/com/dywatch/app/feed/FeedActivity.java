@@ -42,6 +42,18 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     /** 应用级缓存：重进页面直接放上次刷到的视频（固件只在真冷启动垫场，杜绝"每次进来都是那 2 条老视频"） */
     private static final List<FeedVideo> sCache = new ArrayList<>();
     private com.dywatch.app.net.DouyinApi mApi;
+    /** 全局单例引擎（互动用；懒取，见 engineAction） */
+    private com.dywatch.app.chat.ChatEngine mEngine;
+    /**
+     * 连续多少页"全是看过的内容"。
+     *
+     * 2026-10-02（代码审计 L5）：老实现每遇到一页全看过的就 300ms 后再拉一页，**没有次数上限**，
+     * 而且这一路上既不收转圈也不给任何交代——服务端要是持续返回已看过的内容，
+     * 就是"转圈不停 + 静默无限翻页"（用户看到的是卡住，实际在一直耗流量）。
+     */
+    private int mEmptyPages;
+    /** 自动补拉的上限（一页 2~5 条，5 页≈十几条都看过了就停，别无限刷） */
+    private static final int MAX_EMPTY_PAGES = 5;
     private volatile boolean mLoading;
     private final List<FeedVideo> mVideoList = new ArrayList<>();
     private FeedAdapter mAdapter;
@@ -150,6 +162,8 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     private void loadMore(final boolean first) {
         // 预置列表模式：列表就是这么多，不去拉流（拉了反而把人家的喜欢列表冲掉）
         if (mPresetMode) return;
+        // 页面已经在关：别再起新的网络请求（补拉的延时任务会走到这里）
+        if (isFinishing() || isDestroyed()) return;
         if (mLoading) return;
         mLoading = true;
         // 首屏要等签名 + 拉流（手表上更久），内容区正中给个在转的圈
@@ -190,18 +204,32 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                             // notifyDataSetChanged 会重建页面视图 → 无条件重挂当前播放
                             startPlay(mViewPager.getCurrentItem());
                             if (list.isEmpty()) {
+                                mEmptyPages = 0;
                                 showHint("没有更多了");
                                 com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
                             } else if (added == 0) {
-                                // 本页全是看过的内容 → 自动补拉下一页
-                                com.dywatch.app.util.AppLog.i("feed", "本页全为看过内容，自动补拉");
-                                mViewPager.postDelayed(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        loadMore(false);
-                                    }
-                                }, 300);
+                                // 本页全是看过的内容 → 自动补拉下一页（有上限，见 MAX_EMPTY_PAGES）
+                                mEmptyPages++;
+                                com.dywatch.app.util.AppLog.i("feed", "本页全为看过内容，自动补拉（第 "
+                                        + mEmptyPages + "/" + MAX_EMPTY_PAGES + " 页）");
+                                if (mEmptyPages >= MAX_EMPTY_PAGES) {
+                                    // 到顶：必须收圈 + 明确交代。老实现这里什么都不做，
+                                    // 用户看到的是"转圈永远不停、流量一直在跑"。
+                                    com.dywatch.app.util.AppLog.i("feed", "连续 " + MAX_EMPTY_PAGES
+                                            + " 页全为看过内容，停止自动补拉");
+                                    showHint("这一批都看过了，稍后再来");
+                                    com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
+                                } else {
+                                    mViewPager.postDelayed(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            if (isFinishing() || isDestroyed()) return;
+                                            loadMore(false);
+                                        }
+                                    }, 300);
+                                }
                             } else {
+                                mEmptyPages = 0;
                                 // 有内容就不占画面（全屏刷视频，提示行压在画面上很碍事）
                                 clearHint();
                                 com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
@@ -215,7 +243,9 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                         @Override
                         public void run() {
                             mLoading = false;
+                            mEmptyPages = 0;   // 失败就重新开始计数，别把上一次的失败算进上限
                             com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
+                            if (isFinishing() || isDestroyed()) return;
                             if (first) loadFixtureOrCache();
                             showHint((first ? "网络加载失败，已回退内置数据。\n" : "翻页失败: ") + err);
                         }
@@ -598,22 +628,25 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      * 于是「同一条视频先点赞、再收藏」会把槽覆盖成 "collect:xxx"，
      * 而点赞那条的 30s 兜底定时器判的是 endsWith(":"+awemeId) —— 它会把**收藏**的
      * 在途标记提前清掉，收藏就能被重复提交。改成按 key 独立记账。
+     *
+     * ⚠️ 2026-10-02 修（代码审计 M17）：值从"布尔"变成**请求号**。
+     * 原因是引擎侧的回调槽也被第二次互动顶掉了：点赞的结果会被当成收藏的结果处理
+     * （弹错 toast、回滚错的状态），而收藏的结果谁都收不到、只能等 30 秒兜底，
+     * 界面上留下"看着已收藏、其实没收藏"的假状态。现在每次互动带一个请求号，
+     * 引擎按请求号把结果投回本次调用自己的闭包，互不干扰。
      */
-    private final java.util.Set<String> mActionsInFlight = new java.util.HashSet<>();
+    private final java.util.Map<String, String> mActionsInFlight = new java.util.HashMap<>();
+
+    /** 互动超时兜底专用 Handler：onDestroy 一次性清空，免得定时器抱着已销毁的页面不放 */
+    private final android.os.Handler mActionTimeout = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private boolean actionBusy(String kind, String awemeId) {
         String key = kind + ":" + awemeId;
-        if (mActionsInFlight.contains(key)) {
+        if (mActionsInFlight.containsKey(key)) {
             android.widget.Toast.makeText(this, "上一次操作还在进行中…", android.widget.Toast.LENGTH_SHORT).show();
             return true;
         }
-        mActionsInFlight.add(key);
         return false;
-    }
-
-    /** 互动结束（成功/失败/超时）统一从这里摘掉在途标记 */
-    private void actionDone(String kind, String awemeId) {
-        mActionsInFlight.remove(kind + ":" + awemeId);
     }
 
     /**
@@ -621,27 +654,18 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      * 引擎打开该视频的网页、点页面自带的赞/藏按钮——页面 SDK 承担全部签名/风控，零 KICK 风险。
      * 乐观更新 + 失败回滚。
      */
-    private void engineAction(String kind, final FeedVideo video, final FeedAdapter.ViewHolder holder,
+    private void engineAction(final String kind, final FeedVideo video, final FeedAdapter.ViewHolder holder,
                               final boolean target, final boolean isLike) {
-        final com.dywatch.app.chat.ChatEngine engine =
-                com.dywatch.app.chat.ChatEngine.getInstance(this, null);
+        if (mEngine == null) mEngine = com.dywatch.app.chat.ChatEngine.getInstance(this, null);
+        final com.dywatch.app.chat.ChatEngine engine = mEngine;
         final String awemeId = video.awemeId;
-        // 桥没回音（页面异常/被吞）时不能把互动按钮永久锁死。
-        // 只清自己这一条 key：原先清的是"任意以该 awemeId 结尾"的槽，会误清另一个互动的在途标记。
-        mViewPager.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (mActionsInFlight.contains(kind + ":" + awemeId)) {
-                    AppLog.i("feed", "互动超时兜底解锁 " + kind + " aweme=" + awemeId);
-                    actionDone(kind, awemeId);
-                }
-            }
-        }, 30000);
-        engine.setActionListener(new com.dywatch.app.chat.ChatEngine.ActionListener() {
+        final String key = kind + ":" + awemeId;
+        com.dywatch.app.chat.ChatEngine.ActionListener cb = new com.dywatch.app.chat.ChatEngine.ActionListener() {
             @Override
             public void onActionResult(String action, boolean ok, String detail) {
-                engine.setActionListener(null);
-                actionDone(kind, awemeId);
+                mActionsInFlight.remove(key);
+                // 页面已经在关（用户在等结果的几秒里退出了）：回调和超时都别再动 UI
+                if (isFinishing() || isDestroyed()) return;
                 if (ok) {
                     android.widget.Toast.makeText(FeedActivity.this,
                             isLike ? (target ? "已点赞" : "已取消点赞") : (target ? "已收藏" : "已取消收藏"),
@@ -658,12 +682,21 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                             "操作失败（" + detail + "）", android.widget.Toast.LENGTH_SHORT).show();
                 }
             }
-        });
-        if (isLike) {
-            engine.likeVideo(video.awemeId, target);
-        } else {
-            engine.collectVideo(video.awemeId, target);
-        }
+        };
+        String reqId = isLike ? engine.likeVideo(awemeId, target, cb)
+                : engine.collectVideo(awemeId, target, cb);
+        mActionsInFlight.put(key, reqId);
+        // 桥没回音（页面异常/被吞）时不能把互动按钮永久锁死。只清自己这一条 key。
+        mActionTimeout.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                String id = mActionsInFlight.remove(key);
+                if (id != null) {
+                    AppLog.i("feed", "互动超时兜底解锁 " + key);
+                    engine.cancelAction(id);   // 撤销登记：迟到的结果不再投给本页
+                }
+            }
+        }, 30000);
     }
 
     /** 刷视频要常亮：手表抬腕亮屏时长有限，不常亮会看着看着黑屏（设置里可关） */
@@ -729,6 +762,8 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     protected void onResume() {
         super.onResume();
         if (mVideoView != null) mVideoView.resume();
+        // 预加载跟着页面可见性走（审计 L6/L8）：后台时整队停，回来时把没预热好的补齐
+        if (mPreloadManager != null) mPreloadManager.resumeAll();
         com.dywatch.app.chat.ChatEngine.attachTo(this);
     }
 
@@ -736,12 +771,24 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     protected void onPause() {
         super.onPause();
         com.dywatch.app.chat.ChatEngine.detachFrom(this);
+        // ⚠️ 原来只停了播放器：预加载队列不管，用户按 Home 走后还在继续下（每条最多 1MB）
+        if (mPreloadManager != null) mPreloadManager.pauseAll();
         if (mVideoView != null) mVideoView.pause();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        // ⚠️ 2026-10-02 修（代码审计 H5）：引擎是**进程单例**，互动回调里抓着本页的
+        // video/holder/this。退出刷视频页时不主动注销，回调会一直挂在引擎上，
+        // 整棵信息流视图树（含每个 item 的封面、播放器容器）跟着单例活到进程结束。
+        if (mEngine != null) {
+            for (String reqId : mActionsInFlight.values()) {
+                mEngine.cancelAction(reqId);
+            }
+        }
+        mActionsInFlight.clear();
+        mActionTimeout.removeCallbacksAndMessages(null);
         if (mVideoView != null) mVideoView.release();
         if (mPreloadManager != null) mPreloadManager.removeAllPreloadTask();
     }

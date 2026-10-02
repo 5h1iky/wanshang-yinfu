@@ -42,6 +42,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     private boolean mAtEnd;
     /** 评论发送在途标记（防连点重复发出） */
     private boolean mSending;
+    /** 本次发送的请求号（onDestroy 时撤销登记，防结果回调到已销毁的页面） */
+    private String mSendReqId;
     /** 手表内存有限，评论攒到 300 条就停，别无限往下拉 */
     private static final int MAX_COMMENTS = 300;
 
@@ -84,30 +86,10 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         mEngine = ChatEngine.getInstance(this, this);
         // 直连是主路（只读接口风控宽松、结构稳定）；引擎 DOM 抓取只在直连失败时兜底
         fetchCommentsFromApi(0, false);
-        mEngine.setActionListener(new ChatEngine.ActionListener() {
-            @Override
-            public void onActionResult(String action, boolean ok, String detail) {
-                mSending = false;
-                mHint.setVisibility(View.VISIBLE);
-                mHint.setText(ok ? "已发送，刷新中…" : ("发送失败: " + detail));
-                if (ok) {
-                    mList.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (isFinishing()) return;
-                            // 发完刷新：按当前数据源走（直连就直连，回退了就走引擎）
-                            if (mApiMode) {
-                                mApiCursor = 0;
-                                mApiLoading = false;
-                                fetchCommentsFromApi(0, false);
-                            } else if (mEngine != null) {
-                                mEngine.fetchComments(mAwemeId);
-                            }
-                        }
-                    }, 1500);
-                }
-            }
-        });
+        // 发评论的结果回调改成**每次发送单独注册**（2026-10-02，代码审计 M17）。
+        // 原来是 onCreate 里注册一个常驻回调，而引擎侧那个槽是全局唯一的单槽：
+        // 信息流页点一次赞就能把本页的回调顶掉 → 本页永远收不到"发送结果"，
+        // 20 秒后提示"发送无回应，可重试"，用户一重发就是**两条一模一样的评论**（评论不可撤回）。
 
         findViewById(R.id.btn_send_comment).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -170,13 +152,41 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         mInput.setText("");
         mHint.setVisibility(View.VISIBLE);
         mHint.setText("发送中…");
-        mEngine.sendComment(mAwemeId, text);
+        // 结果只回调给本次发送（引擎按请求号投递）：不会因为别处点了个赞就再也收不到结果
+        mSendReqId = mEngine.sendComment(mAwemeId, text, new ChatEngine.ActionListener() {
+            @Override
+            public void onActionResult(String action, boolean ok, String detail) {
+                mSendReqId = null;
+                mSending = false;
+                if (isFinishing() || isDestroyed()) return;
+                mHint.setVisibility(View.VISIBLE);
+                mHint.setText(ok ? "已发送，刷新中…" : ("发送失败: " + detail));
+                if (ok) {
+                    mList.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (isFinishing() || isDestroyed()) return;
+                            // 发完刷新：按当前数据源走（直连就直连，回退了就走引擎）
+                            if (mApiMode) {
+                                mApiCursor = 0;
+                                mApiLoading = false;
+                                fetchCommentsFromApi(0, false);
+                            } else if (mEngine != null) {
+                                mEngine.fetchComments(mAwemeId);
+                            }
+                        }
+                    }, 1500);
+                }
+            }
+        });
         mList.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (mSending && !isFinishing()) {
+                if (mSending && !isFinishing() && !isDestroyed()) {
                     mSending = false;   // 桥没回音也不能把发送按钮永久锁死
                     mHint.setText("发送无回应，可重试");
+                    if (mEngine != null && mSendReqId != null) mEngine.cancelAction(mSendReqId);
+                    mSendReqId = null;
                 }
             }
         }, 20000);
@@ -495,7 +505,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     protected void onDestroy() {
         super.onDestroy();
         if (mEngine != null) {
-            mEngine.setActionListener(null);
+            if (mSendReqId != null) mEngine.cancelAction(mSendReqId);
+            mSendReqId = null;
             mEngine.setListenerDetached(this);
         }
     }

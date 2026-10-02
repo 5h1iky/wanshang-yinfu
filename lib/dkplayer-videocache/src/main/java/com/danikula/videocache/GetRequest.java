@@ -47,7 +47,22 @@ class GetRequest {
         Matcher matcher = RANGE_HEADER_PATTERN.matcher(request);
         if (matcher.find()) {
             String rangeValue = matcher.group(1);
-            return Long.parseLong(rangeValue);
+            // ⚠️ 本地修改（2026-10-02，代码审计 M1）：
+            // 正则是 `bytes=(\d*)-`，`\d*` 允许**空串**；而 RFC 7233 的后缀范围
+            // `Range: bytes=-500`（完全合法的请求，播放器/预加载都可能发）正好让
+            // group(1) 为空 → Long.parseLong("") 抛 NumberFormatException。
+            // 超长数字（溢出）同样会抛。
+            // 后果：请求在 FutureTask 里被静默吞掉 —— 没有响应、没有日志，用户只看到
+            // "这条视频放不出来"。两种输入都不是攻击，所以按"整段返回"优雅降级。
+            if (rangeValue == null || rangeValue.isEmpty()) {
+                return -1;   // 后缀范围（最后 N 字节）：当成不带 Range 处理
+            }
+            try {
+                return Long.parseLong(rangeValue);
+            } catch (NumberFormatException e) {
+                Logger.error("Range 头解析失败，按整段处理: " + rangeValue);
+                return -1;
+            }
         }
         return -1;
     }

@@ -74,6 +74,40 @@ android {
     }
 }
 
+// ---- 发布卫生闸门（2026-10-02，代码审计 H2 + 发布流程）----
+//
+// 背景：Release 页历史上**同时挂着 debug 包**（字母序还排在前面），而 debug 包与 release 包
+// 签名不同 —— 用户点错装成 debug 包后，照着公告说的"覆盖安装即可"操作必然失败，
+// 只能卸载重装、登录态一起没。更糟的是 devdiag（release 同签名 + debuggable）万一误发，
+// 任何能碰到设备的人 `adb shell run-as` 就能读出会话 cookie。
+//
+// 两道闸门：
+//  ① devdiag 的产物文件名自带 DO-NOT-PUBLISH —— 它永远不可能和 release 资产名混淆；
+//  ② assembleRelease 结束时校验**合并后的清单**里没有 debuggable=true：
+//     一旦有人把它抄进 release（或改了 buildType 继承），构建当场失败，而不是等用户装上才发现。
+androidComponents {
+    onVariants(selector().withBuildType("devdiag")) { variant ->
+        variant.outputs.each { output ->
+            output.outputFileName.set("wanshang-yinfu-DEVDIAG-DO-NOT-PUBLISH.apk")
+        }
+    }
+}
+
+tasks.matching { it.name == 'assembleRelease' }.configureEach {
+    doLast {
+        def mf = file("${buildDir}/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml")
+        if (!mf.exists()) {
+            println "发布闸门：找不到合并清单，跳过 debuggable 校验（${mf}）"
+            return
+        }
+        if (mf.getText('UTF-8').contains('android:debuggable="true"')) {
+            throw new GradleException(
+                    "release 包被标记为 debuggable，禁止发布（代码审计 H2）。请检查 buildTypes.release 是否被改成了 initWith(devdiag)。")
+        }
+        println "发布闸门：release 未标记 debuggable ✓"
+    }
+}
+
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'com.google.android.material:material:1.12.0'
