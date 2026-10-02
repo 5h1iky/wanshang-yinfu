@@ -21,8 +21,8 @@ android {
         applicationId 'com.dywatch.app'
         minSdk 21
         targetSdk 36
-        versionCode 10
-        versionName '0.8.1'
+        versionCode 11
+        versionName '0.8.2'
     }
 
     signingConfigs {
@@ -93,20 +93,36 @@ androidComponents {
     }
 }
 
-tasks.matching { it.name == 'assembleRelease' }.configureEach {
-    doLast {
-        def mf = file("${buildDir}/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml")
-        if (!mf.exists()) {
-            println "发布闸门：找不到合并清单，跳过 debuggable 校验（${mf}）"
-            return
-        }
-        if (mf.getText('UTF-8').contains('android:debuggable="true"')) {
-            throw new GradleException(
-                    "release 包被标记为 debuggable，禁止发布（代码审计 H2）。请检查 buildTypes.release 是否被改成了 initWith(devdiag)。")
-        }
-        println "发布闸门：release 未标记 debuggable ✓"
+// 闸门本体：校验合并后的清单里没有 debuggable=true
+def verifyReleaseNotDebuggable = {
+    def mf = file("${buildDir}/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml")
+    if (!mf.exists()) {
+        println "发布闸门：找不到合并清单，跳过 debuggable 校验（${mf}）"
+        return
     }
+    if (mf.getText('UTF-8').contains('android:debuggable="true"')) {
+        throw new GradleException(
+                "release 包被标记为 debuggable，禁止发布（代码审计 H2）。请检查 buildTypes.release 是否被改成了 initWith(devdiag)。")
+    }
+    println "发布闸门：release 未标记 debuggable ✓"
 }
+
+// ⚠️ 2026-10-02 记录一次**误判**，免得后人重踩：我起初用
+//     tasks.matching { it.name == 'assembleRelease' }.configureEach { doLast { … } }
+//   构建后按 "发布闸门" 去 grep 输出，没匹配到，就认定"闸门没执行"，改成了下面这套双保险。
+//   后来把完整输出落盘才发现：闸门一直有执行，只是 Windows 控制台的编码把中文打成了乱码
+//   （����բ��），是**我的 grep 没匹配上**，不是 Gradle 没跑。
+//   双保险保留（whenTaskAdded 管以后注册的任务、matching().all 管已存在的），
+//   但结论要写对：这不是"修了一个不生效的守卫"，而是"差点因为乱码冤枉了它"。
+def releaseGateAttached = { t ->
+    if (t.name != 'assembleRelease') return
+    if (t.ext.has('dywatchReleaseGate')) return
+    t.ext.dywatchReleaseGate = true
+    t.doLast(verifyReleaseNotDebuggable)
+}
+
+tasks.whenTaskAdded { releaseGateAttached(it) }
+tasks.matching { it.name == 'assembleRelease' }.all { releaseGateAttached(it) }
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
