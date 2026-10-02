@@ -687,13 +687,19 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 : engine.collectVideo(awemeId, target, cb);
         mActionsInFlight.put(key, reqId);
         // 桥没回音（页面异常/被吞）时不能把互动按钮永久锁死。只清自己这一条 key。
+        //
+        // ⚠️ 2026-10-02 真机实测修正：这里**只解锁，不撤销回调登记**。
+        // 第一版我在超时时顺手调了 engine.cancelAction(reqId)，结果真机上一次真实的点赞是这样：
+        //   点击 → 引擎跳 /video/<id> → 等页面就绪 → 点击 → 4 轮复查 → **34 秒**后才回报 ok=true，
+        // 而 30 秒的兜底先到，把登记撤了 → 日志变成"互动结果无接收方（reqId=r1）"，
+        // 用户**永远等不到"已点赞"**（成功也静默、失败也不回滚）。
+        // 也就是说：慢一点的成功会被我们自己丢掉。现在超时只解锁按钮，迟到的结果照样投递
+        // （页面若已销毁，回调里的 isFinishing/isDestroyed 会拦住 UI 操作）。
         mActionTimeout.postDelayed(new Runnable() {
             @Override
             public void run() {
-                String id = mActionsInFlight.remove(key);
-                if (id != null) {
-                    AppLog.i("feed", "互动超时兜底解锁 " + key);
-                    engine.cancelAction(id);   // 撤销登记：迟到的结果不再投给本页
+                if (mActionsInFlight.remove(key) != null) {
+                    AppLog.i("feed", "互动超时解锁按钮（结果仍会投递） " + key);
                 }
             }
         }, 30000);

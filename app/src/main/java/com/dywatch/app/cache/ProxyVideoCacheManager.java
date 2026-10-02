@@ -74,11 +74,15 @@ public class ProxyVideoCacheManager {
 
     /**
      * 清空视频缓存（2026-10-02，代码审计 M7）。
-     * 为什么不用库里那个 `StorageUtils.deleteFiles`：它**不看文件类型**，会把
-     * `xxx.download` 这种"正在下载中的临时文件"一起删掉。Linux 上删除只是 unlink，
-     * 下载线程会继续往一个已经没有名字的 inode 里写，最后 rename 失败 ——
-     * 表现就是"点了清缓存之后，正在放的这个视频彻底废了"。
-     * 所以这里自己遍历：跳过 .download，其余删除，并把失败如实返回。
+     *
+     * 实现取舍（真机实测踩到的）：预加载只读 1MB 就停，所以缓存目录里**绝大多数是
+     * `xxx.download` 临时文件**（只有整条下完才会改名成最终文件）。第一版我为了"别删
+     * 正在下载中的文件"跳过了全部 .download —— 真机上点"清空视频缓存"的实测结果是
+     * 容量纹丝不动（3.3MB → 3.3MB），等于这个按钮是假的。
+     *
+     * 现在全删。最坏情况是什么？正在播的那条，它的下载线程已经持有文件句柄，
+     * 文件被 unlink 后仍然能继续读/写（Linux 语义），只是这一条的缓存没了 ——
+     * 正是这一行提示里写明的"正在播放的那条会重下"。用户按的就是"清空"，就按清空做。
      *
      * 注意：`AndroidVideoCache.db` 里的行（URL → mime/长度索引）这个库**没有任何删除 API**，
      * 只能留着。它只存 URL 字符串，体积很小，不影响可用空间。
@@ -91,7 +95,6 @@ public class ProxyVideoCacheManager {
             boolean allOk = true;
             for (File f : files) {
                 if (!f.isFile()) continue;
-                if (f.getName().endsWith(".download")) continue;   // 正在下载：别动
                 if (!f.delete()) allOk = false;
             }
             return allOk;

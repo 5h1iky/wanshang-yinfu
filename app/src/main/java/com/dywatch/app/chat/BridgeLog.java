@@ -33,6 +33,29 @@ final class BridgeLog {
 
     private BridgeLog() {}
 
+    /**
+     * 事件里的 doc 字段是否等于本引擎本次注入的文档密钥（2026-10-02，审计 H4-c）。
+     *
+     * 为什么要这一层：addJavascriptInterface 挂的对象在**所有框架**里都可见，
+     * 页面里任何第三方 iframe 都能调 onBridgeEvent 伪造"点赞成功/评论已发/会话列表"。
+     * 桥在注入时被塞进一个只存在于**本文档**的随机密钥，事件必须带着它；
+     * 跨域 iframe 读不到主文档的变量，于是伪造这条路被堵上。
+     *
+     * 抽成纯函数（而不是留在 ChatEngine 里用私有字段判断）是为了能在 JVM 里直接测 ——
+     * 这条规则一旦错了，表现是"聊天彻底没反应"，绝不能只靠真机试。
+     */
+    static boolean hasValidKey(String json, String key) {
+        if (key == null || key.isEmpty() || json == null) return false;
+        try {
+            JsonElement el = JsonParser.parseString(json);
+            if (!el.isJsonObject()) return false;
+            JsonElement d = el.getAsJsonObject().get("doc");
+            return d != null && d.isJsonPrimitive() && key.equals(d.getAsString());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** 一条桥事件 → 一行可安全落盘的摘要 */
     static String summarize(String json) {
         if (json == null) return "(null)";

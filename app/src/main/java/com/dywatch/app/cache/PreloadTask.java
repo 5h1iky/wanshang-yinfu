@@ -74,6 +74,12 @@ public class PreloadTask implements Runnable {
         synchronized (blackList) {
             if (blackList.contains(mRawUrl)) return;
         }
+        // ⚠️ 2026-10-02（代码审计 M7 延伸）：这三行日志是**必须**的。
+        // 原来整条预加载链路的成败全靠 dkplayer 的 L 日志，而 L 默认关闭、全工程没人打开它 ——
+        // 于是"预加载到底跑了没有、失败在哪一步"在日志里一个字都看不到（失败被 catch 后
+        // 只丢进一个看不见的黑名单）。真机实测：缓存目录与 AndroidVideoCache.db 压根没被创建过，
+        // 而整个系统对此完全沉默。本项目全靠 logcat/落盘日志取证，这种黑盒必须先拆掉。
+        com.dywatch.app.util.AppLog.i("cache", "预加载开始 #" + mPosition + " " + tail(mRawUrl));
         L.i("预加载开始：" + mPosition);
         HttpURLConnection connection = null;
         try {
@@ -92,14 +98,19 @@ public class PreloadTask implements Runnable {
                 //预加载完成或者取消预加载
                 if (mIsCanceled || read >= PreloadManager.PRELOAD_LENGTH) {
                     if (mIsCanceled) {
+                        com.dywatch.app.util.AppLog.i("cache", "预加载取消 #" + mPosition + " 已读 " + read + "B");
                         L.i("预加载取消：" + mPosition + " 读取数据：" + read + " Byte");
                     } else {
+                        com.dywatch.app.util.AppLog.i("cache", "预加载完成 #" + mPosition + " 已读 " + read + "B");
                         L.i("预加载成功：" + mPosition + " 读取数据：" + read + " Byte");
                     }
                     break;
                 }
             }
         } catch (Exception e) {
+            // 失败原因必须落盘：这是"下一条视频要不要重新缓冲"的直接答案
+            com.dywatch.app.util.AppLog.i("cache", "预加载失败 #" + mPosition + "："
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
             L.i("预加载异常：" + mPosition + " 异常信息："+ e.getMessage());
             // 关入小黑屋（带上限：见 blackList 注释）
             synchronized (blackList) {
@@ -123,6 +134,18 @@ public class PreloadTask implements Runnable {
         if (mIsExecuted) return;
         mIsExecuted = true;
         executorService.submit(this);
+    }
+
+    /** 日志里只留 URL 尾部（域名+路径，不带那一长串签名参数；与 feed 其它日志同一口径） */
+    private static String tail(String url) {
+        if (url == null) return "";
+        try {
+            java.net.URL u = new java.net.URL(url);
+            String path = u.getPath() == null ? "" : u.getPath();
+            return u.getHost() + (path.length() > 24 ? path.substring(0, 24) + "…" : path);
+        } catch (Throwable t) {
+            return url.length() > 32 ? url.substring(0, 32) + "…" : url;
+        }
     }
 
     /**

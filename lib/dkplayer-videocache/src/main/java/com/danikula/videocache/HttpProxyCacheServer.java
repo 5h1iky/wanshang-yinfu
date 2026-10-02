@@ -313,7 +313,10 @@ public class HttpProxyCacheServer {
     }
 
     private void onError(Throwable e) {
-        Logger.error("HttpProxyCacheServer error");
+        // ⚠️ 本地修改（2026-10-02，代码审计 M1）：原实现**把参数丢掉了**，只打一句
+        // "HttpProxyCacheServer error" —— 真机实测一个非法请求进来时，日志里就只有这七个字，
+        // 完全看不出是"请求非法"还是"源站连不上"还是"磁盘满了"。异常必须原样打出来。
+        Logger.error("HttpProxyCacheServer error: " + e);
     }
 
     private final class WaitRequestsRunnable implements Runnable {

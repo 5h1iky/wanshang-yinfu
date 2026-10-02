@@ -109,4 +109,24 @@ public class BridgeLogTest {
         String s = BridgeLog.safeText(sb.toString());
         assertTrue("应截断: " + s.length(), s.length() <= 81);
     }
+
+    // ---- 文档密钥（2026-10-02，代码审计 H4-c）----
+    // 页面里的第三方框架拿不到主文档的 __dywatch_key，于是无法伪造事件。
+    @Test
+    public void 密钥相符才认事件() {
+        String json = "{\"type\":\"ready\",\"doc\":\"abc123\"}";
+        assertTrue(BridgeLog.hasValidKey(json, "abc123"));
+    }
+
+    @Test
+    public void 密钥不符或缺失一律丢弃() {
+        assertFalse("没有 doc 字段", BridgeLog.hasValidKey("{\"type\":\"ready\"}", "abc123"));
+        assertFalse("doc 为空", BridgeLog.hasValidKey("{\"type\":\"ready\",\"doc\":\"\"}", "abc123"));
+        assertFalse("doc 是别的值", BridgeLog.hasValidKey("{\"type\":\"ready\",\"doc\":\"guess\"}", "abc123"));
+        assertFalse("doc 不是字符串", BridgeLog.hasValidKey("{\"type\":\"ready\",\"doc\":123}", "abc123"));
+        assertFalse("非 JSON", BridgeLog.hasValidKey("ready", "abc123"));
+        assertFalse("引擎还没有密钥", BridgeLog.hasValidKey("{\"type\":\"ready\",\"doc\":\"abc123\"}", ""));
+        assertFalse("密钥为 null", BridgeLog.hasValidKey("{\"type\":\"ready\",\"doc\":\"abc123\"}", null));
+        assertFalse("事件为 null", BridgeLog.hasValidKey(null, "abc123"));
+    }
 }

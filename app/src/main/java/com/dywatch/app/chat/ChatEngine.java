@@ -155,8 +155,16 @@ public class ChatEngine {
             public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
                 // 页面脚本报错是"DOM 抓不到东西"最常见的原因（尤其老内核跑不动现代 bundle）
                 if (cm != null && cm.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
+                    String msg = cm.message() == null ? "" : cm.message();
+                    // 已知噪音先滤掉（2026-10-02）：真机实测抖音 PC 页在 WebView 里会刷几十条
+                    // 这类"其实不算错"的报错，把真正的信号（脚本解析失败 / DOM 取不到）淹掉。
+                    //   · upgrade-insecure-requests：CSP 的固定提示，https 页面里必然出现，无影响
+                    //   · chrome-extension://…：页面风控脚本在探测本机浏览器扩展，WebView 里当然没有
+                    if (msg.contains("upgrade-insecure-requests") || msg.contains("chrome-extension://")) {
+                        return true;
+                    }
                     // 同样脱敏：页面报错里可能夹着带正文的 DOM 片段（审计 H3）
-                    AppLog.i("engine", "JS错误: " + BridgeLog.safeText(cm.message())
+                    AppLog.i("engine", "JS错误: " + BridgeLog.safeText(msg)
                             + " @" + cm.sourceId() + ":" + cm.lineNumber());
                 }
                 return true;
@@ -670,16 +678,7 @@ public class ChatEngine {
 
     /** 事件里的 doc 字段是否等于本引擎本次注入的文档密钥 */
     private boolean hasValidKey(String json) {
-        String key = mBridgeKey;
-        if (key == null || key.isEmpty()) return false;
-        try {
-            com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(json);
-            if (!el.isJsonObject()) return false;
-            com.google.gson.JsonElement d = el.getAsJsonObject().get("doc");
-            return d != null && d.isJsonPrimitive() && key.equals(d.getAsString());
-        } catch (Throwable t) {
-            return false;
-        }
+        return BridgeLog.hasValidKey(json, mBridgeKey);
     }
 
     private void dispatchBridgeEvent(String json) {
