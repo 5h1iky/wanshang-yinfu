@@ -4,7 +4,8 @@ import android.content.Context;
 
 import com.danikula.videocache.HttpProxyCacheServer;
 import com.danikula.videocache.headers.HeaderInjector;
-import com.dywatch.app.net.DouyinApi;
+import com.dywatch.app.net.DouyinApi;
+import com.dywatch.app.util.AppLog;
 
 import java.io.File;
 import java.util.Map;
@@ -29,7 +30,33 @@ public class ProxyVideoCacheManager {
     private ProxyVideoCacheManager() {
     }
 
-    public static HttpProxyCacheServer getProxy(Context context) {
+
+    /**
+     * 代理是否已被判定为不可用。
+     *
+     * 置位后**不再回头**（进程内）：代理服务要么一开始就起不来，要么在播放中被发现有问题，
+     * 两种情况都不适合再试一次 —— 反复在代理上跌倒只会让用户看到反复的播放失败。
+     * 用户下次冷启动会重新尝试。
+     */
+    private static volatile boolean sProxyBroken = false;
+
+    /** 代理当前是否可用（未构造失败、也未被播放过程判死刑） */
+    public static boolean isProxyUsable() {
+        return !sProxyBroken;
+    }
+
+    /**
+     * 把代理标记为不可用。之后所有播放一律直连原始地址 ——
+     * 宁可没有缓存加速，也不能因为代理坏了而播不出来。
+     */
+    public static void markProxyBroken(String why) {
+        if (!sProxyBroken) {
+            sProxyBroken = true;
+            com.dywatch.app.util.AppLog.i("cache", "代理判定不可用，后续改直连：" + why);
+        }
+    }
+
+    public static HttpProxyCacheServer getProxy(Context context) {
         return sharedProxy == null ? (sharedProxy = newProxy(context)) : sharedProxy;
     }
 
