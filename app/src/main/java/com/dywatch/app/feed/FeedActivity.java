@@ -67,6 +67,12 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     private boolean mFullscreen;
     /** 当前 item 的 TikTokView（全屏时它其实被盖住了，但要同步"进/退全屏"的图标状态） */
     private TikTokView mCurTikTokView;
+    /** 当前播放的**原始地址**（走代理时它是被代理的那个源址，用于降级重播） */
+    private String mPlayingRawUrl = "";
+    /** 当前这条是否走的是本地代理地址 */
+    private boolean mPlayingViaProxy;
+    /** 本条是否已经试过一次「代理失败 → 直连重播」（只试一次，防死循环） */
+    private boolean mProxyFallbackTried;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -289,6 +295,15 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             @Override
             public void onPlayerStateChanged(int playerState) {
                 com.dywatch.app.util.AppLog.i("feed", "播放器状态: " + playerStateName(playerState));
+                // 播不出来时，如果这一条走的是代理 → 删坏缓存改直连（见 fallbackToDirectPlay）
+                if (playerState == VideoView.STATE_ERROR) {
+                    // 两层降级依次试：
+                    //   ① 走了代理却播不出来 → 删坏缓存改直连
+                    //   ② 直连也播不出来（或本来就是直连）→ 留给宿主自己处理
+                    if (!fallbackToDirectPlay()) {
+                        com.dywatch.app.util.AppLog.i("feed", "播放失败且无法降级，等用户滑动");
+                    }
+                }
                 // 全屏状态跟**实际**走（软件内问题 ⑤）：进全屏的不一定是我们点的那个键——
                 // dkplayer 的传感器监听在横屏时也会自动进全屏（见 BaseVideoController.onOrientationLandscape）。
                 // 所以内缩清零 / 图标 / 缩放复位都挂在这里，而不是只挂在按钮回调里。
@@ -327,6 +342,39 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             case VideoView.STATE_ERROR: return "ERROR(播放失败)";
             default: return "state=" + s;
         }
+    }
+
+    /**
+     * 播放失败的兜底降级（缓存链路的最后一层）。
+     *
+     * 触发条件：**这一条本来走的是代理**，且**还没降级过**。
+     * 做法：删掉这条的缓存（既然播不出来，它就是坏的）、改用直连原始地址重播一次。
+     *
+     * 为什么必须有这一层：代理地址是本机 127.0.0.1 上的一个小服务，失败模式很多 ——
+     * 缓存写到一半断了、源站拒绝续传、端口被系统回收、磁盘写满…… 这些都不是内容的问题，
+     * 直连大概率能播。没有这一层，用户看到的就是"这个视频打不开"。
+     *
+     * ⚠️ 只降级一次：直连还失败就说明确实是内容/网络的问题，再试只会陷入死循环重播。
+     * ⚠️ "必须走代理"的场景**不做这层降级** —— 直连 https 对老系统的解码器同样无解，
+     *    这种"代理播不出来"是解码/内容问题，不该改直连。
+     */
+    private boolean fallbackToDirectPlay() {
+        if (!mPlayingViaProxy || mProxyFallbackTried || mPlayingRawUrl.isEmpty()) return false;
+        if (com.dywatch.app.cache.PreloadManager.mustUseProxy()) return false;
+        mProxyFallbackTried = true;
+        com.dywatch.app.util.AppLog.i("feed", "代理播放失败 → 删掉坏缓存，重取播放地址");
+        com.dywatch.app.cache.ProxyVideoCacheManager.evict(this, mPlayingRawUrl);
+        try {
+            mVideoView.release();
+            // 删完坏缓存后由 getPlayUrl 重新决定：缓存已不够门槛，它会自然给出直连
+            String retryUrl = mPreloadManager.getPlayUrl(mPlayingRawUrl);
+            mPlayingViaProxy = !retryUrl.equals(mPlayingRawUrl);
+            mVideoView.setUrl(retryUrl, com.dywatch.app.net.DouyinApi.playHeaders());
+            mVideoView.start();
+        } catch (Throwable e) {
+            com.dywatch.app.util.AppLog.i("feed", "降级重播失败：" + e);
+        }
+        return true;
     }
 
     private void initViewPager() {
@@ -408,6 +456,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     HistoryStore.mark(this, video.awemeId, video.title, video.coverUrl);
                 }
                 String playUrl = mPreloadManager.getPlayUrl(video.playUrl);
+                // 记下降级重播需要的三样东西（见 fallbackToDirectPlay）
+                mPlayingRawUrl = video.playUrl;
+                mPlayingViaProxy = !playUrl.equals(video.playUrl);
+                mProxyFallbackTried = false;
                 mVideoView.setUrl(playUrl, com.dywatch.app.net.DouyinApi.playHeaders());
                 mController.addControlComponent(viewHolder.mTikTokView, true);
                 // 全屏入口接线（每个 item 的 TikTokView 都要接：换条后拿到的是新的实例）

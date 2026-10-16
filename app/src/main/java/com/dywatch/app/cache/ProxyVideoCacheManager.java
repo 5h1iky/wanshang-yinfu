@@ -76,6 +76,23 @@ public class ProxyVideoCacheManager {
                 .build();
     }
 
+    /**
+     * 删掉某一条的缓存（正式文件 + 临时文件）。
+     *
+     * 用于「代理播放失败 → 直连重播」：既然播不出来，这份缓存就是坏的 ——
+     * 不删掉的话，下次 {@code getPlayUrl} 看到它已过可播门槛，还会把播放送回代理。
+     */
+    public static void evict(Context context, String rawUrl) {
+        try {
+            File f = getProxy(context).getCacheFile(rawUrl);
+            if (f.exists()) f.delete();
+            File t = getProxy(context).getTempCacheFile(rawUrl);
+            if (t.exists()) t.delete();
+        } catch (Throwable ignored) {
+            // 删不掉不致命：最坏是这次重播仍走代理、仍失败，用户滑一下就好
+        }
+    }
+
     /** 人类可读容量（设置页那行用；手表上看到"128.0 MB"比"134217728"有用） */
     public static String formatSize(long bytes) {
         if (bytes < 0) return "0 MB";
