@@ -68,6 +68,15 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     /** 当前 item 的 TikTokView（全屏时它其实被盖住了，但要同步"进/退全屏"的图标状态） */
     private TikTokView mCurTikTokView;
 
+    /** 当前播放的**原始地址**（走代理时它是被代理的源址，用于降级重播） */
+    private String mPlayingRawUrl = "";
+    /** 当前这条是否走的是本地代理地址 */
+    private boolean mPlayingViaProxy;
+    /** 本条是否已经试过一次「代理失败 → 直连重播」（只试一次，防死循环） */
+    private boolean mProxyFallbackTried;
+    /** 播放代次：换条后旧播放器迟到的 ERROR 不再误重播 */
+    private int mPlayToken;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -310,8 +319,66 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             @Override
             public void onPlayStateChanged(int playState) {
                 com.dywatch.app.util.AppLog.i("feed", "播放状态: " + playerStateName(playState));
+                if (playState == VideoView.STATE_PLAYING && mPlayingViaProxy) {
+                    com.dywatch.app.cache.ProxyVideoCacheManager.noteProxyPlaybackSuccess();
+                }
+                if (playState == VideoView.STATE_ERROR) {
+                    // dkplayer 的 STATE_ERROR(-1) 只走这条回调（BaseVideoView.setPlayState），
+                    // 不会出现在 onPlayerStateChanged（那里只有 PLAYER_NORMAL/FULL_SCREEN/TINY_SCREEN）。
+                    // post 一拍再重播：避免在状态分发里同步 release()/setUrl() 造成重入。
+                    final int token = mPlayToken;
+                    mVideoView.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (token != mPlayToken) return;   // 用户已经滑走
+                            if (!fallbackToDirectPlay()) {
+                                com.dywatch.app.util.AppLog.i("feed", "播放失败且无法降级，等用户滑动");
+                            }
+                        }
+                    });
+                }
             }
         });
+    }
+
+    /**
+     * 播放失败的兜底降级（缓存链路的最后一层）。
+     *
+     * 触发条件：这一条本来走的是代理，且还没降级过。
+     * 做法：停掉这条的预加载、删掉坏缓存（既然播不出来，它就是坏的——不删的话
+     * 下次 getPlayUrl 看到它已过 256KB 门槛，还会把播放送回代理），改直连重播一次。
+     *
+     * 为什么必须有这一层：代理地址是本机 127.0.0.1 上的一个小服务，失败模式很多——
+     * 缓存写到一半断了、源站拒绝续传、端口被系统回收、磁盘写满……这些都不是内容的问题，
+     * 直连大概率能播。没有这一层，用户看到的就是"这个视频打不开"。
+     *
+     * ⚠️ 只降级一次：直连还失败就说明确实是内容/网络的问题，再试只会死循环重播。
+     */
+    private boolean fallbackToDirectPlay() {
+        if (!mPlayingViaProxy || mProxyFallbackTried || mPlayingRawUrl.isEmpty()) return false;
+        mProxyFallbackTried = true;
+        final String rawUrl = mPlayingRawUrl;
+        com.dywatch.app.util.AppLog.i("feed", "代理播放失败 → 删掉坏缓存，改直连重播");
+        // 先停预加载：否则删完缓存，后台任务可能立刻把同一个坏文件写回来
+        if (mPreloadManager != null) mPreloadManager.removePreloadTask(rawUrl);
+        com.dywatch.app.cache.ProxyVideoCacheManager.evict(this, rawUrl);
+        com.dywatch.app.cache.ProxyVideoCacheManager.noteProxyPlaybackFailure();
+        try {
+            mVideoView.release();
+            // 删完坏缓存后由 getPlayUrl 重新决定：缓存已不够门槛，它会自然给出直连
+            String retryUrl = mPreloadManager.getPlayUrl(rawUrl);
+            mPlayingViaProxy = !retryUrl.equals(rawUrl);
+            mVideoView.setUrl(retryUrl, com.dywatch.app.net.DouyinApi.playHeaders());
+            // release() 会走 STATE_IDLE → 控制器摘掉 isDissociate=true 的组件（TikTokView 就是），
+            // 重播前必须重新挂上，否则这条的按钮/进度不再跟播放状态同步。
+            if (mCurTikTokView != null) {
+                mController.addControlComponent(mCurTikTokView, true);
+            }
+            mVideoView.start();
+        } catch (Throwable e) {
+            com.dywatch.app.util.AppLog.i("feed", "降级重播失败：" + e);
+        }
+        return true;
     }
 
     private static String playerStateName(int s) {
@@ -394,6 +461,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             View itemView = mViewPager.getChildAt(i);
             FeedAdapter.ViewHolder viewHolder = (FeedAdapter.ViewHolder) itemView.getTag();
             if (viewHolder != null && viewHolder.mPosition == position) {
+                mPlayToken++;
                 mVideoView.release();
                 if (mVideoView.getParent() instanceof ViewGroup) {
                     ((ViewGroup) mVideoView.getParent()).removeView(mVideoView);
@@ -408,6 +476,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     HistoryStore.mark(this, video.awemeId, video.title, video.coverUrl);
                 }
                 String playUrl = mPreloadManager.getPlayUrl(video.playUrl);
+                // 记下降级重播需要的三样东西（见 fallbackToDirectPlay）
+                mPlayingRawUrl = video.playUrl;
+                mPlayingViaProxy = !playUrl.equals(video.playUrl);
+                mProxyFallbackTried = false;
                 mVideoView.setUrl(playUrl, com.dywatch.app.net.DouyinApi.playHeaders());
                 mController.addControlComponent(viewHolder.mTikTokView, true);
                 // 全屏入口接线（每个 item 的 TikTokView 都要接：换条后拿到的是新的实例）
