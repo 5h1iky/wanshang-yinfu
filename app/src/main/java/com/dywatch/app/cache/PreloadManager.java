@@ -3,6 +3,7 @@ package com.dywatch.app.cache;
 import android.content.Context;
 
 import com.danikula.videocache.HttpProxyCacheServer;
+import com.dywatch.app.util.AppLog;
 
 import java.io.File;
 import java.util.Iterator;
@@ -51,7 +52,22 @@ public class PreloadManager {
      */
     public static final int PRELOAD_LENGTH = 1024 * 1024;
 
+    /**
+     * 走代理播放的最低门槛（2026-10-17）。
+     *
+     * 原来只有一个判据（1MB），于是出现这种浪费：预加载刚下到 900KB 时用户正好滑到这条，
+     * isPreloaded() 返回 false → 直连原始地址 → **已经下好的 900KB 白费**，
+     * 而且这一路完全没有缓存加速。
+     *
+     * 现在把两件事拆开：
+     *   - "还要不要继续预加载" → 看 {@link #PRELOAD_LENGTH}（1MB）
+     *   - "能不能走代理播放"   → 看这里（256KB），代理会从已有数据接着往下供流
+     * 256KB 对 720p 大约够播两三秒，起播够用，剩下的边播边下。
+     */
+    public static final int READY_LENGTH = 256 * 1024;
+
     private PreloadManager(Context context) {
+        // 代理构造失败时 getProxy 返回 null（不再抛异常），下面所有使用点都按"没有代理"处理
         mHttpProxyCacheServer = ProxyVideoCacheManager.getProxy(context);
     }
 
@@ -72,6 +88,8 @@ public class PreloadManager {
      * @param rawUrl 原始视频地址
      */
     public void addPreloadTask(String rawUrl, int position) {
+        // 代理没构造出来 / 已被判定不可用：没有缓存通道，预加载只会白耗流量
+        if (mHttpProxyCacheServer == null || !ProxyVideoCacheManager.isProxyUsable()) return;
         if (isPreloaded(rawUrl)) return;
         PreloadTask task = new PreloadTask();
         task.mRawUrl = rawUrl;
@@ -90,6 +108,7 @@ public class PreloadManager {
      * 判断该播放地址是否已经预加载
      */
     private boolean isPreloaded(String rawUrl) {
+        if (mHttpProxyCacheServer == null) return false;
         //先判断是否有缓存文件，如果已经存在缓存文件，并且其大小大于1KB，则表示已经预加载完成了
         File cacheFile = mHttpProxyCacheServer.getCacheFile(rawUrl);
         if (cacheFile.exists()) {
@@ -108,6 +127,21 @@ public class PreloadManager {
         }
 
         return false;
+    }
+
+    /**
+     * 该地址**能不能直接走代理播放**（门槛比预加载低，见 {@link #READY_LENGTH}）。
+     *
+     * 完整缓存文件存在就算 ready —— 此时 getProxyUrl 会直接返回 file:// URI，
+     * 哪怕是不到 256KB 的短视频也不该被永远打回直连。
+     * 只有临时文件才按 256KB 门槛判断。
+     */
+    private boolean isReadyForPlayback(String rawUrl) {
+        if (mHttpProxyCacheServer == null) return false;
+        File cacheFile = mHttpProxyCacheServer.getCacheFile(rawUrl);
+        if (cacheFile.exists()) return true;
+        File tempCacheFile = mHttpProxyCacheServer.getTempCacheFile(rawUrl);
+        return tempCacheFile.exists() && tempCacheFile.length() >= READY_LENGTH;
     }
 
     /**
@@ -145,6 +179,7 @@ public class PreloadManager {
         L.d("resumePreload：" + position + " isReverseScroll: " + isReverseScroll);
         // 后台时不许被"滑动恢复"把预加载又拉起来（审计 L6/L8）
         if (mHostPaused) return;
+        if (mHttpProxyCacheServer == null || !ProxyVideoCacheManager.isProxyUsable()) return;
         mIsStartPreload = true;
         for (Map.Entry<String, PreloadTask> next : mPreloadTasks.entrySet()) {
             PreloadTask task = next.getValue();
@@ -210,6 +245,7 @@ public class PreloadManager {
     public void resumeAll() {
         mHostPaused = false;
         mIsStartPreload = true;
+        if (mHttpProxyCacheServer == null || !ProxyVideoCacheManager.isProxyUsable()) return;
         for (Map.Entry<String, PreloadTask> next : mPreloadTasks.entrySet()) {
             PreloadTask task = next.getValue();
             if (!isPreloaded(task.mRawUrl)) task.executeOn(mExecutorService);
@@ -217,16 +253,34 @@ public class PreloadManager {
     }
 
     /**
-     * 获取播放地址
+     * 取这条视频实际该用的播放地址 —— **降级链路的入口**。
+     *
+     * 依次判断：
+     *   ① 代理不可用 / 没构造出来 → 直连；
+     *   ② 缓存还没攒到可播门槛（256KB）→ 直连，并取消同一条的预加载
+     *      （本条都直连了，后台再走代理下一份只是双份流量）；
+     *   ③ 都 OK → 返回代理地址（命中缓存，起播最快；完整缓存会直接给 file://）;
+     *   ④ 连"取代理地址"这一步都抛异常 → 判定代理不可用，本次直连。
+     *
+     * 这一层保证的是"**播放永远不会因为缓存层的问题而失败**"—— 最差也有直连兜底。
      */
     public String getPlayUrl(String rawUrl) {
-        PreloadTask task = mPreloadTasks.get(rawUrl);
-        if (task != null) {
-            task.cancel();
+        if (mHttpProxyCacheServer == null || !ProxyVideoCacheManager.isProxyUsable()) {
+            return rawUrl;
         }
-        if (isPreloaded(rawUrl)) {
+        if (!isReadyForPlayback(rawUrl)) {
+            // 只取消这一条：走代理播放时故意不取消（预加载和播放读同一份缓存，
+            // 取消会把已经在下、马上能供播放器用的连接提前掐断）。
+            PreloadTask task = mPreloadTasks.get(rawUrl);
+            if (task != null) task.cancel();
+            AppLog.i("cache", "缓存未达可播门槛（<256KB），本条直连");
+            return rawUrl;
+        }
+        try {
             return mHttpProxyCacheServer.getProxyUrl(rawUrl);
-        } else {
+        } catch (Throwable e) {
+            ProxyVideoCacheManager.markProxyBroken("取代理地址失败: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
             return rawUrl;
         }
     }
