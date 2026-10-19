@@ -21,7 +21,6 @@ import com.dywatch.app.widget.VerticalViewPager;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -593,7 +592,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         int n;
         while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
         is.close();
-        return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        return new String(bos.toByteArray(), java.nio.charset.Charset.forName("UTF-8"));
     }
 
     // ---- 互动（操作栏）：乐观更新 + 后台直写（用户已授权直写尝试，KICK 则重登）----

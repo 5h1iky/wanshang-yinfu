@@ -24,6 +24,43 @@ public final class Signer {
                     + "var outerWidth = 2554; var outerHeight = 1386;\n"
                     + "var screen = { availWidth: 2560, availHeight: 1392, width: 2560, height: 1440 };\n";
 
+
+    /**
+     * ES6 补丁：**Rhino 1.7.7.2 没有 Map / Set**，而抖音的签名 JS 用了 Map
+     * （不补的话直接 `ReferenceError: "Map" is not defined`，签名永远算不出来）。
+     *
+     * 为什么宁可用老 Rhino + 补丁，也不用新版 Rhino：见 build.gradle 里 rhino 依赖那段的注释
+     * （新版含 Java 8 lambda，Dalvik 加载不到 D8 生成的 $$ExternalSyntheticLambda 类）。
+     *
+     * 注意 size 用普通属性维护而不是 getter —— 老 Rhino 对 defineProperty 的 getter 支持不稳。
+     */
+    private static final String ES6_POLYFILL =
+            "if (typeof Map === 'undefined') {\n"
+                    + "  Map = function(iterable) {\n"
+                    + "    this._k = []; this._v = {}; this.size = 0;\n"
+                    + "    if (iterable) { for (var i = 0; i < iterable.length; i++) this.set(iterable[i][0], iterable[i][1]); }\n"
+                    + "  };\n"
+                    + "  Map.prototype.set = function(k, v) { var s = '$' + k; if (!(s in this._v)) this._k.push(k); this._v[s] = v; this.size = this._k.length; return this; };\n"
+                    + "  Map.prototype.get = function(k) { var s = '$' + k; return (s in this._v) ? this._v[s] : undefined; };\n"
+                    + "  Map.prototype.has = function(k) { return ('$' + k) in this._v; };\n"
+                    + "  Map.prototype[\'delete\'] = function(k) { var s = '$' + k; if (s in this._v) { delete this._v[s]; this._k.splice(this._k.indexOf(k), 1); this.size = this._k.length; return true; } return false; };\n"
+                    + "  Map.prototype.clear = function() { this._k = []; this._v = {}; this.size = 0; };\n"
+                    + "  Map.prototype.forEach = function(cb, t) { for (var i = 0; i < this._k.length; i++) { var k = this._k[i]; cb.call(t, this._v['$' + k], k, this); } };\n"
+                    + "}\n"
+                    + "if (typeof Set === 'undefined') {\n"
+                    + "  Set = function(iterable) { this._m = new Map(); this.size = 0; if (iterable) { for (var i = 0; i < iterable.length; i++) this.add(iterable[i]); } };\n"
+                    + "  Set.prototype.add = function(v) { if (!this._m.has(v)) { this._m.set(v, true); this.size = this._m.size; } return this; };\n"
+                    + "  Set.prototype.has = function(v) { return this._m.has(v); };\n"
+                    + "  Set.prototype[\'delete\'] = function(v) { var r = this._m[\'delete\'](v); this.size = this._m.size; return r; };\n"
+                    + "  Set.prototype.clear = function() { this._m.clear(); this.size = 0; };\n"
+                    + "  Set.prototype.forEach = function(cb, t) { var s = this; this._m.forEach(function(v, k) { cb.call(t, k, k, s); }); };\n"
+                    + "}\n"
+                    + "if (!Array.prototype.includes) { Array.prototype.includes = function(x) { return this.indexOf(x) !== -1; }; }\n"
+                    + "if (!String.prototype.includes) { String.prototype.includes = function(x) { return this.indexOf(x) !== -1; }; }\n"
+                    + "if (!String.prototype.startsWith) { String.prototype.startsWith = function(x) { return this.indexOf(x) === 0; }; }\n"
+                    + "if (!String.prototype.endsWith) { String.prototype.endsWith = function(x) { return this.slice(-x.length) === x; }; }\n"
+                    + "if (!Array.from) { Array.from = function(a) { return Array.prototype.slice.call(a); }; }\n";
+
     private final Scriptable scope;
 
     public Signer(List<String> jsSources) {
@@ -33,6 +70,8 @@ public final class Signer {
             cx.setLanguageVersion(Context.VERSION_ES6); // 算法 JS 用了 let/解构赋值
             scope = cx.initStandardObjects();
             cx.evaluateString(scope, ENV_PRELUDE, "env", 1, null);
+            // Rhino 1.7.7.2 没有 Map/Set，而签名 JS 用了 Map —— 必须在加载前补上
+            cx.evaluateString(scope, ES6_POLYFILL, "polyfill", 1, null);
             int i = 0;
             for (String src : jsSources) {
                 cx.evaluateString(scope, src, "sign-" + (i++) + ".js", 1, null);

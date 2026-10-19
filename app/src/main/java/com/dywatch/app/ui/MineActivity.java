@@ -256,7 +256,7 @@ public class MineActivity extends UiActivity {
         int n;
         while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
         is.close();
-        return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        return new String(bos.toByteArray(), java.nio.charset.Charset.forName("UTF-8"));
     }
 
     private void hint(String text) {

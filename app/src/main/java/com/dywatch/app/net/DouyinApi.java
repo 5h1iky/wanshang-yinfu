@@ -54,14 +54,22 @@ public final class DouyinApi {
 
     public DouyinApi(Signer signer) {
         this.signer = signer;
-        this.client = new OkHttpClient.Builder()
+        OkHttpClient.Builder b = new OkHttpClient.Builder()
                 .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                 .followRedirects(true)
                 // Cookie 出站守卫（代码审计 M2）：注册成**网络拦截器**才能逐跳生效——
                 // 手工塞的 Cookie 头会被 OkHttp 在 302 时原样复制到站外主机上。
-                .addNetworkInterceptor(new CookieHostGuard())
-                .build();
+                .addNetworkInterceptor(new CookieHostGuard());
+        // 老系统（API<21）：换成自带 CA 的 TrustManager —— 否则 4.4 上握手直接
+        // "Trust anchor for certification path not found"（见 TlsCompat）。
+        // API 21+ 这里返回 null，保持系统默认。
+        if (com.dywatch.app.util.TlsCompat.sslContext() != null
+                && com.dywatch.app.util.TlsCompat.trustManager() != null) {
+            b.sslSocketFactory(com.dywatch.app.util.TlsCompat.sslContext().getSocketFactory(),
+                    com.dywatch.app.util.TlsCompat.trustManager());
+        }
+        this.client = b.build();
     }
 
     /** M0.5① 实测：live.douyin.com 一跳即发 ttwid（www 两跳老办法已失效） */

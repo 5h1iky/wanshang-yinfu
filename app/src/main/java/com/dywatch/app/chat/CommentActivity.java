@@ -381,7 +381,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         int n;
         while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
         is.close();
-        return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        return new String(bos.toByteArray(), java.nio.charset.Charset.forName("UTF-8"));
     }
 
     /** 翻页：让引擎把评论区滚一页，新渲染出来的那批经 onCommentsMore 追加回来 */
