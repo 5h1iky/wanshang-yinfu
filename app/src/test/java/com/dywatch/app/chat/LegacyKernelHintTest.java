@@ -125,6 +125,67 @@ public class LegacyKernelHintTest {
         assertFalse(LegacyKernel.isKernelDeadEnd(modern, 99));
     }
 
+    @Test
+    public void 决策函数_预算内一律给加载态() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        LegacyKernel.Hint h = LegacyKernel.decideHint(old, true, true, 3, true, 45_000L);
+        assertTrue("预算内必须是加载态", h.loading);
+        assertTrue("应带秒数：" + h.text, h.text.contains("45s"));
+        assertTrue("应说在拉取：" + h.text, h.text.contains("正在拉取"));
+        assertNoNegativeWords(h.text);
+    }
+
+    @Test
+    public void 决策函数_补丁生效时预算后给卡点而不是内核过旧() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        // 补丁生效 → isKernelDeadEnd 恒 false → 走 stuckHint（"卡在…"），不再甩锅内核
+        LegacyKernel.Hint h = LegacyKernel.decideHint(old, true, true, 9, true, 190_000L);
+        assertFalse("预算耗尽后应停下转圈", h.loading);
+        assertFalse("不许说无法加载：" + h.text, h.text.contains("无法加载"));
+        assertTrue("应说明卡在哪一步：" + h.text, h.text.contains("卡在"));
+    }
+
+    @Test
+    public void 决策函数_补丁未生效且内核过旧时只说慢() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        LegacyKernel.Hint h = LegacyKernel.decideHint(old, true, true, 8, false, 190_000L);
+        assertFalse(h.loading);
+        assertTrue("应走 kernelHint 的慢口径：" + h.text, h.text.contains("加载很慢"));
+        assertTrue("应带已等秒数：" + h.text, h.text.contains("190s"));
+        assertFalse("不许说无法加载：" + h.text, h.text.contains("无法加载"));
+    }
+
+    @Test
+    public void 决策函数_未登录时的终态先说登录态() {
+        LegacyKernel.Kernel modern = new LegacyKernel.Kernel(108, "108.0.5359.128", "com.google.android.webview");
+        LegacyKernel.Hint h = LegacyKernel.decideHint(modern, false, false, 1, false, 190_000L);
+        assertFalse(h.loading);
+        assertTrue("应先说登录态：" + h.text, h.text.contains("登录态"));
+    }
+
+    @Test
+    public void 断网时先说网络而不是骗用户去重登() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        // 真机现场：断网 180s 后给了「卡在登录态，请回主屏重新登录」——用户明明登录着，只是没网
+        LegacyKernel.Hint term = LegacyKernel.decideHint(old, false, false, 9, true, 190_000L, false);
+        assertFalse(term.loading);
+        assertTrue("应报网络：" + term.text, term.text.contains("网络未连接"));
+        assertFalse("不该引导重新登录：" + term.text, term.text.contains("重新登录"));
+
+        LegacyKernel.Hint load = LegacyKernel.decideHint(old, false, false, 9, true, 45_000L, false);
+        assertTrue("预算内仍是加载态", load.loading);
+        assertTrue("应说在等网络：" + load.text, load.text.contains("等待网络"));
+        assertTrue("仍带秒数：" + load.text, load.text.contains("45s"));
+    }
+
+    @Test
+    public void 有网时行为与原来一致() {
+        LegacyKernel.Kernel modern = new LegacyKernel.Kernel(108, "108.0.5359.128", "com.google.android.webview");
+        LegacyKernel.Hint h = LegacyKernel.decideHint(modern, true, true, 1, false, 45_000L, true);
+        assertTrue(h.loading);
+        assertTrue("有网时应说在拉取：" + h.text, h.text.contains("正在拉取"));
+    }
+
     private static void assertNoNegativeWords(String s) {
         for (String w : NEGATIVE_WORDS) {
             assertFalse("加载中的文案不该出现「" + w + "」：" + s, s.contains(w));

@@ -173,8 +173,7 @@ public final class LegacyKernel {
     }
 
     /**
-     * 加载中的进度文案（纯函数）。
-     * ⚠️ 单测锁死：这些文案**不许**出现"失败 / 异常 / 过旧 / 不可用 / 卡在"这类否定词——
+     * 加载中的进度文案（纯函数）。     * ⚠️ 单测锁死：这些文案**不许**出现"失败 / 异常 / 过旧 / 不可用 / 卡在"这类否定词——
      * 它们只在预算耗尽后的终态里出现。
      *
      * @param engineReady 引擎是否已就绪（false = 通道还在启动）
@@ -206,5 +205,65 @@ public final class LegacyKernel {
             base = base + "已等 " + (elapsedMs / 1000) + "s";
         }
         return base;
+    }
+
+    /**
+     * 「现在该显示什么」的统一决策（纯函数）。
+     *
+     * 为什么要有它：这套判断原先写在 {@code ConvListActivity.render()} 里，只在引擎回调时跑；
+     * 真机实测（2026-10-25，断网进聊天页）发现——**没有回调恰恰就是卡住的形态**，
+     * 于是界面停在「正在拉取会话…已等 45s」再也不动，180 秒的终态也永远不会出现。
+     * 现在渲染回调与 5 秒心跳都走这一个函数，保证两处口径一致、也方便单测。
+     *
+     * @param retries 已重试次数（不含本次）
+     * @return 该显示"加载中"还是"终态"，以及对应文案
+     */
+    public static Hint decideHint(Kernel k, boolean authed, boolean pageOk, int retries,
+                                  boolean patched, long waitedMs) {
+        return decideHint(k, authed, pageOk, retries, patched, waitedMs, true);
+    }
+
+    /**
+     * 同上 + 网络可用性（2026-10-25 真机第二次修正）。
+     *
+     * 现场：**断开网络**进聊天页，180 秒后终态给的是「卡在「登录态」：未确认已登录，请回主屏重新登录」。
+     * 但用户明明登录着 —— 只是没网，引擎当然确认不了登录态。这条提示会把用户骗去重新扫码（还没网，必然失败）。
+     * 所以网络不通时先报网络，且说清"连上后会自己继续"，不引导任何重登动作。
+     *
+     * @param networkUp 当前是否有可用网络（调用方用 ConnectivityManager 判）
+     */
+    public static Hint decideHint(Kernel k, boolean authed, boolean pageOk, int retries,
+                                  boolean patched, long waitedMs, boolean networkUp) {
+        int attempts = Math.max(1, retries + 1);
+        if (stillLoading(waitedMs)) {
+            if (!networkUp) {
+                return new Hint(true, "正在等待网络…（已等 " + (waitedMs / 1000) + "s）");
+            }
+            return new Hint(true, progressHint(pageOk, attempts, waitedMs));
+        }
+        if (!networkUp) {
+            return new Hint(false, "网络未连接：连上网络后会自动继续（已等 "
+                    + (waitedMs / 1000) + "s）");
+        }
+        if (isKernelDeadEnd(k, retries, patched)) {
+            return new Hint(false, kernelHint(k, waitedMs));
+        }
+        return new Hint(false, stuckHint(k, authed, pageOk, attempts, patched));
+    }
+
+    /** {@link #decideHint} 的结果：loading=true 时应当继续转圈并显示进度 */
+    public static final class Hint {
+        public final boolean loading;
+        public final String text;
+
+        Hint(boolean loading, String text) {
+            this.loading = loading;
+            this.text = text == null ? "" : text;
+        }
+
+        @Override
+        public String toString() {
+            return (loading ? "loading: " : "terminal: ") + text;
+        }
     }
 }

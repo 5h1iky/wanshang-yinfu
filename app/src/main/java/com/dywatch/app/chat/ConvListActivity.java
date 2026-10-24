@@ -35,6 +35,58 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     private long mOpenedAt;
     /** 空列表自动重试的上限（之后不再加新请求，但"加载中"的提示与转圈继续） */
     private static final int MAX_EMPTY_RETRIES = 8;
+    /** 进度刷新间隔（见 mTick 的注释） */
+    private static final long TICK_MS = 5000L;
+    /** 是否已经有会话内容（有内容就不再刷"正在拉取"） */
+    private boolean mHasContent;
+    /** 终态提示是否已给过（避免每 5 秒重复写一遍同一句） */
+    private boolean mTerminalShown;
+    /** 上一次心跳时是否断网：用于"网络恢复 → 重启首屏预算"（否则文案承诺的"自动继续"是空话） */
+    private boolean mWasOffline;
+
+    /**
+     * 进度心跳（2026-10-25 真机发现）。
+     *
+     * 现场：断开网络进聊天页，界面停在「正在拉取会话…（…已重试 10 次）**已等 45s**」再也不动。
+     * 原因：提示只在引擎回调里刷新，而"没有回调"恰恰就是卡住的形态——
+     * 于是"已等 Ns"定格、180s 的终态也永远不会出现（用户看到的是一个冻结的界面）。
+     *
+     * 修法：每 5 秒自己刷一次。预算内继续报进度（秒数在动 = 程序还活着），
+     * 预算耗尽且仍无内容 → 给**一次**终态提示（只说慢/卡在哪一步，不下"无法加载"的结论）。
+     */
+    private final Runnable mTick = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing()) return;
+            if (mHint == null) return;
+            // 网络恢复（上一次心跳还断着）→ 重启首屏预算、清掉终态，让"连上会自动继续"成为真话
+            boolean up = networkUp();
+            if (!up) {
+                mWasOffline = true;
+            } else if (mWasOffline) {
+                mWasOffline = false;
+                mTerminalShown = false;
+                mOpenedAt = System.currentTimeMillis();
+                AppLog.i("chat", "网络恢复 → 重启首屏预算 + 重载私信页");
+                // ⚠️ 只重启预算不够：断网时 WebView 停在 Chromium 报错页，它不会自己重试
+                if (mEngine != null) mEngine.reloadIm();
+            }
+            long waited = System.currentTimeMillis() - mOpenedAt;
+            if (!mHasContent && !mTerminalShown) {
+                boolean patched = mEngine != null && mEngine.isPatchApplied();
+                LegacyKernel.Hint h = LegacyKernel.decideHint(
+                        kernel(), mAuthed, mPageReady, mEmptyRetries, patched, waited, up);
+                if (h.loading) {
+                    loadingHint(h.text);
+                } else {
+                    mTerminalShown = true;
+                    terminalHint(h.text);
+                    AppLog.i("chat", "首屏预算耗尽（已等 " + (waited / 1000) + "s，无内容）→ 终态: " + h.text);
+                }
+            }
+            mHint.postDelayed(this, TICK_MS);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,6 +125,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
             setLoading(true);
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再拉）
             mEngine.ensureImHome();
+            // 进度心跳：只在"有登录态、在等数据"时才有意义
+            mHint.postDelayed(mTick, TICK_MS);
         } else {
             mEngine = null;
             hint("请先登录（主屏→登录→扫码）");
@@ -81,8 +135,33 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         AppLog.i("chat", "会话列表页打开");
     }
 
-    /** 本机网页内核（用于判定私信是否可能因内核过旧而不可用） */
-    private LegacyKernel.Kernel kernel() {
+    /**
+     * 当前有没有可用网络（2026-10-25）。
+     *
+     * 用来避免一个真机上抓到的误判：断网时引擎确认不了登录态，终态会说"未登录，请回主屏重新登录"，
+     * 把用户骗去重新扫码（还没网，必然失败）。网络不通时先报网络。
+     * 判不出来时**按有网处理**（宁可多等，也不要误报"没网"）。
+     */
+    private boolean networkUp() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            if (android.os.Build.VERSION.SDK_INT >= 23) {
+                android.net.Network n = cm.getActiveNetwork();
+                if (n == null) return false;
+                android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                return caps != null && caps.hasCapability(
+                        android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            }
+            android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
+            return ni != null && ni.isConnected();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** 本机网页内核（用于判定私信是否可能因内核过旧而不可用） */    private LegacyKernel.Kernel kernel() {
         try {
             if (android.os.Build.VERSION.SDK_INT < 26) return null;
             android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage();
@@ -150,24 +229,30 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     private void render(List<Conversation> list) {
         if (list.isEmpty()) {
+            mHasContent = false;
+            if (mTerminalShown) {
+                // 终态已经给过（心跳那一路），引擎再来空结果也不用重复刷屏
+                return;
+            }
             // ⚠️ 2026-10-01 重做（用户反馈："三个提示里两个在否定加载成功"）：
             //    老逻辑只要重试 2 次（≈5 秒）就敢下"内核过旧 / 脚本解析失败"的结论，
             //    而真机冷启动要 35~40 秒才拿到数据 → 提示先否定、几秒后又加载成功，自打脸。
             //    现在分两段：**首屏预算内只报进度（且一直转圈）**，预算耗尽才给"卡在哪一步"的终态。
             long waited = System.currentTimeMillis() - mOpenedAt;
-            int attempts = mEmptyRetries + 1;          // 本次是第几次尝试（渲染发生在自增之前）
             LegacyKernel.Kernel k = kernel();
             boolean patched = mEngine != null && mEngine.isPatchApplied();
-            if (LegacyKernel.stillLoading(waited)) {
-                loadingHint(LegacyKernel.progressHint(mPageReady, attempts, waited));
-            } else if (LegacyKernel.isKernelDeadEnd(k, mEmptyRetries, patched)) {
-                // 补丁未生效 + 内核确实过旧：只说"慢"，不再说"无法加载"
-                terminalHint(LegacyKernel.kernelHint(k, waited));
-                AppLog.i("chat", "私信很慢（内核偏旧，补丁未生效，已等 " + (waited / 1000) + "s）: "
-                        + LegacyKernel.kernelHint(k));
-                return;
+            LegacyKernel.Hint h = LegacyKernel.decideHint(
+                    k, mAuthed, mPageReady, mEmptyRetries, patched, waited, networkUp());
+            if (h.loading) {
+                loadingHint(h.text);
             } else {
-                terminalHint(LegacyKernel.stuckHint(k, mAuthed, mPageReady, attempts, patched));
+                mTerminalShown = true;
+                terminalHint(h.text);
+                if (LegacyKernel.isKernelDeadEnd(k, mEmptyRetries, patched)) {
+                    // 补丁未生效 + 内核确实过旧：只说"慢"，不再说"无法加载"，也不再排重试
+                    AppLog.i("chat", "私信很慢（内核偏旧，补丁未生效，已等 " + (waited / 1000) + "s）: " + h.text);
+                    return;
+                }
             }
             // 预算内继续自动重试；到底了（MAX_EMPTY_RETRIES）就不再加新请求，
             // 但页面仍由 bridge 自己的轮询兜着（真机上数据就是这么在 30~40s 到的）。
@@ -183,6 +268,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
             return;
         }
         mEmptyRetries = 0;
+        mHasContent = true;
+        mTerminalShown = false;
         setLoading(false);
         // 计数折进页名，省掉常驻提示行——手表那点高度要留给会话本身
         setPageTitle("会话 " + list.size());
@@ -278,6 +365,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     @Override
     protected void onDestroy() {
+        // 停掉进度心跳，别让定时器抱着已销毁的页面（会泄漏整页）
+        if (mHint != null) mHint.removeCallbacks(mTick);
         super.onDestroy();
         // 引擎是单例，不随页面销毁；仅解除监听
         if (mEngine != null) mEngine.setListenerDetached(this);

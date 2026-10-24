@@ -479,6 +479,25 @@ public class ChatEngine {
         if (mListener == l) mListener = null;
     }
 
+    /**
+     * 重载私信页（2026-10-25，真机发现）。
+     *
+     * 现场：断网时 WebView 停在 Chromium 的 `ERR_INTERNET_DISCONNECTED` 报错页；网络恢复后
+     * **这张报错页不会自己重试**，所以"预算重启 + 继续轮询"全是空转，用户看到的还是那张错误页。
+     * 必须重新 loadUrl 才会真正重新请求。
+     */
+    public void reloadIm() {
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (mWebView == null) return;
+                AppLog.i("engine", "重载私信页（网络恢复）");
+                mReady = false;
+                mWebView.loadUrl(MESSAGES_URL);
+            }
+        });
+    }
+
     // ---- 引擎宿主窗口（真视口）----
     // 背景：引擎 WebView 从来没用加进窗口树 → 0×0 视口（实测 innerWidth/innerHeight/clientWidth
     // 全为 0）。很多页面行为因此不对：推荐流“可见才加载”直接不发请求、沉浸式规则把
