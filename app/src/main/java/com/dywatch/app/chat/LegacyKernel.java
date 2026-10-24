@@ -66,14 +66,25 @@ public final class LegacyKernel {
 
     /**
      * 内核不足时的说明文案（诚实降级，方案 D）。
-     * 不说"网络错误"，直接说清是本机内核太老，并给出版本号差距。
+     *
+     * ⚠️ 2026-10-25 改口径：旧文案写"抖音私信页**无法加载**"，真机上被打脸——
+     *    语法补丁（方案 A）生效后 83 也能加载，只是 **pcim 模块要 2.5~3 分钟才开始下载**，
+     *    实测冷启动 165s 成功、第二次 293s+ 才挂死。把"慢"说成"不能"，用户会直接放弃。
+     *    现在一律只说"慢"，并给出已等时长与可选动作。
      */
     public static String kernelHint(Kernel k) {
-        if (k == null) return "无法确认网页内核版本，私信可能不可用";
-        if (!k.known()) return "网页内核版本未知（" + k.raw + "），私信可能不可用";
+        if (k == null) return "无法确认网页内核版本，私信页可能很慢；可继续等待或稍后再来";
+        if (!k.known()) return "网页内核版本未知（" + k.raw + "），私信页可能很慢；可继续等待或稍后再来";
         if (k.supportsIm()) return "";   // 够用 → 不打扰
-        return "本机网页内核过旧（Chromium " + k.major + "，需 " + MIN_CHROME_FOR_IM
-                + "+），抖音私信页无法加载";
+        return "本机网页内核偏旧（Chromium " + k.major + "），私信页加载很慢；可继续等待或稍后再来";
+    }
+
+    /** 同上，但把"已等多久"说清楚（终态文案，elapsedMs <= 0 时不带秒数） */
+    public static String kernelHint(Kernel k, long elapsedMs) {
+        String base = kernelHint(k);
+        if (base.isEmpty() || elapsedMs <= 0) return base;
+        return base.replace("；可继续等待或稍后再来",
+                "（已等 " + (elapsedMs / 1000) + "s）；可继续等待或稍后再来");
     }
 
     /**
@@ -123,8 +134,18 @@ public final class LegacyKernel {
      *
      * ⚠️ 2026-10-01：调用方必须**先过首屏预算**（{@link #stillLoading}）再问这个，
      *    否则会在"只是慢"的时候给出"没救"的结论（用户已反馈过这个误导）。
+     *
+     * ⚠️ 2026-10-25：**语法补丁生效时永远不算死路**（patched=true → false）。
+     *    补丁把 SyntaxError 打到 0，内核不再是卡点；剩下的只是慢（pcim 模块下载晚）。
+     *    旧代码在补丁生效时仍可能走到这里，直接给"内核过旧无法加载"，与事实相反。
      */
     public static boolean isKernelDeadEnd(Kernel k, int retries) {
+        return isKernelDeadEnd(k, retries, false);
+    }
+
+    /** 补丁感知版：补丁已生效 → 内核不再背锅（恒 false） */
+    public static boolean isKernelDeadEnd(Kernel k, int retries, boolean patched) {
+        if (patched) return false;
         return k != null && k.known() && !k.supportsIm() && retries >= 2;
     }
 
@@ -138,11 +159,13 @@ public final class LegacyKernel {
      * 而老代码在 ~5 秒时就敢说"本机内核过旧、脚本解析失败"，紧接着数据又出来了 ——
      * 三条提示里两条在否定加载成功，直接打击等待意愿。
      *
-     * ⚠️ 30 秒、60 秒都不够：实测冷启动最慢一次 **61 秒**才拿到数据（30s 那版出现过
-     *    "先说卡住、两秒后加载好"；60s 那版数据正好在第 61 秒到，仍是擦边）。
-     *    现在设 90 秒（≈ 观测最慢值的 1.5 倍）：预算内只显示"正在……"并保持转圈。
+     * ⚠️ 30 秒、60 秒、90 秒都不够：
+     *    2026-10-01 冷启动最慢 61s（90s 那版留 1.5 倍余量）；
+     *    **2026-10-25 手表两次冷启动实测**：①165s 成功（会话 7 条）；②293s+ 挂死。
+     *    根因是**抖音 pcim 微前端包要到 2.5~3 分钟才开始下载**，慢在前端资源而不是本机。
+     *    所以预算放到 **180 秒**（覆盖 165s 那次成功），且预算耗尽后也**只说慢、不判死**。
      */
-    public static final long FIRST_LOAD_BUDGET_MS = 90_000L;
+    public static final long FIRST_LOAD_BUDGET_MS = 180_000L;
 
     /** 还在首屏预算内 = 加载中（调用方据此决定"报进度"还是"下结论"） */
     public static boolean stillLoading(long elapsedMs) {
@@ -158,13 +181,30 @@ public final class LegacyKernel {
      * @param attempts    已尝试拉取次数（含首次）
      */
     public static String progressHint(boolean engineReady, int attempts) {
+        return progressHint(engineReady, attempts, -1);
+    }
+
+    /**
+     * 同上 + 带上"已等 N 秒"（2026-10-25 新增）。
+     *
+     * 为什么要秒数：手表上这条提示要挂 2~3 分钟，只写"正在拉取会话…"用户会以为界面卡死、
+     * 反复退出重进（每次重进都会重新开 WebView，反而更慢）。数字在动 = 程序还活着。
+     *
+     * @param elapsedMs 已等待毫秒；< 0 表示不带秒数
+     */
+    public static String progressHint(boolean engineReady, int attempts, long elapsedMs) {
+        String base;
         if (!engineReady) {
-            return "正在启动通道…（首次打开较慢，请稍等）";
+            base = "正在启动通道…（首次打开较慢，请稍等）";
+        } else if (attempts <= 1) {
+            base = "正在拉取会话…";
+        } else {
+            // 说"在等"而不是"卡住"：抖音私信页本身就要几十秒到几分钟，中途下结论必被打脸
+            base = "正在拉取会话…（抖音私信页较慢，已重试 " + attempts + " 次）";
         }
-        if (attempts <= 1) {
-            return "正在拉取会话…";
+        if (elapsedMs >= 1000) {
+            base = base + "已等 " + (elapsedMs / 1000) + "s";
         }
-        // 说"在等"而不是"卡住"：抖音私信页本身就要几十秒，中途下结论必被打脸
-        return "正在拉取会话…（抖音私信页较慢，已重试 " + attempts + " 次）";
+        return base;
     }
 }

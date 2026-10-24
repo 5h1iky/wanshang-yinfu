@@ -159,10 +159,11 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
             LegacyKernel.Kernel k = kernel();
             boolean patched = mEngine != null && mEngine.isPatchApplied();
             if (LegacyKernel.stillLoading(waited)) {
-                loadingHint(LegacyKernel.progressHint(mPageReady, attempts));
-            } else if (!patched && LegacyKernel.isKernelDeadEnd(k, mEmptyRetries)) {
-                terminalHint(LegacyKernel.kernelHint(k));
-                AppLog.i("chat", "私信不可用（内核过旧，已等 " + (waited / 1000) + "s）: "
+                loadingHint(LegacyKernel.progressHint(mPageReady, attempts, waited));
+            } else if (LegacyKernel.isKernelDeadEnd(k, mEmptyRetries, patched)) {
+                // 补丁未生效 + 内核确实过旧：只说"慢"，不再说"无法加载"
+                terminalHint(LegacyKernel.kernelHint(k, waited));
+                AppLog.i("chat", "私信很慢（内核偏旧，补丁未生效，已等 " + (waited / 1000) + "s）: "
                         + LegacyKernel.kernelHint(k));
                 return;
             } else {
@@ -215,7 +216,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
      */
     @Override
     public void onEngineWaiting(String why) {
-        loadingHint(LegacyKernel.progressHint(false, mEmptyRetries + 1));
+        loadingHint(LegacyKernel.progressHint(false, mEmptyRetries + 1,
+                System.currentTimeMillis() - mOpenedAt));
     }
 
     @Override
@@ -261,7 +263,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         AppLog.i("chat", "会话列表异常: " + err);
         long waited = System.currentTimeMillis() - mOpenedAt;
         if (LegacyKernel.stillLoading(waited)) {
-            loadingHint(LegacyKernel.progressHint(mPageReady, mEmptyRetries + 1));
+            loadingHint(LegacyKernel.progressHint(mPageReady, mEmptyRetries + 1, waited));
         } else {
             terminalHint("通道异常: " + err);
         }

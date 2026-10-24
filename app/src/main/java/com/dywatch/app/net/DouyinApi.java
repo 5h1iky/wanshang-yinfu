@@ -6,6 +6,7 @@ package com.dywatch.app.net;
 
 import com.dywatch.app.feed.FeedVideo;
 import com.dywatch.app.sign.Signer;
+import com.dywatch.app.util.AppLog;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -102,17 +103,92 @@ public final class DouyinApi {
                 .header("Cookie", fullCookie())
                 .build();
         try (Response resp = client.newCall(req).execute()) {
-            if (resp.body() == null) throw new IOException("空响应");
+            if (resp.body() == null) throw new IOException("喜欢列表暂不可用（空响应），稍后再试");
+            int httpCode = resp.code();
             String body = resp.body().string();
+            // ⚠️ 2026-10-25：上游 Argus 收紧后这里会回 **HTTP 403 + 纯文本**
+            //    `Blocked by ArgusSecurityPlugin Uifid Not Found`。
+            //    旧代码直接把这段喂给 Gson → 界面弹 "MalformedJsonException: ..." 英文异常。
+            //    现在先把响应原文打进日志（下次定案有据），再按类型翻成人话。
+            AppLog.i("api", "favorite http=" + httpCode + " len=" + body.length()
+                    + " head=" + headOf(body, 200));
+            String b = body.trim();
+            if (!b.startsWith("{") && !b.startsWith("[")) {
+                throw new IOException(favoriteFailureMessage(httpCode, body));
+            }
             List<FeedVideo> list = parseFeed(body);
             if (list.isEmpty()) {
                 // 空也可能是真没喜欢过；用 status_code 区分"接口没通"和"确实没数据"
-                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(body);
+                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(b);
                 int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
-                if (code != 0) throw new IOException("喜欢列表 status=" + code);
+                if (code != 0) {
+                    AppLog.i("api", "favorite status=" + code + " body=" + headOf(b, 300));
+                    throw new IOException(favoriteFailureMessage(httpCode, body) + "（status=" + code + "）");
+                }
             }
             return list;
         }
+    }
+
+    /** 取前 n 个字符（日志用；换行压成空格，避免 logcat 一行被截断后看不出结构） */
+    static String headOf(String s, int n) {
+        if (s == null) return "";
+        String one = s.replace('\n', ' ').replace('\r', ' ').trim();
+        return one.length() <= n ? one : one.substring(0, n) + "…";
+    }
+
+    /**
+     * 「喜欢」失败原因翻译（纯函数，可 JVM 单测）。
+     *
+     * 实测（2026-10-25）：`/aweme/v1/web/aweme/favorite/` 回 403 + 纯文本
+     * `Blocked by ArgusSecurityPlugin Uifid Not Found`；2026-09-26 时还是 200 正常，
+     * 属上游风控收紧，纯 a_bogus 链不够 → 本版只做诚实降级，票据链（UIFID/webSign）列 0.8.5。
+     */
+    static String favoriteFailureMessage(int httpCode, String body) {
+        String b = body == null ? "" : body;
+        if (b.contains("ArgusSecurityPlugin") || b.contains("Uifid") || httpCode == 403) {
+            return "喜欢列表暂不可用（接口被风控拦截），稍后再试";
+        }
+        if (!b.trim().startsWith("{") && !b.trim().startsWith("[")) {
+            return "喜欢列表暂不可用（接口返回异常），稍后再试";
+        }
+        if (httpCode != 200) {
+            return "喜欢列表暂不可用（HTTP " + httpCode + "），稍后再试";
+        }
+        return "喜欢列表暂不可用，稍后再试";
+    }
+
+    /**
+     * 把网络/接口异常翻成人话（纯函数，可 JVM 单测）。
+     * 语音：已经是我们自己抛的中文就直接用；否则按关键字归类，**绝不把英文类名甩给用户**。
+     */
+    public static String friendlyMessage(Throwable t) {
+        if (t == null) return "加载失败，请稍后重试";
+        String m = t.getMessage();
+        if (m != null && !m.isEmpty() && hasChinese(m)) return m;
+        String all = (m == null ? "" : m) + " " + t.getClass().getSimpleName();
+        if (all.contains("timeout") || all.contains("Timeout") || all.contains("timed out")) {
+            return "网络超时，请稍后重试";
+        }
+        if (all.contains("UnknownHost") || all.contains("Unable to resolve host")) {
+            return "网络不可用，请检查连接后重试";
+        }
+        if (all.contains("MalformedJson") || all.contains("JsonSyntax") || all.contains("JSON")) {
+            return "接口返回格式异常，请稍后重试";
+        }
+        if (all.contains("Socket") || all.contains("Connect") || all.contains("IOException")) {
+            return "网络异常，请稍后重试";
+        }
+        return "加载失败，请稍后重试";
+    }
+
+    /** 是否含中日韩统一表意文字（用来判断这条 message 是不是我们自己的中文文案） */
+    static boolean hasChinese(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 0x4E00 && c <= 0x9FFF) return true;
+        }
+        return false;
     }
 
     // ---- 通用 query 构建 ----

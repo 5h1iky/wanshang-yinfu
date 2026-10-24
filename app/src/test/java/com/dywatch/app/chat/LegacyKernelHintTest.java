@@ -31,10 +31,56 @@ public class LegacyKernelHintTest {
     }
 
     @Test
-    public void 首屏预算是九十秒() {
-        // 产品口径：真机冷启动最慢观测 61s，取 ≈1.5 倍余量。
-        // 历史：30s 那版又出现"先说卡住、两秒后加载好"；60s 那版数据正好在第 61 秒到，仍擦边。
-        assertEquals(90_000L, LegacyKernel.FIRST_LOAD_BUDGET_MS);
+    public void 首屏预算是一百八十秒() {
+        // 产品口径（2026-10-25 改）：手表两次冷启动实测 —— ①165s 成功（会话 7 条）；
+        // ②293s+ 挂死。根因是抖音 pcim 微前端包要到 2.5~3 分钟才开始下载。
+        // 90s 那版一到点就弹"内核过旧、无法加载"，与事实相反 → 放到 180s。
+        assertEquals(180_000L, LegacyKernel.FIRST_LOAD_BUDGET_MS);
+        assertTrue("165s 那次成功必须落在预算内", LegacyKernel.stillLoading(165_000L));
+    }
+
+    @Test
+    public void 补丁生效时永远不算内核死路() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        // 补丁没生效 → 老口径仍然成立（重试够了才判死）
+        assertTrue(LegacyKernel.isKernelDeadEnd(old, 2, false));
+        // 补丁生效 → 内核不背锅（SyntaxError 已打到 0，剩下的只是慢）
+        assertFalse(LegacyKernel.isKernelDeadEnd(old, 999, true));
+    }
+
+    @Test
+    public void 内核提示只说慢不说无法加载() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        for (String s : new String[]{
+                LegacyKernel.kernelHint(old),
+                LegacyKernel.kernelHint(old, 165_000L),
+                LegacyKernel.kernelHint(null),
+                LegacyKernel.kernelHint(new LegacyKernel.Kernel(-1, "", ""))}) {
+            assertFalse("终态提示不许下'无法加载/不可用'的结论：" + s,
+                    s.contains("无法加载") || s.contains("不可用"));
+            assertTrue("应给出可选动作：" + s, s.contains("继续等待"));
+        }
+    }
+
+    @Test
+    public void 终态提示带上已等秒数() {
+        LegacyKernel.Kernel old = new LegacyKernel.Kernel(83, "83.0.4103.120", "com.android.webview");
+        String s = LegacyKernel.kernelHint(old, 165_000L);
+        assertTrue("应带上已等秒数：" + s, s.contains("165s"));
+        // elapsed <= 0 时不带秒数（老调用点不必改）
+        assertFalse(LegacyKernel.kernelHint(old, 0).contains("已等"));
+    }
+
+    @Test
+    public void 进度文案带上已等秒数且不含否定词() {
+        String s = LegacyKernel.progressHint(true, 3, 42_000L);
+        assertTrue("应带上已等秒数：" + s, s.contains("42s"));
+        assertTrue("仍应说明在拉取：" + s, s.contains("正在拉取会话"));
+        assertNoNegativeWords(s);
+        // 不足 1 秒不显示（避免首帧出现"已等 0s"）
+        assertFalse(LegacyKernel.progressHint(true, 1, 800L).contains("已等"));
+        // 老签名不带秒数，行为不变
+        assertFalse(LegacyKernel.progressHint(true, 1).contains("已等"));
     }
 
     @Test

@@ -185,14 +185,30 @@
       ChatBridge.__doVideoAction('sendComment', awemeId, text, reqId);
     },
 
-    // 状态指纹：类名 token 集合 + 计数文本。
-    // 类名是构建期哈希（实测已赞标 = 多出一段如 Fw5w6T_O，整页重载后服务端仍给同一标记），
-    // 故不硬编类名、只比差异；用排序后的 token 集合，免因 React 重渲染重排类名而误判。
+    // 状态指纹：data-e2e-state（2026-10-24 CDP 实测定案）+ 类名 token 集合 + 计数文本。
+    //
+    // ⚠️ 为什么必须加 data-e2e-state：收藏按钮翻转时 **className 一个字节都不变**
+    //    （只有 data-e2e-state 从 video-player-no-collect → video-player-is-collected），
+    //    只比 className+文本的旧判据必然判"没生效" → 重试 → 把刚收藏的又点回去（已复现）。
+    //    点赞按钮恰好顺带多一段类名（如 Fw5w6T_O），所以旧判据在点赞上"看起来能用"。
+    __stateOf: function (el) {
+      if (!el || typeof el.getAttribute !== 'function') return '';
+      return el.getAttribute('data-e2e-state') || '';
+    },
+
+    // want(true/false) → 目标 state 值；不认识的动作返回 ''（退回旧的"有变化即成功"判据）
+    __wantState: function (kind, want) {
+      if (kind === 'like') return want ? 'video-player-is-digged' : 'video-player-no-digged';
+      if (kind === 'collect') return want ? 'video-player-is-collected' : 'video-player-no-collect';
+      return '';
+    },
+
     __trait: function (el) {
       if (!el) return null;
       var raw = el.className && el.className.baseVal !== undefined ? el.className.baseVal : (el.className || '');
       var tokens = String(raw).split(/\s+/).filter(function (s) { return s.length > 0; });
       return {
+        state: this.__stateOf(el),
         cls: tokens.sort().join(' '),
         text: (el.textContent || '').replace(/\s+/g, ' ').trim()
       };
@@ -214,10 +230,18 @@
       return false;
     },
 
-    // 点击 + 以状态指纹变化判定是否生效（先等就绪门，再点，再宽窗口复查）
+    __btn: function (e2e) { return document.querySelector('[data-e2e="' + e2e + '"]'); },
+
+    // 指纹是否有变化（三通道取或，只增不删，老页面/老设备兼容）
+    __diff: function (a, b) {
+      if (!a || !b) return false;
+      return a.state !== b.state || a.cls !== b.cls || a.text !== b.text;
+    },
+
+    // 点击 + 以状态指纹变化判定是否生效（先等就绪门 → 幂等短路 → 点 → 宽窗口复查）
     __clickAndJudge: function (kind, e2e, want, tries) {
       var self = this;
-      var btn = document.querySelector('[data-e2e="' + e2e + '"]');
+      var btn = this.__btn(e2e);
       if (!btn) {
         if ((tries || 0) < 20) {
           return wait(400).then(function () { return self.__clickAndJudge(kind, e2e, want, (tries || 0) + 1); });
@@ -231,28 +255,53 @@
         }
         return Promise.resolve({ type: 'action', action: kind, ok: false, detail: '按钮事件始终未绑定（组件未就绪）' });
       }
+      var wantState = this.__wantState(kind, want);
       var before = this.__trait(btn);
       var attempt = tries || 0;
+
+      // 幂等短路（2026-10-24 新增）：已经是目标态就**不点**。
+      // 现场故障就是"重试把刚点好的赞/收藏又点回去"，根因之一是点击前从不看当前状态。
+      if (wantState && before.state === wantState) {
+        return Promise.resolve({
+          type: 'action', action: kind, ok: true, want: want, changed: false, already: true,
+          attempts: 0, count: before.text, detail: '已是目标状态，跳过点击'
+        });
+      }
+
       fireClick(btn);
       return this.__waitChange(e2e, before, 14).then(function (now) {
-        var changed = !!now && (now.cls !== before.cls || now.text !== before.text);
-        if (changed) {
+        var hit = wantState ? (!!now && now.state === wantState) : self.__diff(before, now);
+        if (hit) {
           return {
-            type: 'action', action: kind, ok: true, want: want, changed: true, attempts: attempt + 1,
-            count: before.text + '→' + now.text,
+            type: 'action', action: kind, ok: true, want: want, changed: self.__diff(before, now),
+            attempts: attempt + 1,
+            count: before.text + '→' + (now ? now.text : '?'),
             detail: '状态已翻转'
           };
         }
         if (attempt < 3) {
-          return wait(1200).then(function () { return self.__clickAndJudge(kind, e2e, want, attempt + 1); });
+          return wait(1200).then(function () {
+            // 重试前**重读**：上一次点击可能已经生效（只是服务端回填慢），别再点一次
+            var cur = self.__trait(self.__btn(e2e));
+            if (wantState && cur && cur.state === wantState) {
+              return {
+                type: 'action', action: kind, ok: true, want: want, changed: true,
+                attempts: attempt + 1, count: before.text + '→' + cur.text,
+                detail: '重试前复查已生效（避免二次点击）'
+              };
+            }
+            return self.__clickAndJudge(kind, e2e, want, attempt + 1);
+          });
         }
-        // 最后复查一次（宽窗口）：真机出现过"窗口后才发现服务端已记账"的情况
-        return self.__waitChange(e2e, before, 14).then(function (late) {
-          var lateChanged = !!late && (late.cls !== before.cls || late.text !== before.text);
+        // 最后复查一次（宽窗口 8s，慢设备用）：真机出现过"窗口后才发现服务端已记账"的情况
+        return self.__waitChange(e2e, before, 20).then(function (late) {
+          var lateHit = wantState ? (!!late && late.state === wantState) : self.__diff(before, late);
           return {
-            type: 'action', action: kind, ok: lateChanged, want: want, changed: lateChanged, attempts: 4,
+            type: 'action', action: kind, ok: lateHit, want: want,
+            changed: self.__diff(before, late) || lateHit,
+            attempts: attempt + 1,
             count: before.text + '→' + (late ? late.text : '?'),
-            detail: lateChanged ? '状态已翻转（复查发现）' : '多次点击后状态仍未变'
+            detail: lateHit ? '状态已翻转（复查发现）' : '多次点击后状态仍未变'
           };
         });
       });
@@ -264,9 +313,8 @@
       return new Promise(function (res) {
         var i = 0;
         (function step() {
-          var now = self.__trait(document.querySelector('[data-e2e="' + e2e + '"]'));
-          var diff = !!now && (now.cls !== before.cls || now.text !== before.text);
-          if (diff || i++ >= n) { res(now); return; }
+          var now = self.__trait(self.__btn(e2e));
+          if (self.__diff(before, now) || i++ >= n) { res(now); return; }
           setTimeout(step, 400);
         })();
       });

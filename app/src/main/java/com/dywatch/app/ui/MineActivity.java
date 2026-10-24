@@ -131,7 +131,11 @@ public class MineActivity extends UiActivity {
                         public void run() {
                             mLoading = false;
                             Loading.show(MineActivity.this, false);
-                            hint("拉取失败: " + e.getMessage());
+                            // ⚠️ 2026-10-25：原来直接拼 e.getMessage()，Gson 的
+                            //    "MalformedJsonException: Use JsonReader.setLenient..." 就甩到表盘上了。
+                            //    风控拦截是上游收紧（403 + ArgusSecurityPlugin），我们改不了，
+                            //    但至少要说人话：接口暂时不可用 + 稍后再试。
+                            hint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
                         }
                     });
                 }
