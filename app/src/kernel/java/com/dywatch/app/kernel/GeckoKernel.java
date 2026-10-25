@@ -88,7 +88,9 @@ public final class GeckoKernel {
             msg.put("cmd", "invoke");
             msg.put("fn", fn);
             msg.put("reqId", reqId);
-            msg.put("args", new JSONArray().put(awemeId).put(want).put(reqId));
+            // ⚠️ 用字符串传参：直接 put 数组对象在 Android 的 org.json 上会抛
+            //    "Array has incompatible type: class [Ljava.lang.String;"（实测踩过）
+            msg.put("argsJson", new JSONArray().put(awemeId).put(want).put(reqId).toString());
             mContentPort.postMessage(msg);
             AppLog.i(TAG, "内核下发 " + fn + " aweme=" + awemeId + " want=" + want + " req=" + reqId);
             return reqId;
@@ -114,7 +116,13 @@ public final class GeckoKernel {
         mStarted = true;
         try {
             mRuntime = GeckoRuntime.create(mApp);
-            mSession = new GeckoSession();
+            // ⚠️ 必须伪装桌面 UA：桥的 DOM 选择器是按**桌面版**抖音页校准的（WebView 线同样如此）。
+            //    Gecko 默认移动 UA 会把 /video/<id> 重定向到 m.douyin.com/share/video/...，
+            //    那里根本没有 [data-e2e=video-player-digg] 这类按钮（实测踩过）。
+            //    gv100 的 GeckoSession 没有 setUserAgentOverride，只能走 Settings.Builder。
+            mSession = new GeckoSession(new org.mozilla.geckoview.GeckoSessionSettings.Builder()
+                    .userAgentOverride(com.dywatch.app.net.DouyinApi.UA)
+                    .build());
             mSession.open(mRuntime);
 
             mView = new GeckoView(mApp);

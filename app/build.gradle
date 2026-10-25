@@ -222,9 +222,18 @@ def syncKernelExt = tasks.register('syncKernelExt', Copy) {
     into(kernelExtAssets)
 }
 
-android.sourceSets.kernel.assets.srcDir(kernelExtAssets)
+// ⚠️ 必须用 .get().asFile 这种**立即求值**的写法：直接传 Provider 给 srcDir 时，
+//    AGP 不会把它算进 kernel 变体的 assets（实测：APK 里没有 assets/kext/*，
+//    而 ensureBuiltIn 找不到 manifest 只会静默失败，表现为"扩展一直装不上"）。
+android.sourceSets.kernel.assets.srcDir(kernelExtAssets.get().asFile)
+// Gradle 的严格校验：任何读这个生成目录的 kernel 任务都要声明关系，否则报
+// "uses this output ... without declaring an explicit or implicit dependency"。
+// 用 mustRunAfter 而不是 dependsOn，避免和 Copy 任务形成环。
 tasks.configureEach { t ->
-    if (t.name.startsWith('mergeKernel') && t.name.endsWith('Assets')) {
-        t.dependsOn(syncKernelExt)
+    if (t.name.contains('Kernel') && t.name != 'syncKernelExt') {
+        t.mustRunAfter(syncKernelExt)
+        if (t.name.startsWith('mergeKernel') && t.name.endsWith('Assets')) {
+            t.dependsOn(syncKernelExt)
+        }
     }
 }
