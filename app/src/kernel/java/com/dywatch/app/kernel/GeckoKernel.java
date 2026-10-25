@@ -247,7 +247,9 @@ public final class GeckoKernel {
                 AppLog.i(TAG, "内核页面体征 " + msg.optString("url")
                         + " nodes=" + msg.optInt("nodes") + " textLen=" + msg.optInt("textLen")
                         + " 登录墙=" + msg.optBoolean("loginWall") + " 有点赞按钮=" + msg.optBoolean("digg")
-                        + " 首屏文字=" + msg.optString("head"));
+                        + " cookieCount=" + msg.optInt("cookieCount") + " hasSid=" + msg.optBoolean("hasSid")
+                        + " sidLen=" + msg.optInt("sidLen") + " 登录按钮=" + msg.optBoolean("loginBtn")
+                        + " 头像=" + msg.optBoolean("avatar") + " 首屏文字=" + msg.optString("head"));
                 break;
             case "contentReady":
                 mContentPort = from;
@@ -259,6 +261,10 @@ public final class GeckoKernel {
                 mCookiesDone = true;
                 AppLog.i(TAG, "内核 cookie 完成 n=" + msg.optInt("n") + " ok=" + msg.optInt("ok") + " fail=" + msg.optInt("fail") + " sessionid=" + msg.optBoolean("sessionid") + " err=" + msg.optString("firstErr"));
                 loadChat();
+                break;
+            case "rawSelf":
+                AppLog.i(TAG, "profile/self 原文 status=" + msg.optInt("status") + " len=" + msg.optInt("len")
+                        + " head=" + msg.optString("head"));
                 break;
             case "auth":
                 // 注意用 opt*：Android 的 JSONObject.get() 会抛受检 JSONException

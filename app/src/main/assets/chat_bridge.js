@@ -32,24 +32,42 @@
     } catch (e) {}
   }
 
-  function fireClick(el) {
-    // ⚠️ 只用 mouse 三事件（2026-09-25 实测能真实翻转已赞态）。
-    // 加 pointerdown/pointerup 后同一按钮反而“状态未变”（实测：v4 首版 12:16 一次 like ok=false），
-    // 推因是指针事件与点击事件各触发一次 toggle、净效果抵消。未重现前勿再加回。
-    //
-    // ⚠️ 2026-10-25（内核线）：GeckoView 的 content script 在隔离世界里，事件派发在 Xray 包装上
-    //    页面 React 处理器可能收不到（实测：按钮找得到、__ready 也过了，点 4 次状态仍不变）。
-    //    这里优先派发到 `wrappedJSObject`（页面对象视图），WebView 侧没有该属性 → 行为不变。
-    var target = el;
-    try {
-      if (el.wrappedJSObject) {
-        target = el.wrappedJSObject;
+  // ⚠️ 2026-10-25（内核线真机）：GeckoView 的 content script 在**隔离世界**，在这里派发的事件
+  //    页面 React 处理器收不到（实测：按钮找得到、就绪门也过、点 4 次状态不变）。
+  //    修法：如果拿得到 `wrappedJSObject`（说明是 Gecko 隔离世界），就用 `window.eval` 在
+  //    **页面上下文**里查询 + 派发（content script 的 eval 执行于页面作用域，能穿过 Xray）。
+  //    WebView 没有 wrappedJSObject，行为完全不变。
+  //
+  // ⚠️ 只用 mouse 三事件（2026-09-25 实测能真实翻转已赞态）：加 pointerdown/pointerup 会让
+  //    同一按钮触发两次 toggle、净效果抵消（实测过），未重现前勿加回。
+  function fireClick(el, e2e) {
+      var inGecko = false;
+      try {
+        inGecko = !!el.wrappedJSObject && typeof window.eval === 'function';
+      } catch (e) { inGecko = false; }
+      if (inGecko && e2e) {
+        try {
+          var src = "(function(){var el=document.querySelector('[data-e2e=\"" + e2e + "\"]');"
+                  + "if(!el)return 'nobtn';"
+                  + "['mousedown','mouseup','click'].forEach(function(t){"
+                  + "el.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));});"
+                  + "return 'ok';})()";
+          var r = window.eval(src);
+          if (r === 'ok') {
+            return;
+          }
+        } catch (e) { /* 回落到底下的直接派发 */ }
       }
-    } catch (e) { /* 取不到就用原对象 */ }
-    ['mousedown', 'mouseup', 'click'].forEach(function (type) {
-      target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-    });
-  }
+      var target = el;
+      try {
+        if (el.wrappedJSObject) {
+          target = el.wrappedJSObject;
+        }
+      } catch (e) { /* 取不到就用原对象 */ }
+      ['mousedown', 'mouseup', 'click'].forEach(function (type) {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      });
+    }
 
   function isLoginWall() {
     var t = (document.body && document.body.innerText) || '';
@@ -292,7 +310,7 @@
         });
       }
 
-      fireClick(btn);
+      fireClick(btn, e2e);
       return this.__waitChange(e2e, before, 14).then(function (now) {
         var hit = wantState ? (!!now && now.state === wantState) : self.__diff(before, now);
         if (hit) {

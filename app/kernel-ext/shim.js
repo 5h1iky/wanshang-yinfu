@@ -72,11 +72,42 @@
   // 告诉原生"这一页的桥已就位"（每页导航后会重跑一次）
   send({ type: 'dyReady', url: String(location.href) });
 
-  // ⚠️ 页面体征要在**加载完之后**量：document_start 时 DOM 还是空的（实测 nodes=1 textLen=0，
+  // 直接看一眼 profile/self 的**原文**：判断"没登录"到底是服务端说没登录、还是我们拿到的根本不是 JSON。
+  setTimeout(function () {
+    try {
+      fetch('https://www.douyin.com/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383'
+        + '&channel=channel_pc_web&version_code=170400&cookie_enabled=true&platform=PC',
+        { credentials: 'include' })
+        .then(function (r) {
+          return r.text().then(function (t) {
+            send({ type: 'rawSelf', status: r.status, len: t.length, head: String(t).slice(0, 200) });
+          });
+        })
+        .catch(function (e) {
+          send({ type: 'rawSelf', status: -1, len: 0, head: 'fetch失败: ' + String(e) });
+        });
+    } catch (e) { /* ignore */ }
+  }, 4000);
   //    那种读数没有任何意义，还会误导判断"页面是空的"）。3 秒后再报一次。
   setTimeout(function () {
     try {
       var bodyText = (document.body && document.body.innerText) || '';
+      // 只报 cookie 名字与长度（不打值）：用来判断"会话 cookie 到底有没有到页面上"
+      var jar = String(document.cookie || '');
+      var names = [];
+      jar.split(';').forEach(function (kv) {
+        var i = kv.indexOf('=');
+        if (i > 0) {
+          names.push(kv.slice(0, i).trim());
+        }
+      });
+      var sidLen = -1;
+      jar.split(';').forEach(function (kv) {
+        var i = kv.indexOf('=');
+        if (i > 0 && kv.slice(0, i).trim() === 'sessionid') {
+          sidLen = kv.length - i - 1;
+        }
+      });
       send({
         type: 'dyInfo',
         url: String(location.href),
@@ -84,7 +115,12 @@
         textLen: bodyText.length,
         loginWall: /扫码登录|登录后查看|立即登录/.test(bodyText),
         digg: !!document.querySelector('[data-e2e="video-player-digg"]'),
-        head: bodyText.replace(/\s+/g, ' ').trim().slice(0, 60)
+        cookieCount: names.length,
+        hasSid: names.indexOf('sessionid') >= 0,
+        sidLen: sidLen,
+        loginBtn: !!document.querySelector('[data-e2e="login-button"], [data-e2e="login"]'),
+        avatar: !!document.querySelector('[data-e2e="user-avatar"], [data-e2e="live-avatar"]'),
+        head: bodyText.replace(/\s+/g, ' ').trim().slice(0, 240)
       });
     } catch (e) { /* ignore */ }
   }, 3000);

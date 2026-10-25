@@ -135,11 +135,20 @@ browser.runtime.onMessage.addListener(function (msg) {
     return Promise.resolve(null);
   }
   switch (msg.type) {
+    case 'rawSelf':
+      if (port) {
+        try {
+          toNative({ type: 'rawSelf', status: msg.status, len: msg.len, head: msg.head });
+        } catch (e) { /* ignore */ }
+      }
+      return Promise.resolve({ ok: true });
     case 'dyInfo':
       if (port) {
         try {
           toNative({ type: 'pageInfo', url: msg.url, nodes: msg.nodes, textLen: msg.textLen,
-                          loginWall: msg.loginWall, digg: msg.digg, head: msg.head });
+                          loginWall: msg.loginWall, digg: msg.digg, head: msg.head,
+                          cookieCount: msg.cookieCount, hasSid: msg.hasSid, sidLen: msg.sidLen,
+                          loginBtn: msg.loginBtn, avatar: msg.avatar });
         } catch (e) { /* ignore */ }
       }
       return Promise.resolve({ ok: true });
