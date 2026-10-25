@@ -77,11 +77,27 @@ function connect() {
 
 function applyCookies(list) {
   var i = 0;
+  var okCount = 0;
+  var failCount = 0;
+  var firstErr = '';
+  function done() {
+    // 回读一条关键 cookie：`cookies.set` 的失败会被 reject 吞掉（实测），只有回读能证明真写进去了
+    var finish = function (found) {
+      toNative({
+        type: 'cookiesDone', n: list.length, ok: okCount, fail: failCount,
+        firstErr: firstErr, sessionid: !!found
+      });
+    };
+    try {
+      browser.cookies.get({ url: 'https://www.douyin.com/', name: 'sessionid' })
+        .then(finish, function () { finish(null); });
+    } catch (e) {
+      finish(null);
+    }
+  }
   function next() {
     if (i >= list.length) {
-      try {
-        toNative({ type: 'cookiesDone', n: list.length });
-      } catch (e) { /* ignore */ }
+      done();
       return;
     }
     var c = list[i++];
@@ -93,8 +109,21 @@ function applyCookies(list) {
         path: '/',
         secure: true,
         httpOnly: !!c.httpOnly
-      }).then(next, next);
+      }).then(function () {
+        okCount++;
+        next();
+      }, function (e) {
+        failCount++;
+        if (!firstErr) {
+          firstErr = String(e).slice(0, 80);
+        }
+        next();
+      });
     } catch (e) {
+      failCount++;
+      if (!firstErr) {
+        firstErr = String(e).slice(0, 80);
+      }
       next();
     }
   }
@@ -106,6 +135,14 @@ browser.runtime.onMessage.addListener(function (msg) {
     return Promise.resolve(null);
   }
   switch (msg.type) {
+    case 'dyInfo':
+      if (port) {
+        try {
+          toNative({ type: 'pageInfo', url: msg.url, nodes: msg.nodes, textLen: msg.textLen,
+                          loginWall: msg.loginWall, digg: msg.digg, head: msg.head });
+        } catch (e) { /* ignore */ }
+      }
+      return Promise.resolve({ ok: true });
     case 'dyReady':
       // 新页面就绪 = 上一个页面（及其桥状态）已经不在，队列里的旧指令必须丢掉：
       // 否则会在新页面上执行"上一页的点赞"，还可能撞上桥的"同动作在途"保护（实测踩过：
@@ -113,7 +150,7 @@ browser.runtime.onMessage.addListener(function (msg) {
       queue.length = 0;
       if (port) {
         try {
-          toNative({ type: 'contentReady', url: msg.url });
+          toNative({ type: 'contentReady', url: msg.url, nodes: msg.nodes, textLen: msg.textLen, loginWall: msg.loginWall, digg: msg.digg });
         } catch (e) { /* ignore */ }
       }
       return Promise.resolve({ ok: true });

@@ -72,6 +72,23 @@
   // 告诉原生"这一页的桥已就位"（每页导航后会重跑一次）
   send({ type: 'dyReady', url: String(location.href) });
 
+  // ⚠️ 页面体征要在**加载完之后**量：document_start 时 DOM 还是空的（实测 nodes=1 textLen=0，
+  //    那种读数没有任何意义，还会误导判断"页面是空的"）。3 秒后再报一次。
+  setTimeout(function () {
+    try {
+      var bodyText = (document.body && document.body.innerText) || '';
+      send({
+        type: 'dyInfo',
+        url: String(location.href),
+        nodes: document.getElementsByTagName('*').length,
+        textLen: bodyText.length,
+        loginWall: /扫码登录|登录后查看|立即登录/.test(bodyText),
+        digg: !!document.querySelector('[data-e2e="video-player-digg"]'),
+        head: bodyText.replace(/\s+/g, ' ').trim().slice(0, 60)
+      });
+    } catch (e) { /* ignore */ }
+  }, 3000);
+
   // 拉取指令（唯一可行的下行通道：background 不能主动 push 到 content）
   setInterval(function () {
     var p = send({ type: 'poll' });

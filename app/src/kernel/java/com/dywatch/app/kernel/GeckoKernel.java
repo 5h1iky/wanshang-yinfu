@@ -82,7 +82,14 @@ public final class GeckoKernel {
         }
         String reqId = "k" + (++mSeq);
         mPending.put(reqId, cb);
-        String fn = "like".equals(kind) ? "likeVideo" : "collectVideo";
+        String fn;
+        if ("auth".equals(kind)) {
+            fn = "checkAuth";
+        } else if ("collect".equals(kind)) {
+            fn = "collectVideo";
+        } else {
+            fn = "likeVideo";
+        }
         try {
             JSONObject msg = new JSONObject();
             msg.put("cmd", "invoke");
@@ -236,14 +243,27 @@ public final class GeckoKernel {
                 mBgPort = from;
                 postCookies();
                 break;
+            case "pageInfo":
+                AppLog.i(TAG, "内核页面体征 " + msg.optString("url")
+                        + " nodes=" + msg.optInt("nodes") + " textLen=" + msg.optInt("textLen")
+                        + " 登录墙=" + msg.optBoolean("loginWall") + " 有点赞按钮=" + msg.optBoolean("digg")
+                        + " 首屏文字=" + msg.optString("head"));
+                break;
             case "contentReady":
                 mContentPort = from;
-                AppLog.i(TAG, "内核 content 就绪 " + msg.optString("url"));
+                AppLog.i(TAG, "内核 content 就绪 " + msg.optString("url")
+                        + " nodes=" + msg.optInt("nodes") + " textLen=" + msg.optInt("textLen")
+                        + " 登录墙=" + msg.optBoolean("loginWall") + " 有点赞按钮=" + msg.optBoolean("digg"));
                 break;
             case "cookiesDone":
                 mCookiesDone = true;
-                AppLog.i(TAG, "内核 cookie 注入完成 n=" + msg.optInt("n") + " → 重载私信页");
+                AppLog.i(TAG, "内核 cookie 完成 n=" + msg.optInt("n") + " ok=" + msg.optInt("ok") + " fail=" + msg.optInt("fail") + " sessionid=" + msg.optBoolean("sessionid") + " err=" + msg.optString("firstErr"));
                 loadChat();
+                break;
+            case "auth":
+                // 注意用 opt*：Android 的 JSONObject.get() 会抛受检 JSONException
+                AppLog.i(TAG, "内核登录态 ok=" + msg.opt("ok") + " user=" + msg.optString("user")
+                        + " msg=" + msg.optString("message"));
                 break;
             case "action":
                 result(msg);
@@ -269,12 +289,36 @@ public final class GeckoKernel {
     private void postCookies() {
         if (mBgPort == null) return;
         try {
-            List<Map<String, Object>> cookies = CookieJar.fromHeader(LoginManager.getCookies(mApp));
+            // ⚠️ 2026-10-25 真机：用 LoginManager 存的那份头去灌 cookie，内核页仍是"会话无效"。
+            // 原因：那份头是登录时抓的 `CookieManager.getCookie(url)`，**默认不含 httpOnly**，
+            // 而抖音的会话 cookie 恰恰是 httpOnly。这里直接向系统要（getCookie(url, true) 包含 httpOnly），
+            // 拿不到才退回存档头。
+            String live = null;
+            try {
+                live = android.webkit.CookieManager.getInstance()
+                        .getCookie("https://www.douyin.com");
+            } catch (Throwable ignored) {
+            }
+            String header = (live != null && !live.isEmpty()) ? live : LoginManager.getCookies(mApp);
+            List<Map<String, Object>> cookies = CookieJar.fromHeader(header);
+            // 只打名字（不打值）：确认会话类 cookie 在不在，判断"是不是 httpOnly 丢了"
+            StringBuilder names = new StringBuilder();
+            boolean hasSession = false;
+            for (Map<String, Object> c : cookies) {
+                String n = String.valueOf(c.get("name"));
+                names.append(n).append(',');
+                if (n.startsWith("sessionid") || n.startsWith("sid_tt") || n.startsWith("sid_guard")) {
+                    hasSession = true;
+                }
+            }
+            AppLog.i(TAG, "cookie 名单(" + cookies.size() + ")=" + names
+                    + " 含会话cookie=" + hasSession);
             JSONObject msg = new JSONObject();
             msg.put("cmd", "setCookies");
             msg.put("cookies", new JSONArray(cookies));
             mBgPort.postMessage(msg);
-            AppLog.i(TAG, "内核注入 cookie " + cookies.size() + " 条");
+            AppLog.i(TAG, "内核注入 cookie " + cookies.size() + " 条（来源="
+                    + (live != null && !live.isEmpty() ? "系统CookieManager含httpOnly" : "存档头") + "）");
         } catch (Throwable t) {
             AppLog.i(TAG, "cookie 注入失败: " + t);
             mCookiesDone = true;

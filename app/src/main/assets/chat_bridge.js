@@ -36,8 +36,18 @@
     // ⚠️ 只用 mouse 三事件（2026-09-25 实测能真实翻转已赞态）。
     // 加 pointerdown/pointerup 后同一按钮反而“状态未变”（实测：v4 首版 12:16 一次 like ok=false），
     // 推因是指针事件与点击事件各触发一次 toggle、净效果抵消。未重现前勿再加回。
+    //
+    // ⚠️ 2026-10-25（内核线）：GeckoView 的 content script 在隔离世界里，事件派发在 Xray 包装上
+    //    页面 React 处理器可能收不到（实测：按钮找得到、__ready 也过了，点 4 次状态仍不变）。
+    //    这里优先派发到 `wrappedJSObject`（页面对象视图），WebView 侧没有该属性 → 行为不变。
+    var target = el;
+    try {
+      if (el.wrappedJSObject) {
+        target = el.wrappedJSObject;
+      }
+    } catch (e) { /* 取不到就用原对象 */ }
     ['mousedown', 'mouseup', 'click'].forEach(function (type) {
-      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
     });
   }
 
@@ -218,12 +228,24 @@
     // 就绪门：页面 DOM 里按钮很早就存在，但 React onClick 要等组件挂载完才绑上去；
     // 绑上前点击=空操作（真机实测：App 路径 3 次点击窗口内未绑，窗口后才生效→误报"无响应"）。
     // 所以直接读节点上的 __reactProps$ 看 onClick 在不在，比猜等待时长可靠。
+    //
+    // ⚠️ 2026-10-25（内核线真机）：GeckoView 的 content script 跑在**隔离世界**里，
+    //    Xray 包装让 `Object.keys(node)` 只看得到页面可见属性，React 挂在节点上的
+    //    `__reactProps$xxx` expando 一律看不见 → 这里永远 false → 空等 80 秒才报
+    //    "按钮事件始终未绑定"。修法：先取 `wrappedJSObject`（Firefox 专有的"页面对象视图"）
+    //    再读 expando；WebView 侧没有这个属性，自动退回原行为。
     __ready: function (el) {
       if (!el) return false;
-      var keys = Object.keys(el);
+      var target = el;
+      try {
+        if (el.wrappedJSObject) {
+          target = el.wrappedJSObject;
+        }
+      } catch (e) { /* 取不到就用原对象 */ }
+      var keys = Object.keys(target);
       for (var i = 0; i < keys.length; i++) {
         if (keys[i].indexOf('__reactProps$') === 0) {
-          var pr = el[keys[i]];
+          var pr = target[keys[i]];
           return !!(pr && (pr.onClick || pr.onPointerDown || pr.onMouseDown));
         }
       }
@@ -250,7 +272,9 @@
       }
       if (!this.__ready(btn)) {
         // 组件未挂载完：不计入点击次数，最多等 12s
-        if ((tries || 0) < 200) {
+        // ⚠️ 2026-10-25：原来是 200 次（80 秒），内核线上"就绪门永远为假"时用户要干等 80 秒
+        //    才看到失败（实测 81 秒）。压到 25 次 ≈10 秒，宁可早点说"没就绪"，也不要让人以为界面死了。
+        if ((tries || 0) < 25) {
           return wait(400).then(function () { return self.__clickAndJudge(kind, e2e, want, (tries || 0) + 1); });
         }
         return Promise.resolve({ type: 'action', action: kind, ok: false, detail: '按钮事件始终未绑定（组件未就绪）' });
