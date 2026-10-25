@@ -338,12 +338,21 @@
       if (kind === 'commentsMore') return this.__loadMoreComments();
       if (kind === 'sendComment') return this.__doSendComment(payload, reqId);
       var key = kind + ':' + awemeId;
-      if (this.__inFlight[key]) {
-        post({ type: 'action', action: kind, ok: false, skipped: true, reqId: reqId,
-               detail: '上一次同动作仍在执行中，已忽略' });
-        return;
+      // ⚠️ 2026-10-25：在途标记带时间戳 + 过期自动作废。
+      // 起因（真机）：一次点击的 promise 链没走完就整页重载/卡住，`__inFlight[key]` 永久留下，
+      // 之后同一个视频的每次点赞都被自己的保护挡回去（detail=上一次同动作仍在执行中），
+      // 用户看到的是"点了没反应"。30 秒还没结论就当它已经死在路上。
+      var flight = this.__inFlight[key];
+      if (flight) {
+        var age = Date.now() - (typeof flight === 'number' ? flight : 0);
+        if (age < 30000) {
+          post({ type: 'action', action: kind, ok: false, skipped: true, reqId: reqId,
+                 detail: '上一次同动作仍在执行中，已忽略' });
+          return;
+        }
+        delete this.__inFlight[key];   // 过期：当作死掉的那次，放行
       }
-      this.__inFlight[key] = true;
+      this.__inFlight[key] = Date.now();
       this.__clickAndJudge(kind, e2e, payload, 0).then(function (r) {
         delete self.__inFlight[key];
         r.reqId = reqId;   // 结果带上请求号：原生侧据此投递，不再靠"当前唯一那个回调"猜
