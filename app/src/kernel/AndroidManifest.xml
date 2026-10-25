@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 只在 kernel 变体里挂这个调试入口（webview 变体没有），用于 adb 广播验证内核动作 -->
+    <application>
+        <receiver
+            android:name=".kernel.KernelTestReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.dywatch.app.KERNEL_TEST" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
