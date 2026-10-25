@@ -15,6 +15,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // GeckoView 只在 Mozilla 自己的 maven（2026-10-24 探针工程实测国内可直连，无需镜像）。
+        // 只有 kernel 变体会真的解析它；webview 变体不会命中这里的坐标。
+        maven { url 'https://maven.mozilla.org/maven2/' }
         maven { url 'https://maven.aliyun.com/repository/google' }
         maven { url 'https://maven.aliyun.com/repository/central' }
         maven { url 'https://maven.aliyun.com/repository/public' }

@@ -1,0 +1,30 @@
+{
+  "manifest_version": 2,
+  "name": "dywatch-kernel",
+  "version": "1.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "kernel@dywatch.local"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons",
+    "cookies",
+    "storage",
+    "*://*.douyin.com/*",
+    "*://douyin.com/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.douyin.com/*"],
+      "js": ["shim.js", "chat_bridge.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}

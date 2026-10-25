@@ -21,8 +21,24 @@ android {
         applicationId 'com.dywatch.app'
         minSdk 21
         targetSdk 36
-        versionCode 12
-        versionName '0.8.3'
+        versionCode 14
+        versionName '0.9.0'
+    }
+
+    // ---- 0.9.0 起同版本两个构建（用户 2026-10-25 拍板）----
+    //   webview ：不引 GeckoView，用系统 WebView（体积 6.27MB，行为与 0.8.x 一致）
+    //   kernel  ：内置 GeckoView（v7a），一个 App、不装第二个 APK；体积 ≈60MB
+    // 两个变体**同包名同签名**：用户装哪个都能覆盖升级、登录态不掉；同时只能装一个。
+    flavorDimensions 'engine'
+    productFlavors {
+        webview {
+            dimension 'engine'
+        }
+        kernel {
+            dimension 'engine'
+            // GeckoView 只有 armeabi-v7a 构件（32 位仍可用，arm64 机器会以 32 位进程运行）
+            ndk { abiFilters 'armeabi-v7a' }
+        }
     }
 
     signingConfigs {
@@ -66,6 +82,11 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    // KernelSeam 要用 BuildConfig.FLAVOR 判断当前是不是「装了内核」的构建（AGP 8 默认关掉了 BuildConfig）
+    buildFeatures {
+        buildConfig true
+    }
+
     testOptions {
         // 联网冒烟测试（FeedFetchTest）按需开启：gradlew test -Dnetwork.test=true
         unitTests.all {
@@ -91,20 +112,42 @@ androidComponents {
             output.outputFileName.set("wanshang-yinfu-DEVDIAG-DO-NOT-PUBLISH.apk")
         }
     }
+    // 发布产物名带 flavor：wanshang-yinfu-v0.9.0-webview-release.apk / -kernel-release.apk
+    // （0.9.0 起同版本两个构建，文件名必须能区分，否则发版时必然混淆）
+    onVariants(selector().withBuildType("release")) { variant ->
+        // AGP 8.7 的 ApplicationVariant 没有 versionName 属性（实测 MissingPropertyException），
+        // 直接从 defaultConfig 取（我们在文件顶部就是字面量赋值的）
+        def vn = android.defaultConfig.versionName
+        variant.outputs.each { output ->
+            output.outputFileName.set("wanshang-yinfu-v${vn}-${variant.flavorName}-release.apk")
+        }
+    }
 }
 
-// 闸门本体：校验合并后的清单里没有 debuggable=true
+// 闸门本体：校验**每个 release 变体**的合并清单里都没有 debuggable=true。
+// ⚠️ 0.9.0 起有了 webview/kernel 两个 flavor，合并清单路径变成
+//    intermediates/merged_manifest/<flavor><BuildType>/process<...>MainManifest/，
+//    原先写死的 release 路径会扫不到 —— 这里改成扫目录，别让它静默失效。
 def verifyReleaseNotDebuggable = {
-    def mf = file("${buildDir}/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml")
-    if (!mf.exists()) {
-        println "发布闸门：找不到合并清单，跳过 debuggable 校验（${mf}）"
+    def root = file("${buildDir}/intermediates/merged_manifest")
+    if (!root.exists()) {
+        println "发布闸门：找不到 merged_manifest 目录，跳过 debuggable 校验"
         return
     }
-    if (mf.getText('UTF-8').contains('android:debuggable="true"')) {
-        throw new GradleException(
-                "release 包被标记为 debuggable，禁止发布（代码审计 H2）。请检查 buildTypes.release 是否被改成了 initWith(devdiag)。")
+    def checked = 0
+    root.listFiles()?.each { dir ->
+        // 只校验 release 变体（devdiag 本身就是 debuggable，不该在这里被拦）
+        if (!(dir.name == 'release' || dir.name.endsWith('Release'))) return
+        dir.eachFileRecurse { f ->
+            if (f.name != 'AndroidManifest.xml') return
+            checked++
+            if (f.getText('UTF-8').contains('android:debuggable="true"')) {
+                throw new GradleException(
+                        "release 包被标记为 debuggable，禁止发布（代码审计 H2）：${f}")
+            }
+        }
     }
-    println "发布闸门：release 未标记 debuggable ✓"
+    println "发布闸门：已校验 ${checked} 个 release 合并清单，均未标记 debuggable ✓"
 }
 
 // ⚠️ 2026-10-02 记录一次**误判**，免得后人重踩：我起初用
@@ -115,14 +158,19 @@ def verifyReleaseNotDebuggable = {
 //   双保险保留（whenTaskAdded 管以后注册的任务、matching().all 管已存在的），
 //   但结论要写对：这不是"修了一个不生效的守卫"，而是"差点因为乱码冤枉了它"。
 def releaseGateAttached = { t ->
-    if (t.name != 'assembleRelease') return
+    // 0.9.0 起有 flavor：assembleRelease + assembleWebviewRelease + assembleKernelRelease 都要挂
+    if (!(t.name == 'assembleRelease'
+            || (t.name.startsWith('assemble') && t.name.endsWith('Release')))) return
     if (t.ext.has('dywatchReleaseGate')) return
     t.ext.dywatchReleaseGate = true
     t.doLast(verifyReleaseNotDebuggable)
 }
 
 tasks.whenTaskAdded { releaseGateAttached(it) }
-tasks.matching { it.name == 'assembleRelease' }.all { releaseGateAttached(it) }
+tasks.matching {
+    it.name == 'assembleRelease'
+            || (it.name.startsWith('assemble') && it.name.endsWith('Release'))
+}.all { releaseGateAttached(it) }
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
@@ -149,4 +197,34 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.11.0'
 
     testImplementation 'junit:junit:4.13.2'
+
+    // ---- 内核构建专用（kernel flavor）：GeckoView 100 / armeabi-v7a ----
+    // 为什么是 100 而不是最新：07 调研实测 32 位构件线连续无缺档，100 的体积与内存最省；
+    // 152+ 的 AAR 元数据把 minCompileSdk 抬到 37，当前工具链（AGP 8.7 / compileSdk 36）编不过。
+    // 体积代价：APK 从 6.27MB → ≈60MB（so 43MB + omni.ja 8.35MB），只影响 kernel 变体。
+    kernelImplementation 'org.mozilla.geckoview:geckoview-armeabi-v7a:100.0.20220519220738'
+}
+
+// ---- kernel 变体的内核扩展（2026-10-25）----
+// 为什么要在构建期生成：GeckoView 只认 `ensureBuiltIn("resource://android/assets/<dir>/")` 这种
+// **内置扩展**（免签名，探针工程实测跑通）；未签名 XPI 走 install() 会被拒或永久挂起。
+// 而扩展里那份 chat_bridge.js 必须与 WebView 线**同一份**（P0-1 的判据修复只有一处真源），
+// 所以这里把 assets/chat_bridge.js 拷进构建产物，而不是在仓库里放两个副本。
+def kernelExtAssets = layout.buildDirectory.dir('generated/kernelAssets')
+
+def syncKernelExt = tasks.register('syncKernelExt', Copy) {
+    from(layout.projectDirectory.dir('kernel-ext')) {
+        into 'kext'
+    }
+    from(layout.projectDirectory.file('src/main/assets/chat_bridge.js')) {
+        into 'kext'
+    }
+    into(kernelExtAssets)
+}
+
+android.sourceSets.kernel.assets.srcDir(kernelExtAssets)
+tasks.configureEach { t ->
+    if (t.name.startsWith('mergeKernel') && t.name.endsWith('Assets')) {
+        t.dependsOn(syncKernelExt)
+    }
 }

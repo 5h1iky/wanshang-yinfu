@@ -755,6 +755,26 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 }
             }
         };
+        // ---- 内核构建（kernel flavor）：点赞/收藏优先交给 GeckoView 引擎 ----
+        // 为什么先试内核：这台表上系统 WebView 是 Chromium 83（厂商 4 年没升过，见 调研\14），
+        // 抖音前端哪天用上 83 不认的语法，写操作就会像 0.7.0 之前的私信那样整片失效。
+        // 内核不可用（未就绪/扩展没连上）时返回 null → 下面照旧走 WebView 引擎，用户无感。
+        if (com.dywatch.app.kernel.KernelSeam.enabled()) {
+            String kreq = com.dywatch.app.kernel.KernelSeam.action(this, kind, awemeId, target,
+                    new com.dywatch.app.kernel.KernelSeam.Callback() {
+                        @Override
+                        public void onResult(boolean ok, String detail) {
+                            cb.onActionResult(kind, ok, detail);
+                        }
+                    });
+            if (kreq != null) {
+                mActionsInFlight.put(key, kreq);
+                armActionTimeout(key);
+                AppLog.i("feed", "互动交给内核（Gecko） req=" + kreq + " " + kind);
+                return;
+            }
+        }
+
         String reqId = isLike ? engine.likeVideo(awemeId, target, cb)
                 : engine.collectVideo(awemeId, target, cb);
         mActionsInFlight.put(key, reqId);
@@ -767,6 +787,11 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         // 用户**永远等不到"已点赞"**（成功也静默、失败也不回滚）。
         // 也就是说：慢一点的成功会被我们自己丢掉。现在超时只解锁按钮，迟到的结果照样投递
         // （页面若已销毁，回调里的 isFinishing/isDestroyed 会拦住 UI 操作）。
+        armActionTimeout(key);
+    }
+
+    /** 互动超时兜底（WebView 与内核两条路共用）：只解锁按钮，不撤销回调登记 */
+    private void armActionTimeout(final String key) {
         mActionTimeout.postDelayed(new Runnable() {
             @Override
             public void run() {
