@@ -14,6 +14,36 @@
 
 var port = null;
 var queue = [];
+/** 发往原生的待发箱：端口重连期间的消息不能丢（跨页导航后正好会撞上重连） */
+var outbox = [];
+
+function toNative(obj) {
+  if (port) {
+    try {
+      port.postMessage(obj);
+      return;
+    } catch (e) { /* 落到发件箱 */ }
+  }
+  outbox.push(obj);
+  if (outbox.length > 50) {
+    outbox.shift();
+  }
+}
+
+function flushOutbox() {
+  if (!port) {
+    return;
+  }
+  while (outbox.length) {
+    var obj = outbox.shift();
+    try {
+      port.postMessage(obj);
+    } catch (e) {
+      outbox.unshift(obj);
+      return;
+    }
+  }
+}
 
 function connect() {
   try {
@@ -42,6 +72,7 @@ function connect() {
   try {
     port.postMessage({ type: 'bgReady' });
   } catch (e) { /* ignore */ }
+  flushOutbox();
 }
 
 function applyCookies(list) {
@@ -49,7 +80,7 @@ function applyCookies(list) {
   function next() {
     if (i >= list.length) {
       try {
-        port.postMessage({ type: 'cookiesDone', n: list.length });
+        toNative({ type: 'cookiesDone', n: list.length });
       } catch (e) { /* ignore */ }
       return;
     }
@@ -76,16 +107,20 @@ browser.runtime.onMessage.addListener(function (msg) {
   }
   switch (msg.type) {
     case 'dyReady':
+      // 新页面就绪 = 上一个页面（及其桥状态）已经不在，队列里的旧指令必须丢掉：
+      // 否则会在新页面上执行"上一页的点赞"，还可能撞上桥的"同动作在途"保护（实测踩过：
+      // 内核结果 ok=false detail=上一次同动作仍在执行中）。
+      queue.length = 0;
       if (port) {
         try {
-          port.postMessage({ type: 'contentReady', url: msg.url });
+          toNative({ type: 'contentReady', url: msg.url });
         } catch (e) { /* ignore */ }
       }
       return Promise.resolve({ ok: true });
     case 'dyEvent':
       if (port && msg.payload) {
         try {
-          port.postMessage(msg.payload);
+          toNative(msg.payload);
         } catch (e) { /* ignore */ }
       }
       return Promise.resolve({ ok: true });
