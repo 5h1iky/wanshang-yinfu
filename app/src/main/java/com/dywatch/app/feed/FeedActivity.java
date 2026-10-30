@@ -81,6 +81,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_feed);
+        installKernelDebugButton();
         initViewPager();
         initVideoView();
         mPreloadManager = PreloadManager.getInstance(this);
@@ -393,6 +394,53 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             case VideoView.STATE_PLAYBACK_COMPLETED: return "COMPLETED";
             case VideoView.STATE_ERROR: return "ERROR(播放失败)";
             default: return "state=" + s;
+        }
+    }
+
+    /**
+     * 内核构建专用：右上角放一个小按钮，点一下把内核（GeckoView）那层视图显示出来，再点收回。
+     *
+     * 为什么需要：内核层平时是全透明的，用户根本看不到里面渲染成什么样。排查"页面空白/登录墙/
+     * 被风控降级"时，亲眼看一眼比十行日志有用。webview 构建里 KernelSeam.enabled()==false，
+     * 这个方法直接返回，不装按钮。
+     */
+    private void installKernelDebugButton() {
+        if (!com.dywatch.app.kernel.KernelSeam.enabled()) {
+            return;
+        }
+        final android.widget.TextView btn = new android.widget.TextView(this);
+        btn.setText("内核");
+        btn.setTextSize(12);
+        btn.setTextColor(0xFFFFFFFF);
+        btn.setBackgroundColor(0x99000000);
+        btn.setPadding(20, 10, 20, 10);
+        final boolean[] shown = {false};
+        btn.setOnClickListener(new android.view.View.OnClickListener() {
+            @Override
+            public void onClick(android.view.View v) {
+                shown[0] = !shown[0];
+                com.dywatch.app.kernel.KernelSeam.debugVisible(FeedActivity.this, shown[0]);
+                btn.setText(shown[0] ? "收回" : "内核");
+                btn.bringToFront();   // 内核层被提到最前时会把按钮盖住，这里再把按钮提回来
+                android.widget.Toast.makeText(FeedActivity.this,
+                        shown[0] ? "显示内核页面（点「收回」返回）" : "已收回内核页面",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+        try {
+            android.view.ViewGroup root = findViewById(android.R.id.content);
+            if (root == null) {
+                return;
+            }
+            android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+            lp.gravity = android.view.Gravity.TOP | android.view.Gravity.END;
+            lp.topMargin = 10;
+            lp.rightMargin = 10;
+            root.addView(btn, lp);
+        } catch (Throwable t) {
+            com.dywatch.app.util.AppLog.i("kernel", "内核调试按钮添加失败: " + t);
         }
     }
 

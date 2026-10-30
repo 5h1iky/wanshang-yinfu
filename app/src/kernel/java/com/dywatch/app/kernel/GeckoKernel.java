@@ -39,6 +39,7 @@ public final class GeckoKernel {
 
     private static final String TAG = "kernel";
     private static final String CHAT_URL = "https://www.douyin.com/chat";
+    private static final String HOME_URL = "https://www.douyin.com/";
     /** 内置扩展在 assets 里的位置（gradle 的 syncKernelExt 生成到 assets/kext/） */
     private static final String EXT_LOCATION = "resource://android/assets/kext/";
     private static final String EXT_ID = "kernel@dywatch.local";
@@ -72,6 +73,71 @@ public final class GeckoKernel {
                                              boolean want, KernelSeam.Callback cb) {
         if (sInst == null) sInst = new GeckoKernel(ctx);
         return sInst.submit(ctx, kind, awemeId, want, cb);
+    }
+
+    /**
+     * 调试开关：把内核那层 GeckoView 显示出来/收回去（由 {@link KernelSeam#debugVisible} 反射调用）。
+     *
+     * 为什么要这个：内核页和 App 自己的界面是叠在一起的两层，平时内核层是全透明的，用户看不到
+     * 里面到底渲染成什么样。排查"页面空白/登录墙/风控降级"时，肉眼看一眼比十行日志管用。
+     */
+    public static synchronized void setDebugVisible(Context ctx, boolean visible) {
+        if (sInst == null) sInst = new GeckoKernel(ctx);
+        sInst.applyDebugVisible(ctx, visible);
+    }
+
+    private void applyDebugVisible(Context ctx, boolean visible) {
+        // 显示时若内核还没起来，就顺手把它启动（用户不该为了看内核先去点一次赞）
+        if (visible && !mStarted) {
+            ensureStarted(ctx);
+        }
+        if (mView == null) {
+            AppLog.i(TAG, "内核视图还没创建（先点一次赞让它启动，或等 2 秒）");
+            return;
+        }
+        ViewGroup root = null;
+        try {
+            if (ctx instanceof Activity) {
+                root = ((Activity) ctx).findViewById(android.R.id.content);
+            }
+        } catch (Throwable ignored) {
+        }
+        if (visible) {
+            mView.setAlpha(1f);
+            mView.setClickable(true);
+            mView.setFocusable(true);
+            if (mView.getParent() == null && root != null) {
+                root.addView(mView, new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            }
+            mView.bringToFront();
+            // 显示出来后落到**抖音首页**：首页有登录入口，方便用户直接在核心里登一次做定性验证
+            // （如果内核自己登录后会话列表就正常，那问题就只是"会话绑定"，不是引擎不行）
+            // ⚠️ 连发两次：第一次可能被启动时那次 /chat 加载覆盖掉（实测过）
+            mUi.post(new Runnable() {
+                @Override
+                public void run() {
+                    mSession.loadUri(HOME_URL);
+                }
+            });
+            mUi.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    mSession.loadUri(HOME_URL);
+                }
+            }, 2500);
+            AppLog.i(TAG, "内核页面已显示（载入 " + HOME_URL + "）");
+        } else {
+            mView.setAlpha(0f);
+            mView.setClickable(false);
+            mView.setFocusable(false);
+            if (root != null && mView.getParent() == root) {
+                root.removeView(mView);
+                root.addView(mView, 0, new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            }
+            AppLog.i(TAG, "内核页面已收回（透明、最底层）");
+        }
     }
 
     private synchronized String submit(Context ctx, String kind, String awemeId,

@@ -45,4 +45,19 @@ public final class KernelSeam {
             return null;
         }
     }
+
+    /**
+     * 调试用：显示/隐藏内核（Gecko）那一层视图，让用户能亲眼看到内核里渲染成什么样。
+     * 只有 kernel 构建有这个视图；webview 构建调用无效。
+     */
+    public static void debugVisible(android.content.Context ctx, boolean visible) {
+        if (!enabled()) return;
+        try {
+            Class<?> c = Class.forName("com.dywatch.app.kernel.GeckoKernel");
+            c.getMethod("setDebugVisible", android.content.Context.class, boolean.class)
+                    .invoke(null, ctx, visible);
+        } catch (Throwable t) {
+            AppLog.i("kernel", "切换内核页面失败: " + t);
+        }
+    }
 }
