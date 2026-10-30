@@ -1,0 +1,12 @@
+# 本目录只放脚本与说明；产物与凭据一律不进仓库
+node_modules/
+__pycache__/
+*.pyc
+
+# 抓包/取证产物、凭据解析结果、运行时输出
+*.log
+*.bin
+*.xml
+cf-cred.json
+out/
+tmp/

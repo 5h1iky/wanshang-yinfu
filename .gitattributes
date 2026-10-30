@@ -1,0 +1,5 @@
+# tools/ 下的 shell 与 python 脚本必须保持 LF。
+# pinch.sh 会被 adb push 到设备上由 /system/bin/sh 执行，CRLF 会让它解析失败；
+# 本机 core.autocrlf=true 会把 .sh 检出成 CRLF，所以这里钉死行尾。
+tools/*.sh text eol=lf
+tools/*.py text eol=lf

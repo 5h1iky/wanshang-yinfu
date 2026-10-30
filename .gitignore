@@ -15,11 +15,50 @@ build-*.log
 # 真机截图（体积大，本地留档）
 shots/
 
-# ── 本地诊断脚本：2026-09-30 起整体不入库，只保留在开发机 ──────────────
-# 这些是排查问题时写的探针 / 抓包 / 取证脚本（probe-*.js、cdp-*.js、ui-*.js 等），
-# 属于开发期工具，不是交付物；数量多且与主代码无关，公开仓库里只会干扰阅读。
-# 注意：代码注释与历史文档里出现的 tools/xxx.js 路径，均指开发机上的本地文件。
-/tools/
+# ── tools/：开发期诊断脚本（2026-10-30 白名单加回，说明见 tools/README.md）──────────
+# 口径：只收录"下次发版/真机验证/公告运维还会用到"的脚本，且目录内不得有凭据或抓包数据。
+# 2026-09-30 曾因目录里混有真实会话 cookie 与源码镜像而整体移出仓库；本次按白名单放行。
+# 开发机上同目录的历史抓包（*.bin / *.json / session* / bili-src 等）继续被忽略，勿用 git add -f。
+/tools/*
+!/tools/README.md
+!/tools/.gitignore
+!/tools/adb-retry.js
+!/tools/watch-ui.ps1
+!/tools/watch-census4.js
+!/tools/watch-repro3.js
+!/tools/watch-chat-probe.js
+!/tools/watch-chat-timing.ps1
+!/tools/watch-webview-allowlist.js
+!/tools/dns-diagnose.js
+!/tools/edge-probe.py
+!/tools/rect-probe.py
+!/tools/crop-zoom.py
+!/tools/video-area.py
+!/tools/col-runs.py
+!/tools/pinch.sh
+!/tools/js-syntax-proof.js
+!/tools/js-syntax-scan.js
+!/tools/mobile-web-probe.js
+!/tools/ua-bundle-test.js
+!/tools/git-api-push.js
+!/tools/git-api-syncback.js
+!/tools/brute-commit.js
+!/tools/compare-commit.js
+!/tools/probe-commit-diff.js
+!/tools/ci-watch.js
+!/tools/commit-msg.js
+!/tools/git-channel-test.js
+!/tools/cf-api.js
+!/tools/cf-cred.js
+!/tools/cf-deploy-worker.js
+!/tools/cf-kv.js
+!/tools/r2-check.js
+!/tools/reach-test.js
+!/tools/reach-test2.js
+!/tools/announce-eps-test.js
+!/tools/geckoview-size-curve.js
+!/tools/geckoview-channels.js
+!/tools/geckoview-versions.js
 
 # Node 依赖
 **/node_modules/
