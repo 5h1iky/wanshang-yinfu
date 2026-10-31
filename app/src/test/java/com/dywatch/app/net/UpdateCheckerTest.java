@@ -29,6 +29,28 @@ public class UpdateCheckerTest {
     }
 
     @Test
+    public void parseRelease_双APK按flavor选() {
+        String json = "{\"tag_name\":\"v0.9.0\",\"assets\":["
+                + "{\"name\":\"wanshang-yinfu-v0.9.0-webview-release.apk\","
+                + "\"browser_download_url\":\"https://example.com/webview.apk\"},"
+                + "{\"name\":\"wanshang-yinfu-v0.9.0-kernel-release.apk\","
+                + "\"browser_download_url\":\"https://example.com/kernel.apk\"}]}";
+        assertEquals("https://example.com/kernel.apk",
+                UpdateChecker.parseRelease(json, "kernel").apkUrl);
+        assertEquals("https://example.com/webview.apk",
+                UpdateChecker.parseRelease(json, "webview").apkUrl);
+    }
+
+    @Test
+    public void parseRelease_没有对应变体时退回第一个APK() {
+        String json = "{\"tag_name\":\"v0.9.0\",\"assets\":["
+                + "{\"name\":\"wanshang-yinfu-v0.9.0-webview-release.apk\","
+                + "\"browser_download_url\":\"https://example.com/webview.apk\"}]}";
+        assertEquals("https://example.com/webview.apk",
+                UpdateChecker.parseRelease(json, "kernel").apkUrl);
+    }
+
+    @Test
     public void parseRelease_bad() {
         assertNull(UpdateChecker.parseRelease("{}"));
         assertNull(UpdateChecker.parseRelease("not json"));

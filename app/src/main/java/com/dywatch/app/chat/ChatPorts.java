@@ -15,9 +15,9 @@ public final class ChatPorts {
     private ChatPorts() {}
 
     public static ChatPort create(Activity activity, ChatEngine.Listener listener) {
-        ChatPort kernel = KernelSeam.chatPort(activity, listener);
-        if (kernel != null) return kernel;
-        return new WebViewChatPort(activity, listener);
+        if (!KernelSeam.enabled()) return new WebViewChatPort(activity, listener);
+        // kernel 构建：先给 Gecko 内核，运行时起不来/超时由 FallbackChatPort 自动切回 WebView。
+        return new FallbackChatPort(activity, listener);
     }
 
 }

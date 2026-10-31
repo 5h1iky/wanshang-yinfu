@@ -52,6 +52,17 @@ public final class UpdateChecker {
      * **启动瞬间闪退**，且用户完全不知道为什么。现在所有取值都过类型判断 + 兜底。
      */
     public static UpdateInfo parseRelease(String json) {
+        return parseRelease(json, null);
+    }
+
+    /**
+     * 按构建变体选择 APK：0.9.0 起同一个 Release 会同时挂 webview / kernel 两个包。
+     *
+     * 以前取 assets 里第一个 .apk，资产顺序一变就可能把 webview 包推给 kernel 用户
+     * （或反过来）。这里优先找文件名里带 "-&lt;flavor&gt;-" 的资产；找不到才退回第一个，
+     * 保证旧 Release（只有一个通用 apk）仍然能更新。
+     */
+    static UpdateInfo parseRelease(String json, String flavor) {
         JsonElement el;
         try {
             el = JsonParser.parseString(json);
@@ -69,15 +80,21 @@ public final class UpdateChecker {
         try {
             JsonElement ae = o.get("assets");
             if (ae != null && ae.isJsonArray()) {
+                String firstApk = "";
+                String preferredApk = "";
                 for (JsonElement a : ae.getAsJsonArray()) {
                     if (a == null || !a.isJsonObject()) continue;
                     JsonObject ao = a.getAsJsonObject();
                     String name = opt(ao, "name");
-                    if (name.endsWith(".apk")) {
-                        apkUrl = opt(ao, "browser_download_url");
-                        break;
+                    if (!name.endsWith(".apk")) continue;
+                    String url = opt(ao, "browser_download_url");
+                    if (firstApk.isEmpty()) firstApk = url;
+                    if (flavor != null && !flavor.isEmpty()
+                            && name.contains("-" + flavor + "-")) {
+                        preferredApk = url;
                     }
                 }
+                apkUrl = preferredApk.isEmpty() ? firstApk : preferredApk;
             }
         } catch (Throwable ignored) {
             // assets 形状不对就当"没有下载地址"，不要因此让整个更新检查炸掉
@@ -107,7 +124,8 @@ public final class UpdateChecker {
                     .build();
             try (Response resp = client.newCall(req).execute()) {
                 if (resp.body() == null || resp.code() != 200) return null;
-                UpdateInfo info = parseRelease(resp.body().string());
+                UpdateInfo info = parseRelease(resp.body().string(),
+                        com.dywatch.app.BuildConfig.FLAVOR);
                 if (info == null) return null;
                 return isNewer(info.version, currentVersion) ? info : null;
             }
