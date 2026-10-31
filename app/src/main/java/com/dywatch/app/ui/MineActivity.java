@@ -33,7 +33,7 @@ public class MineActivity extends UiActivity {
     private static final int TAB_LIKE = 0, TAB_HISTORY = 1;
 
     private androidx.recyclerview.widget.RecyclerView mList;
-    private RowAdapter mAdapter;
+    private MediaRowAdapter mAdapter;
     private TextView mHint;
     private Button mTabLike, mTabHistory;
     private DouyinApi mApi;
@@ -50,17 +50,20 @@ public class MineActivity extends UiActivity {
 
         mList = findViewById(R.id.rv_mine);
         mList.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
-        mAdapter = new RowAdapter(new RowAdapter.OnRowClick() {
-            @Override
-            public void onClick(Object payload) {
-                if (!(payload instanceof Integer)) return;
-                openAt((Integer) payload);
-            }
+        // “作品”区先显示封面 + 标题，点具体一条才进全屏视频流。
+        mAdapter = new MediaRowAdapter(payload -> {
+            if (!(payload instanceof Integer)) return;
+            openAt((Integer) payload);
         });
         mList.setAdapter(mAdapter);
         mHint = findViewById(R.id.tv_mine_hint);
         mTabLike = findViewById(R.id.btn_tab_like);
         mTabHistory = findViewById(R.id.btn_tab_history);
+
+        findViewById(R.id.btn_following).setOnClickListener(v ->
+                startActivity(new android.content.Intent(this, FollowingActivity.class)));
+        findViewById(R.id.btn_collections).setOnClickListener(v ->
+                startActivity(new android.content.Intent(this, CollectionActivity.class)));
 
         mTabLike.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -82,12 +85,15 @@ public class MineActivity extends UiActivity {
     private void switchTab(int tab) {
         if (mTab == tab && !mVideos.isEmpty()) return;
         mTab = tab;
+        mTabLike.setSelected(mTab == TAB_LIKE);
+        mTabHistory.setSelected(mTab == TAB_HISTORY);
         mTabLike.setTextColor(getColorCompat(mTab == TAB_LIKE
-                ? R.color.text_primary : R.color.text_secondary));
+                ? R.color.accent : R.color.text_secondary));
         mTabHistory.setTextColor(getColorCompat(mTab == TAB_HISTORY
-                ? R.color.text_primary : R.color.text_secondary));
+                ? R.color.accent : R.color.text_secondary));
         mVideos.clear();
         mAdapter.clear();
+        clearHint();
         if (tab == TAB_LIKE) loadLikes();
         else loadHistory();
     }
@@ -105,6 +111,7 @@ public class MineActivity extends UiActivity {
         }
         if (mLoading) return;
         mLoading = true;
+        final int tab = TAB_LIKE;
         hint("正在拉取喜欢…");
         Loading.show(this, true);
         new Thread(new Runnable() {
@@ -119,6 +126,7 @@ public class MineActivity extends UiActivity {
                         @Override
                         public void run() {
                             mLoading = false;
+                            if (mTab != tab) return; // 请求回来时已切到“看过”，别覆盖当前列表
                             // 成功路径也落一行：只记失败的话，"列表是空的"到底是没数据还是没拉到就分不清
                             AppLog.i("mine", "喜欢列表拉到 " + list.size() + " 条");
                             show(list, "还没有喜欢过的视频");
@@ -130,6 +138,7 @@ public class MineActivity extends UiActivity {
                         @Override
                         public void run() {
                             mLoading = false;
+                            if (mTab != tab) return; // 别把喜欢页的风控提示带到已切换的“看过”页
                             Loading.show(MineActivity.this, false);
                             // ⚠️ 2026-10-25：原来直接拼 e.getMessage()，Gson 的
                             //    "MalformedJsonException: Use JsonReader.setLenient..." 就甩到表盘上了。
@@ -160,13 +169,9 @@ public class MineActivity extends UiActivity {
     private void show(List<FeedVideo> list, String emptyText) {
         mVideos.clear();
         mVideos.addAll(list);
-        List<RowAdapter.Item> items = new ArrayList<>();
+        List<MediaRowAdapter.Item> items = new ArrayList<>();
         for (int i = 0; i < list.size(); i++) {
-            FeedVideo v = list.get(i);
-            String meta = v.authorName == null || v.authorName.isEmpty()
-                    ? "" : v.authorName;
-            items.add(new RowAdapter.Item(
-                    v.title.isEmpty() ? "(无标题)" : v.title, meta, "", i));
+            items.add(VideoRows.of(list.get(i), i));
         }
         mAdapter.submitList(items);
         Loading.show(this, false);
@@ -241,6 +246,8 @@ public class MineActivity extends UiActivity {
         it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_LIST,
                 new ArrayList<>(mVideos));
         it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_START_INDEX, index);
+        if (mTab == TAB_LIKE) it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_SOURCE,
+                com.dywatch.app.feed.VideoSource.likes(mVideos.size(), true));
         startActivity(it);
     }
 

@@ -588,6 +588,20 @@ public class ChatEngine {
         return reqId;
     }
 
+    /** 回复仍使用网页编辑器：目标 id 随请求透传，原评论与二级回复不能混淆。 */
+    public String sendCommentReply(String awemeId, String text, String commentId,
+                                   String replyToReplyId, String targetName,
+                                   String targetTextPrefix, ActionListener cb) {
+        String reqId = registerAction(cb);
+        runAction("ChatBridge.sendCommentReply(" + org.json.JSONObject.quote(awemeId) + ","
+                + org.json.JSONObject.quote(text) + "," + org.json.JSONObject.quote(commentId)
+                + "," + org.json.JSONObject.quote(replyToReplyId) + ","
+                + org.json.JSONObject.quote(targetName) + ","
+                + org.json.JSONObject.quote(targetTextPrefix) + ","
+                + org.json.JSONObject.quote(reqId) + ");");
+        return reqId;
+    }
+
     // ---- 老内核语法补丁（方案 A）----
     // 手表 WebView 是 Chromium 83，抖音私信微前端（pcim）用了 83 解析不了的语法，
     // 整块模块不执行 → 会话列表永远空。这里把 JS 拦下来改写后再喂内核。

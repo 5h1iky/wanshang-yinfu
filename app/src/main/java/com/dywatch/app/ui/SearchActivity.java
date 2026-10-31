@@ -1,0 +1,274 @@
+package com.dywatch.app.ui;
+
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.dywatch.app.R;
+import com.dywatch.app.feed.FeedActivity;
+import com.dywatch.app.feed.FeedVideo;
+import com.dywatch.app.feed.VideoSource;
+import com.dywatch.app.login.LoginManager;
+import com.dywatch.app.net.DouyinApi;
+import com.dywatch.app.sign.Signer;
+import com.dywatch.app.util.AppLog;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+/** 搜索：视频、用户、直播；短视频结果始终以全屏视频流播放。 */
+public class SearchActivity extends UiActivity {
+    public static final String EXTRA_INITIAL_TAB = "initial_tab";
+    public static final int VIDEO = 0, USER = 1, LIVE = 2;
+    private final List<FeedVideo> mVideos = new ArrayList<>();
+    private final List<DouyinApi.UserSummary> mUsers = new ArrayList<>();
+    private final List<DouyinApi.LiveRoom> mLives = new ArrayList<>();
+    private MediaRowAdapter mAdapter;
+    private RecyclerView mList;
+    private EditText mInput;
+    private TextView mHint, mClearHistory;
+    private Button[] mTabs;
+    private DouyinApi mApi;
+    private int mTab = VIDEO, mOffset, mGeneration;
+    private boolean mHasMore, mLoading;
+    private String mKeyword = "", mSearchId = "";
+    private LinearLayoutManager mLayout;
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_search);
+        setPageTitle("搜索");
+        mInput = findViewById(R.id.et_search);
+        mHint = findViewById(R.id.tv_search_hint);
+        mClearHistory = findViewById(R.id.btn_search_clear);
+        mClearHistory.setOnClickListener(v -> {
+            SearchHistoryStore.clear(this);
+            renderHistory();
+        });
+        mList = findViewById(R.id.rv_search);
+        mLayout = new LinearLayoutManager(this);
+        mList.setLayoutManager(mLayout);
+        mAdapter = new MediaRowAdapter(payload -> {
+            if (payload instanceof String) {
+                mInput.setText((String) payload);
+                mInput.setSelection(((String) payload).length());
+                search();
+            } else onRow(payload);
+        });
+        mList.setAdapter(mAdapter);
+        mTabs = new Button[]{findViewById(R.id.btn_search_video),
+                findViewById(R.id.btn_search_user), findViewById(R.id.btn_search_live)};
+        Fonts.scale(mClearHistory, R.dimen.t_caption);
+        for (int i = 0; i < mTabs.length; i++) {
+            final int tab = i;
+            mTabs[i].setOnClickListener(v -> switchTab(tab));
+        }
+        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
+        findViewById(R.id.btn_search_go).setOnClickListener(v -> search());
+        mInput.setOnEditorActionListener((v, action, event) -> {
+            if (action == EditorInfo.IME_ACTION_SEARCH || action == EditorInfo.IME_ACTION_DONE) {
+                search();
+                return true;
+            }
+            return false;
+        });
+        mList.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView rv, int dx, int dy) {
+                if (mHasMore && mLayout.findLastVisibleItemPosition() >= mAdapter.getItemCount() - 3) {
+                    load(false);
+                }
+            }
+        });
+        Fonts.scale(mInput, R.dimen.t_body);
+        switchTab(getIntent().getIntExtra(EXTRA_INITIAL_TAB, VIDEO));
+    }
+
+    private void switchTab(int tab) {
+        if (tab < VIDEO || tab > LIVE) tab = VIDEO;
+        mTab = tab;
+        for (int i = 0; i < mTabs.length; i++) {
+            mTabs[i].setTextColor(getColor(i == tab ? R.color.text_primary : R.color.text_secondary));
+            mTabs[i].setAlpha(i == tab ? 1f : 0.68f);
+        }
+        mGeneration++;
+        mLoading = false;
+        mHasMore = false;
+        mKeyword = "";
+        mSearchId = "";
+        mOffset = 0;
+        mVideos.clear();
+        mUsers.clear();
+        mLives.clear();
+        mAdapter.clear();
+        Loading.show(this, false);
+        mInput.setHint(tab == VIDEO ? "搜索视频" : tab == USER ? "搜索用户" : "搜索直播");
+        renderHistory();
+    }
+
+    private void search() {
+        String keyword = mInput.getText() == null ? "" : mInput.getText().toString().trim();
+        if (keyword.isEmpty()) {
+            hint("先输入搜索关键词");
+            return;
+        }
+        mInput.clearFocus();
+        mClearHistory.setVisibility(View.GONE);
+        mKeyword = keyword;
+        SearchHistoryStore.add(this, keyword);
+        mOffset = 0;
+        mSearchId = "";
+        mVideos.clear();
+        mUsers.clear();
+        mLives.clear();
+        mAdapter.clear();
+        mHasMore = true;
+        mGeneration++;
+        load(true);
+    }
+
+    private void load(boolean first) {
+        if (mLoading || !mHasMore || mKeyword.isEmpty() || isFinishing() || isDestroyed()) return;
+        mLoading = true;
+        final int generation = mGeneration;
+        final int offset = mOffset;
+        final String keyword = mKeyword, searchId = mSearchId, tabAtRequest = String.valueOf(mTab);
+        hint(first ? "正在搜索…" : "正在加载更多…");
+        if (first) Loading.show(this, true);
+        new Thread(() -> {
+            try {
+                DouyinApi api = ensureApi();
+                List<FeedVideo> videos = null;
+                List<DouyinApi.UserSummary> users = null;
+                List<DouyinApi.LiveRoom> lives = null;
+                int tab = Integer.parseInt(tabAtRequest);
+                if (tab == VIDEO) videos = api.searchVideos(keyword, offset, searchId);
+                else if (tab == USER) users = api.searchUsers(keyword, offset);
+                else lives = api.searchLive(keyword, offset);
+                final List<FeedVideo> finalVideos = videos;
+                final List<DouyinApi.UserSummary> finalUsers = users;
+                final List<DouyinApi.LiveRoom> finalLives = lives;
+                final boolean more = api.lastSearchHasMore;
+                final int next = api.lastSearchOffset;
+                final String nextSearchId = api.lastSearchId;
+                runOnUiThread(() -> {
+                    if (generation != mGeneration || isFinishing() || isDestroyed()) return;
+                    mLoading = false;
+                    mHasMore = more;
+                    mOffset = next;
+                    mSearchId = nextSearchId;
+                    if (mTab == VIDEO && finalVideos != null) {
+                        for (FeedVideo v : finalVideos) {
+                            if (containsVideo(v.awemeId)) continue;
+                            int index = mVideos.size();
+                            mVideos.add(v);
+                            mAdapter.append(java.util.Collections.singletonList(VideoRows.of(v, index)));
+                        }
+                    } else if (mTab == USER && finalUsers != null) {
+                        for (DouyinApi.UserSummary u : finalUsers) {
+                            if (containsUser(u.secUid)) continue;
+                            mUsers.add(u);
+                            String meta = u.followerCount > 0 ? FeedVideo.formatCount(u.followerCount) + " 粉丝" : "";
+                            mAdapter.append(java.util.Collections.singletonList(new MediaRowAdapter.Item(
+                                    u.nickname, meta, u.signature, u.avatarUrl, u, MediaRowAdapter.KIND_USER)));
+                        }
+                    } else if (mTab == LIVE && finalLives != null) {
+                        for (DouyinApi.LiveRoom room : finalLives) {
+                            mLives.add(room);
+                            mAdapter.append(java.util.Collections.singletonList(new MediaRowAdapter.Item(
+                                    room.title, room.ownerName, room.viewerText + " · 直播中",
+                                    room.coverUrl, room, MediaRowAdapter.KIND_VIDEO)));
+                        }
+                    }
+                    Loading.show(this, false);
+                    if (mAdapter.getItemCount() == 0) hint("没有找到相关内容，换个关键词试试");
+                    else if (!mHasMore) hint("已经到底了");
+                    else clearHint();
+                });
+            } catch (Exception e) {
+                AppLog.i("search", "读取失败: " + e.getClass().getSimpleName());
+                runOnUiThread(() -> {
+                    if (generation != mGeneration || isFinishing() || isDestroyed()) return;
+                    mLoading = false;
+                    Loading.show(this, false);
+                    hint(DouyinApi.friendlyMessage(e));
+                });
+            }
+        }, "search-load").start();
+    }
+
+    private boolean containsVideo(String id) {
+        for (FeedVideo v : mVideos) if (v.awemeId.equals(id)) return true;
+        return false;
+    }
+    private boolean containsUser(String id) {
+        for (DouyinApi.UserSummary u : mUsers) if (u.secUid.equals(id)) return true;
+        return false;
+    }
+
+    private void onRow(Object payload) {
+        if (payload instanceof Integer) {
+            int index = (Integer) payload;
+            if (index < 0 || index >= mVideos.size()) return;
+            Intent it = new Intent(this, FeedActivity.class);
+            it.putExtra(FeedActivity.EXTRA_VIDEO_LIST, new ArrayList<>(mVideos));
+            it.putExtra(FeedActivity.EXTRA_START_INDEX, index);
+            VideoSource source = VideoSource.search(mKeyword, mOffset, mHasMore);
+            source.searchId = mSearchId;
+            it.putExtra(FeedActivity.EXTRA_VIDEO_SOURCE, source);
+            startActivity(it);
+        } else if (payload instanceof DouyinApi.UserSummary) {
+            DouyinApi.UserSummary user = (DouyinApi.UserSummary) payload;
+            Intent it = new Intent(this, UserActivity.class);
+            it.putExtra(UserActivity.EXTRA_SEC_UID, user.secUid);
+            it.putExtra(UserActivity.EXTRA_NAME, user.nickname);
+            startActivity(it);
+        } else if (payload instanceof DouyinApi.LiveRoom) {
+            LiveActivity.open(this, (DouyinApi.LiveRoom) payload);
+        }
+    }
+
+    private void renderHistory() {
+        List<String> history = SearchHistoryStore.read(this);
+        List<MediaRowAdapter.Item> rows = new ArrayList<>();
+        for (String word : history) {
+            rows.add(new MediaRowAdapter.Item(word, "最近搜索", "", "", word,
+                    MediaRowAdapter.KIND_HISTORY));
+        }
+        mAdapter.submitList(rows);
+        mClearHistory.setVisibility(history.isEmpty() ? View.GONE : View.VISIBLE);
+        hint(history.isEmpty() ? "输入关键词，查找视频、用户或直播" : "点历史词重新搜索 · 历史仅保存在本机");
+    }
+
+    private DouyinApi ensureApi() throws Exception {
+        if (mApi == null) {
+            mApi = new DouyinApi(new Signer(Arrays.asList(readAsset("sign/utils.js"),
+                    readAsset("sign/sm3.js"), readAsset("sign/vm_decode.js"))));
+            mApi.setSessionCookie(LoginManager.getCookies(this));
+        }
+        return mApi;
+    }
+    private String readAsset(String path) throws IOException {
+        try (InputStream in = getAssets().open(path)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) >= 0) out.write(buffer, 0, n);
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+    private void hint(String text) { mHint.setText(text); mHint.setVisibility(View.VISIBLE); }
+    private void clearHint() { mHint.setVisibility(View.GONE); }
+    @Override protected void onDestroy() { mGeneration++; super.onDestroy(); }
+}

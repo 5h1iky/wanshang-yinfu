@@ -57,6 +57,12 @@
             style="@style/AboutRow"
             android:layout_marginTop="@dimen/s2" />
 
+        <!-- 作者 B 站 -->
+        <TextView
+            android:id="@+id/row_bilibili"
+            style="@style/AboutRow"
+            android:layout_marginTop="@dimen/s2" />
+
         <!-- 开源协议 -->
         <TextView
             android:id="@+id/row_license"

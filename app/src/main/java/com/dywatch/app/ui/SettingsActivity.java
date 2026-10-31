@@ -181,6 +181,17 @@ public class SettingsActivity extends UiActivity {
                 toast("已清除，下次进聊天会重新改写");
             }
         });
+        // 旧 kernel / 系统 WebView 的网页缓存：升级到 webview 变体后 Gecko 不再使用，
+        // 但 qgahcyt6 目录可能留几百 MB；给一个显式回收入口。
+        actionRow("清理网页/内核缓存", com.dywatch.app.util.CacheManager
+                .formatSize(com.dywatch.app.util.CacheManager.browserCacheSize(this))
+                + "（旧内核/网页缓存，不影响登录）", new Runnable() {
+            @Override public void run() {
+                long freed = com.dywatch.app.util.CacheManager.clearBrowserCache(SettingsActivity.this);
+                toast("已清理 " + com.dywatch.app.util.CacheManager.formatSize(freed));
+                buildRows();
+            }
+        });
         // 视频缓存（2026-10-02，代码审计 M7）：库里只会按上限自动淘汰，且淘汰是异步的、
         // 失败还是静默的；用户此前**没有任何手动回收空间的手段**。
         actionRow("清空视频缓存", com.dywatch.app.cache.ProxyVideoCacheManager
@@ -203,6 +214,9 @@ public class SettingsActivity extends UiActivity {
                                 + "  边距 " + Settings.paddingHPercent(SettingsActivity.this)
                                 + "/" + Settings.paddingVPercent(SettingsActivity.this) + "%"
                                 + "\n【看过记录】" + com.dywatch.app.feed.SeenStore.size(SettingsActivity.this) + " 条"
+                                + "\n【网页缓存】" + com.dywatch.app.util.CacheManager
+                                        .formatSize(com.dywatch.app.util.CacheManager
+                                                .browserCacheSize(SettingsActivity.this))
                                 + "\n【视频缓存】" + com.dywatch.app.cache.ProxyVideoCacheManager
                                         .formatSize(com.dywatch.app.cache.ProxyVideoCacheManager
                                                 .cacheSize(SettingsActivity.this))

@@ -97,12 +97,16 @@ public class RowAdapter extends RecyclerView.Adapter<RowAdapter.Holder> {
         // chrome，不跟——否则整行高度跟着涨，列表可视行数变少。
         Fonts.scale(h.title, R.dimen.t_body);
         Fonts.scale(h.summary, R.dimen.t_body);
-        h.itemView.setOnClickListener(new View.OnClickListener() {
+        View.OnClickListener click = new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (mClick != null) mClick.onClick(it.payload);
             }
-        });
+        };
+        h.itemView.setOnClickListener(click);
+        // 有些机型会把触摸目标落在文本子控件上；把点击同时挂到阅读面，保证整行可点。
+        h.title.setOnClickListener(click);
+        h.summary.setOnClickListener(click);
     }
 
     @Override

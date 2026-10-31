@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 媒体通用行：严格对齐界面草案 .video-card / .person / .folder / .notify。
+     视频卡 = 89×63 封面 + 10dp 间距 + 12sp 两行标题 + 10sp 元信息。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="9dp"
+    android:background="@drawable/bg_media_card"
+    android:clickable="true"
+    android:focusable="true"
+    android:padding="9dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/media_row_image"
+            android:layout_width="89dp"
+            android:layout_height="63dp"
+            android:background="@color/bg_surface"
+            android:importantForAccessibility="no"
+            android:scaleType="centerCrop" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/media_row_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:lineSpacingMultiplier="1.55"
+                android:maxLines="2"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/t_card_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/media_row_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/text_muted"
+                android:textSize="@dimen/t_card_meta" />
+
+            <TextView
+                android:id="@+id/media_row_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/t_card_summary" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

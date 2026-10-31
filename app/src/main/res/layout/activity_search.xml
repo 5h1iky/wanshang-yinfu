@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg_base" android:orientation="vertical">
+    <include layout="@layout/include_header" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:paddingHorizontal="@dimen/s3"
+        android:paddingVertical="@dimen/s2" android:gravity="center_vertical">
+        <EditText android:id="@+id/et_search" android:layout_width="0dp"
+            android:layout_height="@dimen/input_min_h" android:layout_weight="1"
+            android:background="@drawable/bg_settings_row" android:hint="搜索视频"
+            android:imeOptions="actionSearch" android:inputType="text"
+            android:maxLines="1" android:paddingHorizontal="@dimen/s4"
+            android:textColor="@color/text_primary" android:textColorHint="@color/text_muted"
+            android:textSize="@dimen/t_body" />
+        <Button android:id="@+id/btn_search_go" android:layout_width="@dimen/ctrl_md"
+            android:layout_height="@dimen/ctrl_min" android:layout_marginStart="@dimen/s2"
+            android:background="@drawable/bg_pill" app:backgroundTint="@null"
+            android:minWidth="0dp" android:padding="0dp" android:text="→"
+            android:textColor="@color/text_primary" android:textSize="@dimen/t_lede" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:paddingHorizontal="@dimen/s3">
+        <Button android:id="@+id/btn_search_video" android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min" android:layout_weight="1"
+            android:background="@drawable/bg_settings_row" app:backgroundTint="@null"
+            android:text="视频" android:textSize="@dimen/t_body" />
+        <Button android:id="@+id/btn_search_user" android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min" android:layout_weight="1"
+            android:layout_marginStart="@dimen/s2" android:background="@drawable/bg_settings_row"
+            app:backgroundTint="@null" android:text="用户" android:textSize="@dimen/t_body" />
+        <Button android:id="@+id/btn_search_live" android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min" android:layout_weight="1"
+            android:layout_marginStart="@dimen/s2" android:background="@drawable/bg_settings_row"
+            app:backgroundTint="@null" android:text="直播" android:textSize="@dimen/t_body" />
+    </LinearLayout>
+    <TextView android:id="@+id/tv_search_hint" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4" android:paddingVertical="@dimen/s2"
+        android:textColor="@color/text_secondary" android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
+    <TextView android:id="@+id/btn_search_clear" android:layout_width="wrap_content"
+        android:layout_height="@dimen/ctrl_min" android:layout_gravity="end"
+        android:background="@drawable/bg_settings_row" android:clickable="true"
+        android:focusable="true" android:gravity="center"
+        android:paddingHorizontal="@dimen/s4" android:text="清空历史"
+        android:textColor="@color/text_muted" android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1">
+        <com.dywatch.app.ui.RotaryRecyclerView android:id="@+id/rv_search"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:clipToPadding="false" android:padding="@dimen/s3" android:scrollbars="none" />
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
+</LinearLayout>

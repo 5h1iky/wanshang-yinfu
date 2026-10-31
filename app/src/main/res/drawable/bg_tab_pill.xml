@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 界面草案 .tab：胶囊圆角、33dp 高、选中 #3B272A + 粉色文字。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/tab_active_bg" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/tab_bg" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>

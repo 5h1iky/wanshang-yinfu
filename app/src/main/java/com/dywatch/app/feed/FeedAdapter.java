@@ -33,6 +33,8 @@ public class FeedAdapter extends PagerAdapter {
         void onShare(FeedVideo video);
         /** 点作者头像 → 进主页（只读，走原生 API） */
         void onAvatar(FeedVideo video);
+        /** 播放面板里的返回键：退全屏或退出播放页 */
+        void onBack();
     }
 
     /** View 缓存池：从 ViewPager 移除的 item 存这里复用（沿用 demo 方案） */
@@ -126,6 +128,10 @@ public class FeedAdapter extends PagerAdapter {
         com.dywatch.app.ui.Fonts.scale(viewHolder.mTitle, R.dimen.t_lede);
         viewHolder.mPosition = pos;
         viewHolder.mItem = item;
+        // 返回键在播放面板里（与暂停键/进度条同层），显隐由 TikTokView 跟随面板。
+        viewHolder.mTikTokView.setOnBackClickListener(() -> {
+            if (mActionListener != null) mActionListener.onBack();
+        });
         bindActions(viewHolder, item);
         // 每次绑定重设监听（闭包引用当前条目，防复用串页）
         viewHolder.mBtnLike.setOnClickListener(new View.OnClickListener() {

@@ -22,6 +22,10 @@
     <color name="bg_base">#000000</color>
     <!-- 顶栏/底栏（原 #161C22） -->
     <color name="bg_surface">#0D0D0D</color>
+    <!-- 界面草案的 card / dim / active tab 三个色 -->
+    <color name="card_media">#262626</color>
+    <color name="tab_bg">#1D1D1D</color>
+    <color name="tab_active_bg">#3B272A</color>
     <!-- 列表行/卡片：Bili CardStyle 同款 #cc262626 -->
     <color name="bg_card">#CC262626</color>
     <!-- 按钮/输入框（Bili ButtonStyle 同款底） -->

@@ -104,6 +104,18 @@
             </LinearLayout>
         </LinearLayout>
 
+        <TextView
+            android:id="@+id/btn_notice"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_marginTop="@dimen/s3"
+            android:background="@drawable/bg_settings_row"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="@dimen/s4"
+            android:text="互动通知"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/t_body" />
+
         <!--
           次要动作：登录状态 + 退出。
           原先登录占一格一级位，但它低频且状态多变（已登录/需重登/未登录），

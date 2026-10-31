@@ -37,7 +37,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      */
     public static final String EXTRA_VIDEO_LIST = "video_list";
     public static final String EXTRA_START_INDEX = "start_index";
-    /** 预置列表模式：不再自动拉流、翻页（列表就是这么多） */
+    /** 可选：所选列表的后续分页；不传时保留旧版固定列表行为。 */
+    public static final String EXTRA_VIDEO_SOURCE = "video_source";
+    private VideoSource mSource;
+    /** 预置列表模式：不再自动拉推荐流；有 mSource 时仍按原列表翻页。 */
     private boolean mPresetMode;
     /** 应用级缓存：重进页面直接放上次刷到的视频（固件只在真冷启动垫场，杜绝"每次进来都是那 2 条老视频"） */
     private static final List<FeedVideo> sCache = new ArrayList<>();
@@ -86,6 +89,9 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         initVideoView();
         mPreloadManager = PreloadManager.getInstance(this);
 
+        java.io.Serializable source = getIntent().getSerializableExtra(EXTRA_VIDEO_SOURCE);
+        if (source instanceof VideoSource) mSource = (VideoSource) source;
+
         // 「我的」页可能直接塞一批视频来播（喜欢/看过列表点进来）
         @SuppressWarnings("unchecked")
         java.io.Serializable extra = getIntent().getSerializableExtra(EXTRA_VIDEO_LIST);
@@ -121,14 +127,18 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         });
     }
 
-    /** 手表硬件适配 §10：可见返回键（无手势/无按键设备可回主屏） */
+    /** 返回键已收进播放面板（TikTokView 的点击暂停界面），不再常驻画面。 */
     private void wireBack() {
-        findViewById(R.id.btn_back).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                finish();
-            }
-        });
+        // 页面级返回逻辑统一走 onBack()：全屏时先退全屏，否则退出播放页。
+    }
+
+    @Override
+    public void onBack() {
+        if (mVideoView != null && mVideoView.isFullScreen()) {
+            exitFullscreen();
+        } else {
+            finish();
+        }
     }
 
     /**
@@ -170,8 +180,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     }
 
     private void loadMore(final boolean first) {
-        // 预置列表模式：列表就是这么多，不去拉流（拉了反而把人家的喜欢列表冲掉）
-        if (mPresetMode) return;
+        if (mPresetMode) {
+            loadMoreFromSource();
+            return;
+        }
         // 页面已经在关：别再起新的网络请求（补拉的延时任务会走到这里）
         if (isFinishing() || isDestroyed()) return;
         if (mLoading) return;
@@ -263,6 +275,43 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 }
             }
         }, "feed-load").start();
+    }
+
+    /** 来源流追加：不能经过推荐流的“已看过”过滤，更不能替换成推荐内容。 */
+    private void loadMoreFromSource() {
+        if (mSource == null || !mSource.hasMore || mLoading || isFinishing() || isDestroyed()) return;
+        mLoading = true;
+        new Thread(() -> {
+            try {
+                final java.util.List<FeedVideo> page = mSource.next(ensureApi());
+                runOnUiThread(() -> {
+                    mLoading = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    java.util.List<FeedVideo> fresh = new java.util.ArrayList<>();
+                    for (FeedVideo v : page) {
+                        boolean duplicate = false;
+                        for (FeedVideo old : mVideoList) {
+                            if (old.awemeId.equals(v.awemeId)) { duplicate = true; break; }
+                        }
+                        if (!duplicate) fresh.add(v);
+                    }
+                    mVideoList.addAll(fresh);
+                    mAdapter.notifyDataSetChanged();
+                    startPlay(mViewPager.getCurrentItem());
+                    if (fresh.isEmpty() && !mSource.hasMore) showHint("没有更多了");
+                    AppLog.i("feed", "来源流续拉 +" + fresh.size() + "，共 " + mVideoList.size()
+                            + "，hasMore=" + mSource.hasMore);
+                });
+            } catch (Exception e) {
+                AppLog.i("feed", "来源流翻页失败: " + e.getClass().getSimpleName());
+                runOnUiThread(() -> {
+                    mLoading = false;
+                    if (!isFinishing() && !isDestroyed()) {
+                        showHint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
+                    }
+                });
+            }
+        }, "source-feed-load").start();
     }
 
     private void initVideoView() {
@@ -474,7 +523,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     }
                 });
                 // 快到底时预取下一页
-                if (!mPresetMode && position >= mVideoList.size() - 2) {
+                if ((!mPresetMode || mSource != null) && position >= mVideoList.size() - 2) {
                     loadMore(false);
                 }
             }
@@ -504,6 +553,15 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      */
     private void startPlay(final int position, final int attempt) {
         if (position < 0 || position >= mVideoList.size()) return;
+        final FeedVideo pending = mVideoList.get(position);
+        if (pending.playUrl.isEmpty() && !pending.awemeId.isEmpty()) {
+            resolveAndPlayDetail(position, pending.awemeId);
+            return;
+        }
+        if (pending.playUrl.isEmpty()) {
+            showHint("这条视频没有可用播放地址");
+            return;
+        }
         int count = mViewPager.getChildCount();
         for (int i = 0; i < count; i++) {
             View itemView = mViewPager.getChildAt(i);
@@ -561,6 +619,39 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         } else {
             com.dywatch.app.util.AppLog.i("feed", "挂载失败，放弃 #" + position);
         }
+    }
+
+    /** 「看过」/通知只带 aweme_id：滑到该条时单条换址，不一次并发打一批。 */
+    private final java.util.Set<String> mDetailInFlight = new java.util.HashSet<>();
+    private void resolveAndPlayDetail(final int position, final String awemeId) {
+        if (!mDetailInFlight.add(awemeId)) return;
+        showHint("正在取回播放地址…");
+        new Thread(() -> {
+            try {
+                final FeedVideo full = ensureApi().fetchDetail(awemeId);
+                runOnUiThread(() -> {
+                    mDetailInFlight.remove(awemeId);
+                    if (isFinishing() || isDestroyed()) return;
+                    for (int i = 0; i < mVideoList.size(); i++) {
+                        if (awemeId.equals(mVideoList.get(i).awemeId)) {
+                            mVideoList.set(i, full);
+                            break;
+                        }
+                    }
+                    mAdapter.notifyDataSetChanged();
+                    clearHint();
+                    startPlay(position);
+                });
+            } catch (Exception e) {
+                AppLog.i("feed", "详情换址失败: " + e.getClass().getSimpleName());
+                runOnUiThread(() -> {
+                    mDetailInFlight.remove(awemeId);
+                    if (!isFinishing() && !isDestroyed()) {
+                        showHint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
+                    }
+                });
+            }
+        }, "detail-resolve").start();
     }
 
     /**

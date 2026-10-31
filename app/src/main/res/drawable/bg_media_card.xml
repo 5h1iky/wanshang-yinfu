@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTML 草案 .video-card / .person / .folder / .notify 的统一卡片底：
+     #262626、11px 圆角、无描边。按下时用 bg_control 给反馈。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/bg_control" />
+            <corners android:radius="11dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/card_media" />
+            <corners android:radius="11dp" />
+        </shape>
+    </item>
+</selector>

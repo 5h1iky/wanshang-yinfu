@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  首页“刷视频”选片页：先给封面 + 标题卡片，点具体一条才进全屏视频流。
+  对标参考系（哔哩终端）的首页浏览逻辑，不在进页时自动播放。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base"
+    android:orientation="vertical">
+
+    <include layout="@layout/include_header" />
+
+    <!-- 草案 .tabs：推荐 / 搜索 / 直播，33dp 胶囊，选中粉色 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="11dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/s3"
+        android:paddingTop="@dimen/s2">
+
+        <Button
+            android:id="@+id/btn_browse_recommend"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_weight="1"
+            android:background="@drawable/bg_tab_pill"
+            android:minWidth="0dp"
+            android:minHeight="@dimen/ctrl_min"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp"
+            android:stateListAnimator="@null"
+            android:text="推荐"
+            android:textAllCaps="false"
+            android:textColor="@color/accent"
+            android:textSize="@dimen/t_caption"
+            app:backgroundTint="@null" />
+
+        <Button
+            android:id="@+id/btn_browse_search"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_marginStart="7dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_tab_pill"
+            android:minWidth="0dp"
+            android:minHeight="@dimen/ctrl_min"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp"
+            android:stateListAnimator="@null"
+            android:text="搜索"
+            android:textAllCaps="false"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/t_caption"
+            app:backgroundTint="@null" />
+
+        <Button
+            android:id="@+id/btn_browse_live"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_marginStart="7dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_tab_pill"
+            android:minWidth="0dp"
+            android:minHeight="@dimen/ctrl_min"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp"
+            android:stateListAnimator="@null"
+            android:text="直播"
+            android:textAllCaps="false"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/t_caption"
+            app:backgroundTint="@null" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tv_browse_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4"
+        android:paddingVertical="@dimen/s2"
+        android:textColor="@color/text_secondary"
+        android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <com.dywatch.app.ui.RotaryRecyclerView
+            android:id="@+id/rv_browse"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="@dimen/s3"
+            android:scrollbars="none" />
+
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
+</LinearLayout>

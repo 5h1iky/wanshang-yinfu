@@ -315,6 +315,12 @@
     sendComment: function (awemeId, text, reqId) {
       ChatBridge.__doVideoAction('sendComment', awemeId, text, reqId);
     },
+    // 回复必须先在页面里定位并点击目标评论的“回复”，不能退化成新的一级评论。
+    sendCommentReply: function (awemeId, text, commentId, replyToReplyId, targetName, targetTextPrefix, reqId) {
+      ChatBridge.__doVideoAction('sendCommentReply', awemeId,
+        { text: text, commentId: commentId, replyToReplyId: replyToReplyId,
+          name: targetName, textPrefix: targetTextPrefix }, reqId);
+    },
 
     // 状态指纹：data-e2e-state（2026-10-24 CDP 实测定案）+ 类名 token 集合 + 计数文本。
     //
@@ -482,6 +488,7 @@
       if (kind === 'comments') return this.__scrapeComments();
       if (kind === 'commentsMore') return this.__loadMoreComments();
       if (kind === 'sendComment') return this.__doSendComment(payload, reqId);
+      if (kind === 'sendCommentReply') return this.__doSendComment(payload.text, reqId, payload);
       var key = kind + ':' + awemeId;
       // ⚠️ 2026-10-25：在途标记带时间戳 + 过期自动作废。
       // 起因（真机）：一次点击的 promise 链没走完就整页重载/卡住，`__inFlight[key]` 永久留下，
@@ -632,7 +639,7 @@
 
     // 发评论：激活 Draft.js 框 → 粘贴注入 → 枚举提交面（right-ct 内可点 span 逐个试）→ 回车兜底
     // 判定 = 编辑器清空（清空即已被页面消费=已发出）；不再用「未找到即失败」的假阴性口径
-    __doSendComment: function (text, reqId) {
+    __doSendComment: function (text, reqId, replyTarget) {
       var self = this;
       // 评论框要等 SPA 渲染（实测：跳页后 4s 才起页面、评论框还没挂载，旧版直接报"未找到评论框"）
       var boxTries = 0;
@@ -648,12 +655,39 @@
           return;
         }
         clearInterval(boxTimer);
+        if (replyTarget && !self.__openReplyTarget(replyTarget)) {
+          post({ type: 'action', action: 'sendCommentReply', ok: false, reqId: reqId,
+                 detail: '未定位到这条评论，未发送任何内容' });
+          return;
+        }
         fireClick(b);
-        self.__doSendCommentEdit(text, reqId);
+        self.__doSendCommentEdit(text, reqId, replyTarget);
       }, 500);
     },
 
-    __doSendCommentEdit: function (text, reqId) {
+    // 网页当前没有可靠的 cid DOM 属性：以昵称 + 原正文前缀限定目标，找不到就中止。
+    // 绝不能点第一个“回复”或回退为一级评论，那会把内容发错对象。
+    __openReplyTarget: function (target) {
+      var wraps = document.querySelectorAll('[class*="comment-item-info-wrap"]');
+      for (var i = 0; i < wraps.length; i++) {
+        var col = wraps[i].parentElement;
+        if (!col) continue;
+        var name = (wraps[i].textContent || '').replace(/\s+/g, ' ').trim().replace(/\.{2,}$/, '');
+        if (target.name && name !== target.name) continue;
+        var text = (col.textContent || '').replace(/\s+/g, ' ');
+        if (target.textPrefix && text.indexOf(target.textPrefix) < 0) continue;
+        var nodes = col.querySelectorAll('span,button');
+        for (var n = 0; n < nodes.length; n++) {
+          if (nodes[n].children.length === 0 && (nodes[n].textContent || '').trim() === '回复') {
+            fireClick(nodes[n]);
+            return true;
+          }
+        }
+      }
+      return false;
+    },
+
+    __doSendCommentEdit: function (text, reqId, replyTarget) {
       var self = this;
       var tries = 0;
       var timer = setInterval(function () {
@@ -861,6 +895,9 @@
           else if (a.kind === 'collect') ChatBridge.collectVideo(a.awemeId, a.payload, a.reqId);
           else if (a.kind === 'comments') ChatBridge.fetchComments(a.awemeId);
           else if (a.kind === 'sendComment') ChatBridge.sendComment(a.awemeId, a.payload, a.reqId);
+          else if (a.kind === 'sendCommentReply') ChatBridge.sendCommentReply(a.awemeId,
+            a.payload.text, a.payload.commentId, a.payload.replyToReplyId,
+            a.payload.name, a.payload.textPrefix, a.reqId);
         }, 800);
       }
     }

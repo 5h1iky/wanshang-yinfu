@@ -7,6 +7,7 @@
   feed_* 系列（头像 34dp / 图标 24dp / 间距 8dp），色值也不再写死。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -17,6 +18,22 @@
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
         android:contentDescription="@null"/>
+
+    <!-- 返回键：放进播放面板，随“点一下画面”的面板显隐；正常上下滑时隐藏 -->
+    <Button
+        android:id="@+id/btn_feed_back"
+        android:layout_width="@dimen/ctrl_min"
+        android:layout_height="@dimen/ctrl_min"
+        android:layout_gravity="top|start"
+        android:layout_margin="@dimen/s3"
+        android:background="@drawable/bg_pill"
+        app:backgroundTint="@null"
+        android:minWidth="0dp"
+        android:padding="0dp"
+        android:text="←"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/t_lede"
+        android:visibility="gone" />
 
     <ImageView
         android:id="@+id/play_btn"

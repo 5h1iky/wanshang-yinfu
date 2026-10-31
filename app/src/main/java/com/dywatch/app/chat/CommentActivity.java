@@ -54,7 +54,16 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
         mList = findViewById(R.id.rv_comments);
         mList.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
-        mAdapter = new com.dywatch.app.ui.RowAdapter(null);
+        mAdapter = new com.dywatch.app.ui.RowAdapter(payload -> {
+            if (!(payload instanceof Comment)) return;
+            Comment comment = (Comment) payload;
+            if (comment.cid.isEmpty()) return;
+            com.dywatch.app.util.AppLog.i("chat", "打开评论回复页");
+            android.content.Intent it = new android.content.Intent(this, ReplyActivity.class);
+            it.putExtra(ReplyActivity.EXTRA_AWEME_ID, mAwemeId);
+            it.putExtra(ReplyActivity.EXTRA_ROOT_COMMENT, comment);
+            startActivity(it);
+        });
         mList.setAdapter(mAdapter);
         mHint = findViewById(R.id.tv_comment_hint);
         mFooter = findViewById(R.id.tv_comment_footer);
@@ -266,6 +275,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
         // 0 赞不显示：满屏"· 0 赞"是噪音，手表上每个字符都要有信息量
         boolean hasLikes = !c.likes.isEmpty() && !"0".equals(c.likes.trim());
         String meta = c.time + (hasLikes ? ("  ·  " + c.likes + " 赞") : "");
+        if (!c.cid.isEmpty() && c.replyCount > 0) meta += "  ·  " + c.replyCount + " 条回复 ›";
         return new RowAdapter.Item(c.name.isEmpty() ? "匿名" : c.name, meta, c.text, c);
     }
 
@@ -412,6 +422,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
 
     @Override
     public void onEngineReady() {
+        // 直连接口是主路；引擎只负责写操作，不要再抓一遍 DOM 或覆盖当前提示。
+        if (mApiMode) return;
         // getInstance 同步回调时 mEngine 未赋值 → post 队尾
         mHint.post(new Runnable() {
             @Override

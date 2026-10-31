@@ -9,6 +9,7 @@
      否则未选中的那个 tab 会被染成亮色（真机实测，"退出应用"就是这么变蓝的）。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_base"
@@ -16,7 +17,38 @@
 
     <include layout="@layout/include_header" />
 
-    <!-- 两个分区切换 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/s3"
+        android:paddingTop="@dimen/s2">
+        <Button
+            android:id="@+id/btn_following"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_weight="1"
+            android:background="@drawable/bg_tab_pill"
+            android:stateListAnimator="@null"
+            app:backgroundTint="@null"
+            android:text="关注"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/t_body" />
+        <Button
+            android:id="@+id/btn_collections"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/ctrl_min"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/s2"
+            android:background="@drawable/bg_tab_pill"
+            android:stateListAnimator="@null"
+            app:backgroundTint="@null"
+            android:text="收藏"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/t_body" />
+    </LinearLayout>
+
+    <!-- 作品区：现有喜欢 / 看过收在这里（对齐界面草案的三段结构） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -29,10 +61,11 @@
             android:layout_width="0dp"
             android:layout_height="@dimen/ctrl_min"
             android:layout_weight="1"
-            android:background="@drawable/bg_settings_row"
-            android:backgroundTint="@null"
+            android:background="@drawable/bg_tab_pill"
+            android:stateListAnimator="@null"
+            app:backgroundTint="@null"
             android:text="喜欢"
-            android:textColor="@color/text_primary"
+            android:textColor="@color/accent"
             android:textSize="@dimen/t_body" />
 
         <Button
@@ -41,8 +74,9 @@
             android:layout_height="@dimen/ctrl_min"
             android:layout_marginStart="@dimen/s2"
             android:layout_weight="1"
-            android:background="@drawable/bg_settings_row"
-            android:backgroundTint="@null"
+            android:background="@drawable/bg_tab_pill"
+            android:stateListAnimator="@null"
+            app:backgroundTint="@null"
             android:text="看过"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/t_body" />

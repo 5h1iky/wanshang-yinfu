@@ -33,6 +33,15 @@ public class SignerTest {
     }
 
     @Test
+    public void makeABogus_replyVariantIsAvailable() throws Exception {
+        List<String> js = Arrays.asList(read("utils.js"), read("sm3.js"), read("vm_decode.js"));
+        Signer signer = new Signer(js);
+        String ab = signer.makeABogusWithMagic("aid=6383&item_id=1&comment_id=2", 8);
+        assertNotNull(ab);
+        assertTrue("reply a_bogus 长度异常", ab.length() > 20);
+    }
+
+    @Test
     public void makeABogus_differentQueryDifferentSig() throws Exception {
         List<String> js = Arrays.asList(read("utils.js"), read("sm3.js"), read("vm_decode.js"));
         Signer signer = new Signer(js);

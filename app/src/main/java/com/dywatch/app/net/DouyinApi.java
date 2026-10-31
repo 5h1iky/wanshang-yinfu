@@ -32,6 +32,14 @@ public final class DouyinApi {
      * 拉流/播放必需的请求头。真机 34s ERROR 的根因就在这里：CDN 边缘对无 Referer 的请求一律 403。
      * 实测头矩阵（tools/play-header-matrix.js，2026-09-26）：带 Referer 即可 206 video/mp4，Cookie 反而不需要。
      */
+    public static Map<String, String> livePlayHeaders() {
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("User-Agent", UA);
+        h.put("Referer", "https://live.douyin.com/");
+        h.put("Accept", "*/*");
+        return h;
+    }
+
     public static Map<String, String> playHeaders() {
         Map<String, String> h = new LinkedHashMap<>();
         h.put("User-Agent", UA);
@@ -95,39 +103,716 @@ public final class DouyinApi {
     public List<FeedVideo> fetchFavorite(String secUid, long cursor) throws IOException {
         ensureTtwid();
         String query = buildFavoriteQuery(secUid, cursor);
-        Request req = new Request.Builder()
-                .url("https://www.douyin.com/aweme/v1/web/aweme/favorite/?" + query)
+        String body;
+        try {
+            body = requestFavorite(query, secUid, false);
+        } catch (IOException first) {
+            body = "";
+        }
+        if (body.trim().isEmpty() || !body.trim().startsWith("{")) {
+            // 2026-11-01：Argus 现在会拦 favorite（HTTP 403 / Uifid Not Found）。
+            // 主页作品接口用本地 webSign 已实测可过同一层保护，喜欢列表同样重试一次。
+            AppLog.i("api", "喜欢列表首次响应非 JSON，尝试 webSign 重试");
+            body = requestFavorite(query, secUid, true);
+        }
+        String trimmed = body == null ? "" : body.trim();
+        if (trimmed.isEmpty()) throw new IOException("喜欢列表暂时没有返回内容，请稍后再试");
+        if (!trimmed.startsWith("{")) throw new IOException("喜欢列表暂时被接口拦截，请稍后再试");
+        List<FeedVideo> list = parseFeed(trimmed);
+        if (list.isEmpty()) {
+            // 空也可能是真没喜欢过；用 status_code 区分"接口没通"和"确实没数据"
+            com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(trimmed);
+            int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
+            if (code != 0) {
+                AppLog.i("api", "favorite status=" + code);
+                throw new IOException("喜欢列表暂时不可用（status=" + code + "），稍后再试");
+            }
+        }
+        return list;
+    }
+
+    /** 喜欢列表单次请求；webSign=true 时追加本地签名参数与请求头。 */
+    private String requestFavorite(String query, String secUid, boolean webSign) throws IOException {
+        String finalQuery = query;
+        Map<String, String> signedHeaders = java.util.Collections.emptyMap();
+        if (webSign) {
+            SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(query, fullCookie());
+            finalQuery = signed.query;
+            signedHeaders = signed.headers;
+        }
+        Request.Builder builder = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/favorite/?" + finalQuery)
                 .header("User-Agent", UA)
                 .header("Referer", "https://www.douyin.com/user/"
                         + (secUid == null ? "" : secUid) + "?showTab=like")
-                .header("Cookie", fullCookie())
-                .build();
-        try (Response resp = client.newCall(req).execute()) {
-            if (resp.body() == null) throw new IOException("喜欢列表暂不可用（空响应），稍后再试");
+                .header("Accept", "application/json")
+                .header("Cookie", fullCookie());
+        for (Map.Entry<String, String> header : signedHeaders.entrySet()) {
+            builder.header(header.getKey(), header.getValue());
+        }
+        try (Response resp = client.newCall(builder.build()).execute()) {
+            if (resp.body() == null) throw new IOException("喜欢列表暂时不可用（空响应），稍后再试");
             int httpCode = resp.code();
             String body = resp.body().string();
-            // ⚠️ 2026-10-25：上游 Argus 收紧后这里会回 **HTTP 403 + 纯文本**
-            //    `Blocked by ArgusSecurityPlugin Uifid Not Found`。
-            //    旧代码直接把这段喂给 Gson → 界面弹 "MalformedJsonException: ..." 英文异常。
-            //    现在先把响应原文打进日志（下次定案有据），再按类型翻成人话。
+            // 只落状态与长度，不落正文（正文可能带账号信息）。
             AppLog.i("api", "favorite http=" + httpCode + " len=" + body.length()
-                    + " head=" + headOf(body, 200));
-            String b = body.trim();
-            if (!b.startsWith("{") && !b.startsWith("[")) {
-                throw new IOException(favoriteFailureMessage(httpCode, body));
+                    + " webSign=" + webSign);
+            if (!resp.isSuccessful()) throw new IOException("喜欢列表 HTTP " + httpCode);
+            return body;
+        }
+    }
+
+    /** 本人身份：只把接口调用所需的标识交给关注/收藏功能，不记录到日志。 */
+    public static class SelfIdentity {
+        public String uid = "";
+        public String secUid = "";
+    }
+
+    public SelfIdentity fetchSelfIdentity() throws IOException {
+        String q = joinAndSign(baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME));
+        JsonObject root = getJson("/aweme/v1/web/user/profile/self/", q,
+                "https://www.douyin.com/", "本人信息");
+        JsonObject user = objOf(root, "user");
+        if (user == null) throw new IOException("登录状态已失效，请重新扫码登录");
+        SelfIdentity identity = new SelfIdentity();
+        identity.uid = optString(user, "uid");
+        identity.secUid = optString(user, "sec_uid");
+        if (identity.secUid.isEmpty()) throw new IOException("无法读取当前账号，请重新登录");
+        return identity;
+    }
+
+    /** 关注列表的用户模型；这里只读，不提供关注/取关按钮。 */
+    public static class UserSummary {
+        public String uid = "", secUid = "", nickname = "", signature = "", avatarUrl = "";
+        public long followerCount, awemeCount;
+    }
+
+    public volatile boolean lastFollowingHasMore;
+    public volatile long lastFollowingCursor;
+
+    /**
+     * 自己的关注列表。max_time=0 会走另一分支；首次必须使用当前秒级时间。
+     * 参数与本项目已有 probe-readonly-apis2.js 一致，响应正文绝不写入日志。
+     */
+    public List<UserSummary> fetchFollowing(long maxTime) throws IOException {
+        SelfIdentity self = fetchSelfIdentity();
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("user_id", self.uid);
+        p.put("sec_user_id", self.secUid);
+        p.put("offset", "0");
+        p.put("min_time", "0");
+        p.put("max_time", String.valueOf(maxTime > 0 ? maxTime : System.currentTimeMillis() / 1000));
+        p.put("count", "20");
+        p.put("source_type", maxTime > 0 ? "1" : "2");
+        p.put("gps_access", "0");
+        p.put("address_book_access", "0");
+        p.put("is_top", "1");
+        p.put("webcast_sdk_version", VER_COMMON_CODE);
+        p.put("webcast_version_code", VER_COMMON_CODE);
+        JsonObject root = getJson("/aweme/v1/web/user/following/list/", joinAndSign(p),
+                "https://www.douyin.com/user/" + self.secUid, "关注列表");
+        lastFollowingHasMore = optInt(root, "has_more") == 1;
+        long next = optLong(root, "min_time");
+        lastFollowingCursor = lastFollowingHasMore && next > 0 ? next : -1;
+        return parseFollowing(root);
+    }
+
+    static List<UserSummary> parseFollowing(JsonObject root) {
+        List<UserSummary> out = new ArrayList<>();
+        if (root == null) return out;
+        JsonArray arr = arrOf(root, "followings");
+        if (arr == null) arr = arrOf(root, "following_list");
+        if (arr == null) arr = arrOf(root, "user_following_list");
+        if (arr == null) return out;
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            UserSummary u = parseUserSummary(el.getAsJsonObject());
+            if (!u.secUid.isEmpty()) out.add(u);
+        }
+        return out;
+    }
+
+    static UserSummary parseUserSummary(JsonObject item) {
+        UserSummary u = new UserSummary();
+        u.uid = optString(item, "uid");
+        u.secUid = optString(item, "sec_uid");
+        u.nickname = optString(item, "nickname");
+        u.signature = optString(item, "signature");
+        u.followerCount = optLong(item, "follower_count");
+        u.awemeCount = optLong(item, "aweme_count");
+        u.avatarUrl = imageUrl(item, "avatar_thumb");
+        if (u.avatarUrl.isEmpty()) u.avatarUrl = imageUrl(item, "avatar_medium");
+        return u;
+    }
+
+    /** 统一处理只读响应：敏感正文不落日志，403/风控文案按当前接口单独报告。 */
+    private JsonObject getJson(String path, String query, String referer, String label)
+            throws IOException {
+        return getJson(path, query, referer, label, java.util.Collections.<String, String>emptyMap());
+    }
+
+    private JsonObject getJson(String path, String query, String referer, String label,
+                               Map<String, String> extraHeaders) throws IOException {
+        ensureTtwid();
+        Request req = new Request.Builder()
+                .url((path.startsWith("/webcast/") ? "https://live.douyin.com"
+                        : "https://www.douyin.com") + path + "?" + query)
+                .header("User-Agent", UA)
+                .header("Referer", referer)
+                .header("Accept", "application/json")
+                .header("Cookie", fullCookie())
+                .build();
+        if (!extraHeaders.isEmpty()) {
+            Request.Builder b = req.newBuilder();
+            for (Map.Entry<String, String> h : extraHeaders.entrySet()) {
+                b.header(h.getKey(), h.getValue());
             }
-            List<FeedVideo> list = parseFeed(body);
-            if (list.isEmpty()) {
-                // 空也可能是真没喜欢过；用 status_code 区分"接口没通"和"确实没数据"
-                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(b);
-                int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
-                if (code != 0) {
-                    AppLog.i("api", "favorite status=" + code + " body=" + headOf(b, 300));
-                    throw new IOException(favoriteFailureMessage(httpCode, body) + "（status=" + code + "）");
+            req = b.build();
+        }
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException(label + "暂时不可用，请稍后重试");
+            int http = resp.code();
+            String body = resp.body().string();
+            String trimmed = body.trim();
+            AppLog.i("api", label + " HTTP " + http + " 响应长度=" + body.length());
+            if (trimmed.isEmpty()) {
+                throw new IOException(label + "暂时没有返回内容，请稍后再试");
+            }
+            if (!trimmed.startsWith("{")) {
+                if (http == 403 || trimmed.contains("ArgusSecurityPlugin")) {
+                    throw new IOException(label + "暂时被接口拦截，请稍后再试");
+                }
+                throw new IOException(label + "返回异常（HTTP " + http + "），请稍后重试");
+            }
+            JsonElement el = JsonParser.parseString(trimmed);
+            if (!el.isJsonObject()) throw new IOException(label + "返回格式异常");
+            JsonObject root = el.getAsJsonObject();
+            int status = optInt(root, "status_code");
+            if (status != 0) {
+                AppLog.i("api", label + " status=" + status);
+                throw new IOException(status == 8 || status == 2154
+                        ? "登录状态已失效，请重新扫码登录" : label + "暂时不可用，请稍后重试");
+            }
+            return root;
+        }
+    }
+
+    public static class CollectionInfo implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        public String id = "", name = "";
+        public int count;
+        public boolean isPrivate;
+    }
+
+    public volatile long lastCollectionCursor = -1;
+    public volatile boolean lastCollectionHasMore;
+
+    /** 全部收藏及单个收藏夹目录；读取目录不等于获取全部收藏。 */
+    public List<CollectionInfo> fetchCollections(long cursor) throws IOException {
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("cursor", String.valueOf(cursor));
+        p.put("count", "20");
+        SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(joinAndSign(p), fullCookie());
+        JsonObject root = getJson("/aweme/v1/web/collects/list/", signed.query,
+                "https://www.douyin.com/?recommend=1", "收藏夹", signed.headers);
+        JsonArray arr = arrOf(root, "collects_list");
+        if (arr == null) arr = arrOf(root, "collects");
+        if (arr == null) arr = arrOf(root, "collection_list");
+        List<CollectionInfo> out = new ArrayList<>();
+        if (arr != null) {
+            for (JsonElement el : arr) {
+                if (!el.isJsonObject()) continue;
+                JsonObject o = el.getAsJsonObject();
+                CollectionInfo info = new CollectionInfo();
+                info.id = firstString(o, "collects_id", "collection_id", "id");
+                info.name = firstString(o, "collects_name", "collection_name", "name");
+                info.count = (int) firstLong(o, "total", "aweme_count", "count");
+                info.isPrivate = optInt(o, "status") == 1 || optInt(o, "is_private") == 1;
+                if (!info.id.isEmpty()) out.add(info);
+            }
+        }
+        lastCollectionHasMore = optInt(root, "has_more") == 1;
+        lastCollectionCursor = lastCollectionHasMore ? firstLong(root, "cursor", "max_cursor") : -1;
+        return out;
+    }
+
+    /** 收藏夹内作品。集合 id 必须用 collects_id，不能传用户 id。 */
+    public List<FeedVideo> fetchCollectionVideos(String collectionId, long cursor) throws IOException {
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("collects_id", collectionId == null ? "" : collectionId);
+        p.put("cursor", String.valueOf(cursor));
+        p.put("count", "18");
+        SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(joinAndSign(p), fullCookie());
+        JsonObject root = getJson("/aweme/v1/web/collects/video/list/", signed.query,
+                "https://www.douyin.com/", "收藏作品", signed.headers);
+        lastCollectionHasMore = optInt(root, "has_more") == 1;
+        lastCollectionCursor = lastCollectionHasMore ? firstLong(root, "cursor", "max_cursor") : -1;
+        return parseFeed(root.toString());
+    }
+
+    /** 全部收藏是 POST 查询（非写入）；参数放 query，空 body，不能改当 GET。 */
+    public List<FeedVideo> fetchAllCollectionVideos(long cursor) throws IOException {
+        ensureTtwid();
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("publish_video_strategy_type", "2");
+        p.put("count", "18");
+        p.put("cursor", String.valueOf(cursor));
+        SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(joinAndSign(p), fullCookie());
+        Request.Builder builder = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/listcollection/?" + signed.query)
+                .header("User-Agent", UA).header("Referer", "https://www.douyin.com/")
+                .header("Cookie", fullCookie())
+                .post(okhttp3.RequestBody.create(new byte[0], null));
+        for (Map.Entry<String, String> header : signed.headers.entrySet()) {
+            builder.header(header.getKey(), header.getValue());
+        }
+        Request req = builder.build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (resp.body() == null) throw new IOException("全部收藏暂时不可用，请稍后重试");
+            String body = resp.body().string().trim();
+            if (!body.startsWith("{")) throw new IOException("全部收藏暂时被接口拦截，请稍后再试");
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if (optInt(root, "status_code") != 0) throw new IOException("全部收藏暂时不可用，请稍后重试");
+            lastCollectionHasMore = optInt(root, "has_more") == 1;
+            lastCollectionCursor = lastCollectionHasMore ? firstLong(root, "cursor", "max_cursor") : -1;
+            return parseFeed(body);
+        }
+    }
+
+    public volatile boolean lastSearchHasMore;
+    public volatile int lastSearchOffset;
+    public volatile String lastSearchId = "";
+
+    /** 综合搜索只保留真正可播的视频条目，混合结果不产生空卡片。 */
+    public List<FeedVideo> searchVideos(String keyword, int offset, String searchId) throws IOException {
+        Map<String, String> p = baseDeviceParams("190600", "19.6.0");
+        p.put("search_channel", "aweme_general");
+        p.put("enable_history", "1");
+        p.put("filter_selected", "{\"sort_type\":\"0\",\"publish_time\":\"0\",\"filter_duration\":\"\",\"search_range\":\"\",\"content_type\":\"\"}");
+        p.put("keyword", keyword == null ? "" : keyword);
+        p.put("search_source", "tab_search");
+        p.put("query_correct_type", "1");
+        p.put("is_filter_search", "0");
+        p.put("from_group_id", "");
+        p.put("disable_rs", "0");
+        p.put("offset", String.valueOf(Math.max(0, offset)));
+        p.put("count", "15");
+        p.put("need_filter_settings", offset > 0 ? "0" : "1");
+        p.put("list_type", "single");
+        p.put("pc_search_top_1_params", "{\"enable_ai_search_top_1\":1}");
+        p.put("search_id", searchId == null ? "" : searchId);
+        JsonObject root = getJson("/aweme/v1/web/general/search/single/", joinAndSign(p),
+                "https://www.douyin.com/search/" + urlEncode(keyword) + "?type=general", "视频搜索");
+        lastSearchHasMore = optInt(root, "has_more") == 1;
+        lastSearchOffset = offset + 15;
+        lastSearchId = optString(root, "search_id");
+        JsonObject log = objOf(root, "log_pb");
+        if (lastSearchId.isEmpty() && log != null) lastSearchId = optString(log, "impr_id");
+        List<FeedVideo> out = new ArrayList<>();
+        JsonArray data = arrOf(root, "data");
+        if (data == null) return parseFeed(root.toString());
+        for (JsonElement el : data) {
+            if (!el.isJsonObject()) continue;
+            JsonObject wrapper = el.getAsJsonObject();
+            JsonObject item = objOf(wrapper, "aweme_info");
+            if (item == null && wrapper.has("aweme_id")) item = wrapper;
+            if (item != null) {
+                FeedVideo v = itemToVideo(item);
+                if (v != null) out.add(v);
+            }
+        }
+        return out;
+    }
+
+    public List<UserSummary> searchUsers(String keyword, int offset) throws IOException {
+        Map<String, String> p = searchParams(keyword, "aweme_user_web", offset, 15, VER_COMMON_CODE, VER_COMMON_NAME);
+        JsonObject root = getJson("/aweme/v1/web/discover/search/", joinAndSign(p),
+                "https://www.douyin.com/search/" + urlEncode(keyword) + "?type=user", "用户搜索");
+        lastSearchHasMore = optInt(root, "has_more") == 1;
+        lastSearchOffset = offset + 15;
+        lastSearchId = optString(root, "search_id");
+        List<UserSummary> out = new ArrayList<>();
+        JsonArray arr = arrOf(root, "user_list");
+        if (arr == null) arr = arrOf(root, "data");
+        if (arr != null) for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject o = el.getAsJsonObject();
+            JsonObject u = objOf(o, "user_info");
+            if (u == null) u = objOf(o, "user");
+            if (u == null) u = o;
+            UserSummary user = parseUserSummary(u);
+            if (!user.secUid.isEmpty()) out.add(user);
+        }
+        return out;
+    }
+
+    public static class LiveRoom implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        public String webRid = "", title = "", ownerName = "", coverUrl = "", viewerText = "";
+    }
+
+    public List<LiveRoom> searchLive(String keyword, int offset) throws IOException {
+        Map<String, String> p = searchParams(keyword, "aweme_live", offset, 15, VER_COMMON_CODE, VER_COMMON_NAME);
+        JsonObject root = getJson("/aweme/v1/web/live/search/", joinAndSign(p),
+                "https://www.douyin.com/search/" + urlEncode(keyword) + "?type=live", "直播搜索");
+        lastSearchHasMore = optInt(root, "has_more") == 1;
+        lastSearchOffset = offset + 15;
+        lastSearchId = optString(root, "search_id");
+        if (lastSearchId.isEmpty()) lastSearchId = firstString(root, "log_id", "rid");
+        return parseLiveRooms(root);
+    }
+
+    private Map<String, String> searchParams(String keyword, String channel, int offset,
+                                              int count, String verCode, String verName) {
+        Map<String, String> p = baseDeviceParams(verCode, verName);
+        p.put("search_channel", channel);
+        p.put("keyword", keyword == null ? "" : keyword);
+        p.put("search_source", "normal_search");
+        p.put("query_correct_type", "1");
+        p.put("is_filter_search", "0");
+        p.put("from_group_id", "");
+        p.put("disable_rs", "0");
+        p.put("offset", String.valueOf(offset));
+        p.put("count", String.valueOf(count));
+        p.put("need_filter_settings", offset > 0 ? "0" : "1");
+        p.put("list_type", "single");
+        p.put("pc_search_top_1_params", "{\"enable_ai_search_top_1\":1}");
+        return p;
+    }
+
+    static List<LiveRoom> parseLiveRooms(JsonObject root) {
+        List<LiveRoom> out = new ArrayList<>();
+        if (root == null) return out;
+        JsonArray arr = arrOf(root, "data");
+        if (root.has("data") && root.get("data").isJsonObject()) {
+            JsonObject container = root.getAsJsonObject("data");
+            JsonArray nested = arrOf(container, "data");
+            if (nested != null) arr = nested;
+        }
+        if (arr != null) {
+            for (JsonElement el : arr) {
+                if (!el.isJsonObject()) continue;
+                JsonObject wrapper = el.getAsJsonObject();
+                JsonArray nested = arrOf(wrapper, "data");
+                if (nested == null) continue;
+                for (JsonElement child : nested) {
+                    if (child.isJsonObject()) addLiveRoom(out, child.getAsJsonObject(), wrapper);
                 }
             }
-            return list;
+            if (!out.isEmpty()) return out;
         }
+        if (arr == null) return out;
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject wrapper = el.getAsJsonObject();
+            JsonElement lives = wrapper.get("lives");
+            if (lives != null && lives.isJsonArray()) {
+                for (JsonElement le : lives.getAsJsonArray()) {
+                    if (le.isJsonObject()) addLiveRoom(out, le.getAsJsonObject(), wrapper);
+                }
+            } else if (lives != null && lives.isJsonObject()) {
+                addLiveRoom(out, lives.getAsJsonObject(), wrapper);
+            } else {
+                addLiveRoom(out, wrapper, wrapper);
+            }
+        }
+        return out;
+    }
+
+    /** 兜底入口：实际搜索结果的 web_rid 位于字符串化 rawdata 内。 */
+    private static void addLiveRoom(List<LiveRoom> out, JsonObject item, JsonObject wrapper) {
+        String webRid = findStringRecursive(item, "web_rid", 0);
+        if (webRid.isEmpty()) webRid = findStringRecursive(item, "webRid", 0);
+        if (webRid.isEmpty()) webRid = firstString(wrapper, "web_rid");
+        if (webRid.isEmpty()) return;
+        JsonObject room = findObjectRecursive(item, "web_rid", 0);
+        if (room == null) room = item;
+        LiveRoom live = new LiveRoom();
+        live.webRid = webRid;
+        live.title = findStringRecursive(item, "title", 0);
+        if (live.title.isEmpty()) live.title = firstString(item, "desc");
+        JsonObject owner = objOf(item, "owner");
+        if (owner == null) owner = objOf(item, "author");
+        if (owner == null) owner = findObjectRecursive(item, "nickname", 0);
+        if (owner != null) live.ownerName = optString(owner, "nickname");
+        live.coverUrl = imageUrl(room, "cover");
+        if (live.coverUrl.isEmpty()) live.coverUrl = imageUrl(item, "cover");
+        JsonObject stats = objOf(room, "stats");
+        if (stats != null) live.viewerText = firstString(stats, "user_count_str", "total_user_str");
+        out.add(live);
+    }
+
+    /** 只在 JSON 对象/数组及可解析的 rawdata 字符串里找键，限制深度避免异常嵌套。 */
+    private static JsonElement rawOrJson(JsonElement value) {
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            return value;
+        }
+        String s = value.getAsString();
+        if (!(s.startsWith("{") || s.startsWith("["))) return null;
+        try { return JsonParser.parseString(s); } catch (Exception ignored) { return null; }
+    }
+
+    private static String findStringRecursive(JsonElement element, String key, int depth) {
+        if (element == null || depth > 6) return "";
+        JsonElement parsed = rawOrJson(element);
+        if (parsed != null && parsed != element) {
+            element = parsed;
+        }
+        if (element.isJsonObject()) {
+            JsonObject object = element.getAsJsonObject();
+            JsonElement direct = object.get(key);
+            if (direct != null && direct.isJsonPrimitive()) return direct.getAsString();
+            for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+                String found = findStringRecursive(entry.getValue(), key, depth + 1);
+                if (!found.isEmpty()) return found;
+            }
+        } else if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) {
+                String found = findStringRecursive(child, key, depth + 1);
+                if (!found.isEmpty()) return found;
+            }
+        }
+        return "";
+    }
+
+    private static JsonObject findObjectRecursive(JsonElement element, String key, int depth) {
+        if (element == null || depth > 6) return null;
+        JsonElement parsed = rawOrJson(element);
+        if (parsed != null && parsed != element) element = parsed;
+        if (element.isJsonObject()) {
+            JsonObject object = element.getAsJsonObject();
+            if (object.has(key)) return object;
+            for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+                JsonObject found = findObjectRecursive(entry.getValue(), key, depth + 1);
+                if (found != null) return found;
+            }
+        } else if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) {
+                JsonObject found = findObjectRecursive(child, key, depth + 1);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    public static class NoticeItem {
+        public String id = "", nickname = "", text = "", time = "", awemeId = "", secUid = "";
+        public int group;
+        public String imageUrl = "";
+    }
+
+    /** 只读通知：特意不传 is_mark_read，不做已读副作用，也不自动后台刷新。 */
+    public List<NoticeItem> fetchNotices(int group, long maxTime) throws IOException {
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("is_new_notice", "1");
+        p.put("notice_group", String.valueOf(group));
+        p.put("count", "20");
+        p.put("min_time", "0");
+        p.put("max_time", String.valueOf(maxTime));
+        JsonObject root = getJson("/aweme/v1/web/notice/", joinAndSign(p),
+                "https://www.douyin.com/?recommend=1", "互动通知");
+        lastNoticeHasMore = optInt(root, "has_more") == 1;
+        long next = firstLong(root, "max_time", "cursor");
+        lastNoticeCursor = next > 0 ? next : -1;
+        return parseNoticesForTest(root, group);
+    }
+
+    /** 解析与网络解耦，便于以脱敏样本锁定真实结构。 */
+    static List<NoticeItem> parseNoticesForTest(JsonObject root, int group) {
+        List<NoticeItem> out = new ArrayList<>();
+        JsonArray arr = arrOf(root, "notice_list_v2");
+        if (arr == null) arr = arrOf(root, "notice_list");
+        if (arr == null) return out;
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject o = el.getAsJsonObject();
+            NoticeItem item = new NoticeItem();
+            item.group = optInt(o, "notice_group");
+            if (item.group == 0) item.group = group;
+            item.id = firstString(o, "nid_str", "notice_id", "id", "cid");
+            if (item.id.isEmpty() && firstLong(o, "nid") > 0) item.id = String.valueOf(firstLong(o, "nid"));
+            item.time = formatCommentTime(firstLong(o, "create_time", "time"));
+            item.awemeId = firstString(o, "aweme_id", "item_id");
+            JsonObject general = objOf(o, "general_notice");
+            if (general != null) {
+                item.nickname = firstString(general, "sender_name");
+                item.text = firstString(general, "content", "title");
+            }
+            JsonObject follow = objOf(o, "follow");
+            JsonObject user = objOf(o, "user");
+            if (user == null) user = objOf(o, "from_user");
+            if (user == null && follow != null) user = objOf(follow, "from_user");
+            if (user != null) {
+                if (item.nickname.isEmpty()) item.nickname = optString(user, "nickname");
+                item.secUid = optString(user, "sec_uid");
+                item.imageUrl = imageUrl(user, "avatar_thumb");
+            }
+            JsonObject commentWrap = objOf(o, "comment");
+            JsonObject comment = commentWrap == null ? null : objOf(commentWrap, "comment");
+            if (comment != null) {
+                JsonObject cu = objOf(comment, "user");
+                if (cu != null) {
+                    if (item.nickname.isEmpty()) item.nickname = optString(cu, "nickname");
+                    if (item.secUid.isEmpty()) item.secUid = optString(cu, "sec_uid");
+                    if (item.imageUrl.isEmpty()) item.imageUrl = imageUrl(cu, "avatar_thumb");
+                }
+                if (item.text.isEmpty()) item.text = optString(comment, "text");
+            }
+            JsonObject aweme = objOf(o, "aweme");
+            if (aweme == null && commentWrap != null) aweme = objOf(commentWrap, "aweme");
+            if (aweme == null) aweme = objOf(o, "aweme_info");
+            if (aweme != null) {
+                if (item.awemeId.isEmpty()) item.awemeId = optString(aweme, "aweme_id");
+                if (item.imageUrl.isEmpty()) item.imageUrl = imageUrl(aweme, "cover");
+                if (item.text.isEmpty()) item.text = optString(aweme, "desc");
+            }
+            if (item.text.isEmpty()) item.text = follow != null ? "关注了你" : noticeText(item.group);
+            out.add(item);
+        }
+        return out;
+    }
+    public volatile boolean lastNoticeHasMore;
+    public volatile long lastNoticeCursor = -1;
+
+    static String noticeText(int group) {
+        switch (group) {
+            case 401: return "关注了你";
+            case 601: return "提到了你";
+            case 2: return "评论了你";
+            case 3: return "赞了你";
+            default: return "新互动";
+        }
+    }
+
+    public static class LiveStream {
+        public String name = "", url = "", codec = "";
+        public boolean hls = true;
+    }
+
+    /** 公开 web_rid 换取播放地址；不会输出带签名的完整 URL。 */
+    public List<LiveStream> enterLive(String webRid) throws IOException {
+        Map<String, String> p = new LinkedHashMap<>();
+        p.put("aid", "6383");
+        p.put("app_name", "douyin_web");
+        p.put("live_id", "1");
+        p.put("device_platform", "web");
+        p.put("language", "zh-CN");
+        p.put("enter_from", "link_share");
+        p.put("cookie_enabled", "true");
+        p.put("screen_width", "2560");
+        p.put("screen_height", "1440");
+        p.put("browser_language", "zh-CN");
+        p.put("browser_platform", "Win32");
+        p.put("browser_name", "Chrome");
+        p.put("browser_version", "135.0.0.0");
+        p.put("os_name", "Windows");
+        p.put("os_version", "10");
+        p.put("web_rid", webRid == null ? "" : webRid);
+        JsonObject root = getJson("/webcast/room/web/enter/", joinAndSign(p),
+                "https://live.douyin.com/" + webRid, "直播间");
+        JsonObject data = objOf(root, "data");
+        if (data == null) throw new IOException("直播间暂时无法进入，请稍后重试");
+        JsonArray rooms = arrOf(data, "data");
+        if (rooms == null || rooms.size() == 0 || !rooms.get(0).isJsonObject()) {
+            throw new IOException("直播已结束或房间不存在");
+        }
+        JsonObject room = rooms.get(0).getAsJsonObject();
+        JsonObject stream = objOf(room, "stream_url");
+        if (stream == null) stream = objOf(objOf(room, "room"), "stream_url");
+        List<LiveStream> out = parseLiveStreams(stream);
+        if (out.isEmpty()) throw new IOException("直播间没有可播放的 HLS/FLV 地址");
+        return out;
+    }
+
+    /** 优先 HLS；map 缺失时防御性解析内嵌 stream_data，不假定内层只有一种形式。 */
+    static List<LiveStream> parseLiveStreams(JsonObject stream) {
+        List<LiveStream> out = new ArrayList<>();
+        if (stream == null) return out;
+        addUrlMap(out, objOf(stream, "hls_pull_url_map"), true);
+        addUrlMap(out, objOf(stream, "flv_pull_url"), false);
+        JsonObject sdk = objOf(stream, "live_core_sdk_data");
+        if (sdk != null) {
+            JsonObject pull = objOf(sdk, "pull_data");
+            if (pull != null) {
+                String nested = optString(pull, "stream_data");
+                if (!nested.isEmpty()) {
+                    try {
+                        JsonElement el = JsonParser.parseString(nested);
+                        collectNestedStreams(el, out, 0);
+                    } catch (Exception ignored) { }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void addUrlMap(List<LiveStream> out, JsonObject map, boolean hls) {
+        if (map == null) return;
+        for (Map.Entry<String, JsonElement> entry : map.entrySet()) {
+            if (!entry.getValue().isJsonPrimitive()) continue;
+            String url = entry.getValue().getAsString();
+            if (url.startsWith("http://")) url = "https://" + url.substring(7);
+            if (!url.startsWith("https://")) continue;
+            LiveStream stream = new LiveStream();
+            stream.name = entry.getKey();
+            stream.url = url;
+            stream.hls = hls;
+            out.add(stream);
+        }
+    }
+
+    private static void collectNestedStreams(JsonElement el, List<LiveStream> out, int depth) {
+        if (el == null || depth > 7) return;
+        if (el.isJsonObject()) {
+            JsonObject o = el.getAsJsonObject();
+            if (o.has("url") && o.get("url").isJsonPrimitive()) {
+                String url = optString(o, "url");
+                if (url.startsWith("http://")) url = "https://" + url.substring(7);
+                if (url.startsWith("https://") && (url.contains("m3u8") || url.contains("flv"))) {
+                    LiveStream stream = new LiveStream();
+                    stream.url = url;
+                    stream.hls = url.contains("m3u8");
+                    stream.name = firstString(o, "quality_name", "name", "sdk_key");
+                    stream.codec = firstString(o, "v_codec", "codec");
+                    out.add(stream);
+                }
+            }
+            for (Map.Entry<String, JsonElement> entry : o.entrySet()) collectNestedStreams(entry.getValue(), out, depth + 1);
+        } else if (el.isJsonArray()) {
+            for (JsonElement child : el.getAsJsonArray()) collectNestedStreams(child, out, depth + 1);
+        }
+    }
+
+    /** 解析评论所需的 cid/回复数/用户身份；DOM 兜底模型没有这些字段时为空。 */
+    static com.dywatch.app.chat.model.Comment parseComment(JsonObject c) {
+        if (c == null) return null;
+        JsonObject u = objOf(c, "user");
+        String name = u == null ? "" : optString(u, "nickname");
+        com.dywatch.app.chat.model.Comment cm = new com.dywatch.app.chat.model.Comment(
+                name, optString(c, "text"), formatCommentTime(optLong(c, "create_time")),
+                FeedVideo.formatCount(optLong(c, "digg_count")));
+        cm.cid = optString(c, "cid");
+        cm.replyCount = optLong(c, "reply_comment_total");
+        if (cm.replyCount == 0) cm.replyCount = optLong(c, "reply_count");
+        JsonArray preview = arrOf(c, "reply_comment");
+        if (preview != null) {
+            for (JsonElement reply : preview) {
+                if (reply.isJsonObject()) {
+                    com.dywatch.app.chat.model.Comment item = parseComment(reply.getAsJsonObject());
+                    if (item != null && !item.cid.isEmpty()) cm.previewReplies.add(item);
+                }
+            }
+        }
+        if (u != null) {
+            cm.secUid = optString(u, "sec_uid");
+            cm.avatarUrl = imageUrl(u, "avatar_thumb");
+        }
+        JsonObject replyTo = objOf(c, "reply_to_user");
+        if (replyTo != null) cm.replyToName = optString(replyTo, "nickname");
+        JsonObject reply = objOf(c, "reply_to_reply");
+        if (reply != null) cm.replyToCid = optString(reply, "cid");
+        if (cm.replyToCid.isEmpty()) cm.replyToCid = optString(c, "reply_to_reply_id");
+        return cm;
     }
 
     /** 取前 n 个字符（日志用；换行压成空格，避免 logcat 一行被截断后看不出结构） */
@@ -237,6 +922,17 @@ public final class DouyinApi {
     /** aweme/post 特有版本号（写通用的 170400 会少字段，实测结论） */
     private static final String VER_POST_CODE = "290100", VER_POST_NAME = "29.1.0";
 
+
+    /** 严格接口用：先完整编码业务参数，再由调用方对结果做 a_bogus。 */
+    private static String joinQuery(Map<String, String> p) {
+        StringBuilder q = new StringBuilder();
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (q.length() > 0) q.append('&');
+            q.append(urlEncode(e.getKey())).append('=').append(urlEncode(e.getValue()));
+        }
+        return q.toString();
+    }
+
     /** 拼 query 并签名（LinkedHashMap 保序：a_bogus 必须对最终串算） */
     private String joinAndSign(Map<String, String> p) {
         StringBuilder q = new StringBuilder();
@@ -270,35 +966,73 @@ public final class DouyinApi {
     public List<FeedVideo> fetchUserPosts(String secUid, long cursor) throws IOException {
         ensureTtwid();
         String query = buildUserPostsQuery(secUid, cursor);
-        Request req = new Request.Builder()
-                .url("https://www.douyin.com/aweme/v1/web/aweme/post/?" + query)
+        String body;
+        try {
+            body = requestUserPosts(query, secUid, false);
+        } catch (IOException first) {
+            body = "";
+        }
+        if (body.trim().isEmpty() || !body.trim().startsWith("{")) {
+            // 2026-11-01：主页作品接口也会被 Argus 挡成 HTML/空响应。收藏夹和详情
+            // 已证明本地 webSign 能过同一层保护，这里做一次带签重试；仍失败再报人话。
+            AppLog.i("api", "作品列表首次响应非 JSON，尝试 webSign 重试");
+            body = requestUserPosts(query, secUid, true);
+        }
+        String trimmed = body == null ? "" : body.trim();
+        if (trimmed.isEmpty()) throw new IOException("作品列表暂时没有返回内容，请稍后再试");
+        if (!trimmed.startsWith("{")) {
+            throw new IOException("作品列表暂时被接口拦截，请稍后再试");
+        }
+        List<FeedVideo> list = parseFeed(trimmed);
+        // 翻页游标（下一批从这继续；-1 = 没有更多）。响应里有 has_more/max_cursor，
+        // 不记的话调用方只能反复拉第一页
+        com.google.gson.JsonElement rootEl = com.google.gson.JsonParser.parseString(trimmed);
+        if (rootEl.isJsonObject()) {
+            com.google.gson.JsonObject root = rootEl.getAsJsonObject();
+            boolean hasMore = optInt(root, "has_more") == 1;
+            long next = optLong(root, "max_cursor");
+            lastPostsHasMore = hasMore;
+            lastPostsCursor = hasMore ? next : -1;
+        } else {
+            lastPostsHasMore = false;
+            lastPostsCursor = -1;
+        }
+        if (list.isEmpty()) {
+            int code = optInt(rootEl.getAsJsonObject(), "status_code");
+            if (code != 0) throw new IOException("作品列表 status=" + code);
+        }
+        return list;
+    }
+
+    /** 作品列表单次请求；webSign=true 时追加本地签名参数与请求头。 */
+    private String requestUserPosts(String query, String secUid, boolean webSign)
+            throws IOException {
+        String finalQuery = query;
+        Map<String, String> signedHeaders = java.util.Collections.emptyMap();
+        if (webSign) {
+            SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(query, fullCookie());
+            finalQuery = signed.query;
+            signedHeaders = signed.headers;
+        }
+        Request.Builder builder = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/post/?" + finalQuery)
                 .header("User-Agent", UA)
                 .header("Referer", "https://www.douyin.com/user/" + (secUid == null ? "" : secUid))
-                .header("Cookie", fullCookie())
-                .build();
-        try (Response resp = client.newCall(req).execute()) {
-            if (resp.body() == null) throw new IOException("空响应");
+                .header("Accept", "application/json")
+                .header("Cookie", fullCookie());
+        for (Map.Entry<String, String> header : signedHeaders.entrySet()) {
+            builder.header(header.getKey(), header.getValue());
+        }
+        try (Response resp = client.newCall(builder.build()).execute()) {
+            if (resp.body() == null) throw new IOException("作品列表暂时不可用，请稍后再试");
+            int http = resp.code();
             String body = resp.body().string();
-            List<FeedVideo> list = parseFeed(body);
-            // 翻页游标（下一批从这继续；-1 = 没有更多）。响应里有 has_more/max_cursor，
-            // 不记的话调用方只能反复拉第一页
-            com.google.gson.JsonElement rootEl = com.google.gson.JsonParser.parseString(body);
-            if (rootEl.isJsonObject()) {
-                com.google.gson.JsonObject root = rootEl.getAsJsonObject();
-                boolean hasMore = optInt(root, "has_more") == 1;
-                long next = optLong(root, "max_cursor");
-                lastPostsHasMore = hasMore;
-                lastPostsCursor = hasMore ? next : -1;
-            } else {
-                lastPostsHasMore = false;
-                lastPostsCursor = -1;
+            AppLog.i("api", "作品列表 HTTP " + http + " 响应长度=" + body.length()
+                    + " webSign=" + webSign);
+            if (!resp.isSuccessful()) {
+                throw new IOException("作品列表 HTTP " + http);
             }
-            if (list.isEmpty()) {
-                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(body);
-                int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
-                if (code != 0) throw new IOException("作品列表 status=" + code);
-            }
-            return list;
+            return body;
         }
     }
 
@@ -334,13 +1068,16 @@ public final class DouyinApi {
         ensureTtwid();
         Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
         p.put("aweme_id", awemeId == null ? "" : awemeId);
-        Request req = new Request.Builder()
-                .url("https://www.douyin.com/aweme/v1/web/aweme/detail/?"
-                        + joinAndSign(p))
+        SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(joinAndSign(p), fullCookie());
+        Request.Builder builder = new Request.Builder()
+                .url("https://www.douyin.com/aweme/v1/web/aweme/detail/?" + signed.query)
                 .header("User-Agent", UA)
                 .header("Referer", "https://www.douyin.com/")
-                .header("Cookie", fullCookie())
-                .build();
+                .header("Cookie", fullCookie());
+        for (Map.Entry<String, String> header : signed.headers.entrySet()) {
+            builder.header(header.getKey(), header.getValue());
+        }
+        Request req = builder.build();
         try (Response resp = client.newCall(req).execute()) {
             if (resp.body() == null) throw new IOException("空响应");
             String body = resp.body().string();
@@ -450,16 +1187,51 @@ public final class DouyinApi {
                 String name = u == null ? "" : optString(u, "nickname");
                 long digg = c.has("digg_count") ? c.get("digg_count").getAsLong() : 0L;
                 long ts = c.has("create_time") ? c.get("create_time").getAsLong() : 0L;
-                com.dywatch.app.chat.model.Comment cm =
-                        new com.dywatch.app.chat.model.Comment(
-                                name,
-                                optString(c, "text"),
-                                formatCommentTime(ts),
-                                com.dywatch.app.feed.FeedVideo.formatCount(digg));
+                com.dywatch.app.chat.model.Comment cm = parseComment(c);
                 out.add(cm);
             }
             return out;
         }
+    }
+
+    /** 一级评论的回复；独立页面分页，不嵌套进评论卡片。 */
+    public List<com.dywatch.app.chat.model.Comment> fetchCommentReplies(
+            String awemeId, String commentId, long cursor, int count) throws IOException {
+        Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
+        p.put("item_id", awemeId == null ? "" : awemeId);
+        p.put("comment_id", commentId == null ? "" : commentId);
+        p.put("cut_version", "1");
+        p.put("cursor", String.valueOf(cursor));
+        p.put("count", String.valueOf(count));
+        p.put("item_type", "0");
+        String verifyFp = cookieValue("s_v_web_id");
+        String webid = cookieValue("webid");
+        String uifid = cookieValueAny("uifid", "uifid_temp", "uifidtemp", "UIFID", "UIFID_TEMP");
+        if (!webid.isEmpty()) p.put("webid", webid);
+        if (!uifid.isEmpty()) p.put("uifid", uifid);
+        if (!verifyFp.isEmpty()) {
+            p.put("verifyFp", verifyFp);
+            p.put("fp", verifyFp);
+        }
+        String msToken = cookieValue("msToken");
+        if (!msToken.isEmpty()) p.put("msToken", msToken);
+        String baseQuery = joinQuery(p);
+        String query = baseQuery + "&a_bogus="
+                + urlEncode(signer.makeABogusWithMagic(baseQuery, 8));
+        Map<String, String> extra = new LinkedHashMap<>();
+        if (!uifid.isEmpty()) extra.put("uifid", uifid);
+        JsonObject root = getJson("/aweme/v1/web/comment/list/reply/", query,
+                "https://www.douyin.com/video/" + awemeId, "评论回复", extra);
+        lastCommentHasMore = optInt(root, "has_more") == 1;
+        lastCommentCursor = optLong(root, "cursor");
+        List<com.dywatch.app.chat.model.Comment> out = new ArrayList<>();
+        JsonArray arr = arrOf(root, "comments");
+        if (arr != null) {
+            for (JsonElement el : arr) {
+                if (el.isJsonObject()) out.add(parseComment(el.getAsJsonObject()));
+            }
+        }
+        return out;
     }
 
     /** 上次拉评论的结果：还有没有下一页 */
@@ -546,6 +1318,24 @@ public final class DouyinApi {
     private String fullCookie() {
         String base = cookieHeader();
         return mSessionCookie.isEmpty() ? base : mSessionCookie + "; " + base;
+    }
+
+    private String cookieValue(String name) {
+        for (String part : fullCookie().split(";")) {
+            int eq = part.indexOf('=');
+            if (eq > 0 && part.substring(0, eq).trim().equalsIgnoreCase(name)) {
+                return part.substring(eq + 1).trim();
+            }
+        }
+        return "";
+    }
+
+    private String cookieValueAny(String... names) {
+        for (String name : names) {
+            String value = cookieValue(name);
+            if (!value.isEmpty()) return value;
+        }
+        return "";
     }
 
     /** 构造 feed query（含 a_bogus）；纯函数 */
@@ -658,6 +1448,26 @@ public final class DouyinApi {
      *    ClassCastException（JsonNull cannot be cast to JsonObject）。真机踩过——
      *    带上登录态后会拉到图文贴，它们的 video 字段就是 null。
      */
+    static String firstString(JsonObject o, String... keys) {
+        if (o == null) return "";
+        for (String key : keys) {
+            String value = optString(o, key);
+            if (!value.isEmpty()) return value;
+        }
+        return "";
+    }
+
+    static long firstLong(JsonObject o, String... keys) {
+        if (o == null) return 0;
+        for (String key : keys) {
+            JsonElement e = o.get(key);
+            if (e != null && !e.isJsonNull()) {
+                try { return e.getAsLong(); } catch (Exception ignored) { }
+            }
+        }
+        return 0;
+    }
+
     private static JsonObject objOf(JsonObject o, String key) {
         if (o == null) return null;
         JsonElement e = o.get(key);
@@ -672,13 +1482,23 @@ public final class DouyinApi {
     }
 
     private static long optLong(JsonObject o, String key) {
+        if (o == null) return 0;
         JsonElement e = o.get(key);
-        return e == null || e.isJsonNull() ? 0 : e.getAsLong();
+        if (e == null || e.isJsonNull() || !e.isJsonPrimitive()) return 0;
+        try {
+            if (e.getAsJsonPrimitive().isString()) {
+                String value = e.getAsString().trim();
+                if (value.isEmpty()) return 0;
+                return (long) Double.parseDouble(value);
+            }
+            return e.getAsLong();
+        } catch (Exception ignored) { return 0; }
     }
 
     private static int optInt(JsonObject o, String key) {
-        JsonElement e = o.get(key);
-        return e == null || e.isJsonNull() ? 0 : e.getAsInt();
+        long value = optLong(o, key);
+        return value > Integer.MAX_VALUE ? Integer.MAX_VALUE
+                : value < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int) value;
     }
 
     private static String firstUrl(JsonObject video, String key, String awemeId) {

@@ -30,7 +30,7 @@ public class UserActivity extends UiActivity {
     public static final String EXTRA_NAME = "name";
 
     private androidx.recyclerview.widget.RecyclerView mList;
-    private RowAdapter mAdapter;
+    private MediaRowAdapter mAdapter;
     private TextView mHint, mName, mStats;
     private DouyinApi mApi;
     private String mSecUid;
@@ -52,11 +52,9 @@ public class UserActivity extends UiActivity {
 
         mList = findViewById(R.id.rv_user);
         mList.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
-        mAdapter = new RowAdapter(new RowAdapter.OnRowClick() {
-            @Override
-            public void onClick(Object payload) {
-                if (payload instanceof Integer) playAt((Integer) payload);
-            }
+        // 作者主页先给“作品封面 + 标题”的选片列表，点具体一条才进全屏视频流。
+        mAdapter = new MediaRowAdapter(payload -> {
+            if (payload instanceof Integer) playAt((Integer) payload);
         });
         mList.setAdapter(mAdapter);
         wireAutoLoadMore();
@@ -125,7 +123,7 @@ public class UserActivity extends UiActivity {
                         @Override
                         public void run() {
                             if (isFinishing()) return;
-                            hint("拉取失败: " + e.getMessage());
+                            hint(DouyinApi.friendlyMessage(e));
                             com.dywatch.app.ui.Loading.show(UserActivity.this, false);
                         }
                     });
@@ -157,17 +155,14 @@ public class UserActivity extends UiActivity {
                             mPostsCursor = next;
                             mPostsHasMore = more && next >= 0;
                             // 追加渲染（不清空，保住已看位置）
+                            List<MediaRowAdapter.Item> addedRows = new ArrayList<>();
                             for (FeedVideo v : posts) {
-                                if (!mVideos.contains(v)) mVideos.add(v);
+                                if (mVideos.contains(v)) continue;
+                                int index = mVideos.size();
+                                mVideos.add(v);
+                                addedRows.add(VideoRows.of(v, index));
                             }
-                            List<RowAdapter.Item> items = new ArrayList<>();
-                            for (int i = 0; i < mVideos.size(); i++) {
-                                FeedVideo v = mVideos.get(i);
-                                String meta = v.diggCount > 0 ? (FeedVideo.formatCount(v.diggCount) + " 赞") : "";
-                                items.add(new RowAdapter.Item(
-                                        v.title.isEmpty() ? "(无标题)" : v.title, meta, "", i));
-                            }
-                            mAdapter.submitList(items);
+                            mAdapter.append(addedRows);
                             // 成功也落日志：分不清"到底了"还是"续拉没触发"时这就是唯一线索
                             AppLog.i("user", "作品续拉 +" + posts.size() + " 条，累计 "
                                     + mVideos.size() + "，还有更多=" + mPostsHasMore);
@@ -181,7 +176,7 @@ public class UserActivity extends UiActivity {
                         @Override
                         public void run() {
                             mLoadingPosts = false;
-                            hint("加载更多失败: " + e.getMessage());
+                            hint(DouyinApi.friendlyMessage(e));
                         }
                     });
                 }
@@ -209,17 +204,14 @@ public class UserActivity extends UiActivity {
     private void show(List<FeedVideo> list) {
         mVideos.clear();
         mVideos.addAll(list);
-        List<RowAdapter.Item> items = new ArrayList<>();
+        List<MediaRowAdapter.Item> items = new ArrayList<>();
         for (int i = 0; i < list.size(); i++) {
-            FeedVideo v = list.get(i);
-            String meta = v.diggCount > 0 ? (FeedVideo.formatCount(v.diggCount) + " 赞") : "";
-            items.add(new RowAdapter.Item(
-                    v.title.isEmpty() ? "(无标题)" : v.title, meta, "", i));
+            items.add(VideoRows.of(list.get(i), i));
         }
         mAdapter.submitList(items);
         com.dywatch.app.ui.Loading.show(this, false);
         if (list.isEmpty()) {
-            hint("这个作者没有作品（或接口没返回）");
+            hint("这个作者还没有作品");
         } else {
             clearHint();
         }
@@ -233,6 +225,8 @@ public class UserActivity extends UiActivity {
         it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_LIST,
                 new ArrayList<>(mVideos));
         it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_START_INDEX, index);
+        it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_SOURCE,
+                com.dywatch.app.feed.VideoSource.user(mSecUid, mPostsCursor, mPostsHasMore));
         startActivity(it);
     }
 

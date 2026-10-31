@@ -12,6 +12,11 @@
     <dimen name="t_title">17sp</dimen>
     <dimen name="t_display">22sp</dimen>
 
+    <!-- 媒体卡（对齐界面草案 .video-card）：标题 12、元信息 10、摘要 11 -->
+    <dimen name="t_card_title">12sp</dimen>
+    <dimen name="t_card_meta">10sp</dimen>
+    <dimen name="t_card_summary">11sp</dimen>
+
     <!-- 间距阶 -->
     <dimen name="s1">2dp</dimen>
     <dimen name="s2">4dp</dimen>

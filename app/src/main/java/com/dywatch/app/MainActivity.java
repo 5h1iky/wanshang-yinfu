@@ -7,7 +7,6 @@ import android.widget.TextView;
 
 import com.dywatch.app.ui.UiActivity;
 
-import com.dywatch.app.feed.FeedActivity;
 import com.dywatch.app.login.LoginActivity;
 import com.dywatch.app.login.LoginManager;
 
@@ -68,7 +67,10 @@ public class MainActivity extends UiActivity {
         findViewById(R.id.btn_feed).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                startActivity(new Intent(MainActivity.this, FeedActivity.class));
+                // 参考系（哔哩终端）：先进入推荐选片列表，点具体视频才进全屏；
+                // 不再一按“刷视频”就自动播放。
+                startActivity(new Intent(MainActivity.this,
+                        com.dywatch.app.ui.BrowseActivity.class));
             }
         });
 
@@ -86,6 +88,9 @@ public class MainActivity extends UiActivity {
                 startActivity(new Intent(MainActivity.this, com.dywatch.app.ui.SettingsActivity.class));
             }
         });
+
+        findViewById(R.id.btn_notice).setOnClickListener(v ->
+                startActivity(new Intent(this, com.dywatch.app.ui.NoticeActivity.class)));
 
         findViewById(R.id.btn_mine).setOnClickListener(new View.OnClickListener() {
             @Override

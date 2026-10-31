@@ -67,4 +67,16 @@
         <item name="android:background">@drawable/bg_dialog_btn_ghost</item>
         <item name="android:textColor">@color/text_muted</item>
     </style>
+    <style name="NoticeTab">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">@dimen/ctrl_min</item>
+        <item name="android:layout_marginEnd">@dimen/s2</item>
+        <item name="android:background">@drawable/bg_settings_row</item>
+        <item name="android:backgroundTint">@null</item>
+        <item name="android:minWidth">@dimen/ctrl_md</item>
+        <item name="android:paddingStart">@dimen/s4</item>
+        <item name="android:paddingEnd">@dimen/s4</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">@dimen/t_body</item>
+    </style>
 </resources>

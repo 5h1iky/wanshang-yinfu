@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg_base" android:orientation="vertical">
+    <include layout="@layout/include_header" />
+    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:scrollbars="none" android:paddingHorizontal="@dimen/s3">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content">
+            <Button android:id="@+id/btn_notice_all" style="@style/NoticeTab" app:backgroundTint="@null" android:text="全部" />
+            <Button android:id="@+id/btn_notice_comment" style="@style/NoticeTab" app:backgroundTint="@null" android:text="评论" />
+            <Button android:id="@+id/btn_notice_like" style="@style/NoticeTab" app:backgroundTint="@null" android:text="赞" />
+            <Button android:id="@+id/btn_notice_at" style="@style/NoticeTab" app:backgroundTint="@null" android:text="@我" />
+            <Button android:id="@+id/btn_notice_fans" style="@style/NoticeTab" app:backgroundTint="@null" android:text="粉丝" />
+        </LinearLayout>
+    </HorizontalScrollView>
+    <TextView android:id="@+id/tv_notice_hint" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:background="@color/scrim"
+        android:paddingHorizontal="@dimen/s4" android:paddingVertical="@dimen/s2"
+        android:textColor="@color/text_secondary" android:textSize="@dimen/t_caption"
+        android:visibility="gone" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1">
+        <com.dywatch.app.ui.RotaryRecyclerView android:id="@+id/rv_notice"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:clipToPadding="false" android:padding="@dimen/s3" android:scrollbars="none" />
+        <include layout="@layout/include_loading" />
+    </FrameLayout>
+</LinearLayout>

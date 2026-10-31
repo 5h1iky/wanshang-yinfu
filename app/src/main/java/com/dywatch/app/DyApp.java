@@ -17,6 +17,17 @@ public class DyApp extends Application {
                 androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES);
         AppLog.init(this);
         CrashShield.install(this);
+        // webview 变体不再使用 GeckoView：旧 kernel 版本留下的 qgahcyt6 缓存
+        // 在升级后仍然占空间（实测可达数百 MB），启动时后台清掉，不阻塞首屏。
+        if (!"kernel".equals(BuildConfig.FLAVOR)) {
+            new Thread(() -> {
+                long freed = com.dywatch.app.util.CacheManager.clearLegacyGeckoCache(DyApp.this);
+                if (freed > 0) {
+                    AppLog.i("app", "清理旧内核缓存 "
+                            + com.dywatch.app.util.CacheManager.formatSize(freed));
+                }
+            }, "legacy-cache").start();
+        }
         // 会话 cookie 回写 WebView CookieStore（进程重启丢 cookie 的修复，见 LoginManager v2 注释）
         com.dywatch.app.login.LoginManager.restoreToCookieManager(this);
         // debug 包开启 WebView 远程调试（CDP）：真机 DOM 校准聊天选择器用；release 包自动关闭

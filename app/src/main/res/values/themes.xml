@@ -14,7 +14,11 @@
         <item name="colorOnSurface">@color/text_primary</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
-        <!-- 品牌点缀色三处之一：statusBar（Bili pink 的唯一用途，同款逻辑） -->
-        <item name="android:statusBarColor">@color/accent</item>
+        <!-- 状态栏跟软件内底色一致：黑底白图标，避免手机上一条粉红色横条，
+             也更省电（OLED 黑像素不发光）。 -->
+        <item name="android:statusBarColor">@color/bg_base</item>
+        <item name="android:navigationBarColor">@color/bg_base</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

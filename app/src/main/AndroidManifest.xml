@@ -46,6 +46,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 首页“刷视频”选片页：先封面/标题列表，点一条才进全屏 -->
+        <activity
+            android:name=".ui.BrowseActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
         <!-- M2 刷视频页（VerticalViewPager 上下滑 + 预加载） -->
         <activity
             android:name=".feed.FeedActivity"
@@ -75,6 +82,19 @@
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity android:name=".chat.ReplyActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ui.SearchActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ui.NoticeActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+        <activity android:name=".ui.LiveActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
         <!-- M3 聊天页（自写极简三件套 + WebView JS 桥协议层） -->
         <activity
             android:name=".chat.ChatActivity"
@@ -87,6 +107,15 @@
         <activity
             android:name=".ui.MineActivity"
             android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
+        <activity android:name=".ui.CollectionActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
+        <!-- 我的关注：只读用户列表 + 时间游标分页 -->
+        <activity android:name=".ui.FollowingActivity" android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="portrait" />
 

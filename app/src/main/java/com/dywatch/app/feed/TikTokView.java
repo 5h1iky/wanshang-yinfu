@@ -50,6 +50,8 @@ public class TikTokView extends FrameLayout implements IControlComponent {
     private View mPlayToggle;
     private ImageView mPlayStateIcon;
     private SeekBar mSeekBar;
+    /** 播放面板里的返回键（随面板显隐，不常驻画面） */
+    private View mBackBtn;
     /** 进度行（2026-10-01：进度条 + 左侧全屏键，见 layout_tiktok_controller.xml 注释） */
     private View mProgressRow;
     private ImageView mFullscreenBtn;
@@ -58,6 +60,11 @@ public class TikTokView extends FrameLayout implements IControlComponent {
         void onFullscreenClick();
     }
     private OnFullscreenClick mFullscreenClick;
+    /** 返回键回调（页面接：全屏时先退全屏，否则退出播放页） */
+    public interface OnBackClick {
+        void onBackClick();
+    }
+    private OnBackClick mBackClick;
     /** 当前是否全屏：决定按钮图标（进=四角向外 / 退=四角向内） */
     private boolean mFullscreen;
     /** 拖动进度条中：吃掉手势（不触发单击收起），不吃进度回调 */
@@ -86,7 +93,16 @@ public class TikTokView extends FrameLayout implements IControlComponent {
         mSeekBar = findViewById(R.id.sb_progress);
         mProgressRow = findViewById(R.id.ll_progress_row);
         mFullscreenBtn = findViewById(R.id.btn_fullscreen);
+        mBackBtn = findViewById(R.id.btn_feed_back);
         mScaledTouchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+
+        if (mBackBtn != null) {
+            mBackBtn.setOnClickListener(new OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (mBackClick != null) mBackClick.onBackClick();
+                }
+            });
+        }
 
         // 全屏入口（2026-10-01 软件内问题 ⑤）：进度条左侧那个键。
         // 只发通知，进/退全屏由页面（FeedActivity）统一处理——播放器实例在页面手里。
@@ -221,6 +237,11 @@ public class TikTokView extends FrameLayout implements IControlComponent {
         mFullscreenClick = l;
     }
 
+    /** 页面接线：播放面板返回键 */
+    public void setOnBackClickListener(OnBackClick l) {
+        mBackClick = l;
+    }
+
     /** 页面告知当前是否全屏（换图标：进=四角向外 / 退=四角向内） */
     public void setFullscreenState(boolean fullscreen) {
         mFullscreen = fullscreen;
@@ -294,6 +315,8 @@ public class TikTokView extends FrameLayout implements IControlComponent {
         // ⚠️ 显隐的单位是**进度行**（进度条 + 全屏键一起）——只藏 SeekBar 会让全屏键孤零零留着
         if (mPlayToggle != null) mPlayToggle.setVisibility(isVisible ? VISIBLE : GONE);
         if (mProgressRow != null) mProgressRow.setVisibility(isVisible ? VISIBLE : GONE);
+        // 返回键也属于“点一下才出现”的播放面板；正常滑动/播放时随面板一起隐藏。
+        if (mBackBtn != null) mBackBtn.setVisibility(isVisible ? VISIBLE : GONE);
         if (isVisible) refreshPlayIcon();
     }
 

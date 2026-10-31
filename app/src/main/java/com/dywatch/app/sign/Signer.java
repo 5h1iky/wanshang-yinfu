@@ -22,7 +22,8 @@ public final class Signer {
                     + "platform: 'Win32' };\n"
                     + "var innerWidth = 2048; var innerHeight = 960;\n"
                     + "var outerWidth = 2554; var outerHeight = 1386;\n"
-                    + "var screen = { availWidth: 2560, availHeight: 1392, width: 2560, height: 1440 };\n";
+                    + "var screen = { availWidth: 2560, availHeight: 1392, width: 2560, height: 1440 };\n"
+                    + "var __dywatchMagic = 14;\n";
 
     private final Scriptable scope;
 
@@ -35,6 +36,9 @@ public final class Signer {
             cx.evaluateString(scope, ENV_PRELUDE, "env", 1, null);
             int i = 0;
             for (String src : jsSources) {
+                // 二级评论接口的 a_bogus 使用 [0,1,8]；源实现默认 14。
+                // 先参数化，调用时只切回复接口，其他接口仍使用 14。
+                src = src.replace("magic = 14;", "magic = __dywatchMagic;");
                 cx.evaluateString(scope, src, "sign-" + (i++) + ".js", 1, null);
             }
         } finally {
@@ -53,6 +57,11 @@ public final class Signer {
      * 签名本身是毫秒级，串行化的代价可以忽略。
      */
     public synchronized String makeABogus(String query) {
+        return makeABogusWithMagic(query, 14);
+    }
+
+    /** 回复接口专用变体：抖音网页对 comment/list/reply 使用 magic=8 的 a_bogus。 */
+    public synchronized String makeABogusWithMagic(String query, int magic) {
         Context cx = Context.enter();
         try {
             cx.setOptimizationLevel(-1);
@@ -62,6 +71,7 @@ public final class Signer {
                 throw new IllegalStateException("makeABogus 未定义（JS 加载顺序不对？utils→sm3→vm_decode）");
             }
             Function fn = (Function) fnObj;
+            scope.put("__dywatchMagic", scope, Integer.valueOf(magic));
             Object ret = fn.call(cx, scope, scope, new Object[] {query, 0});
             return Context.toString(ret);
         } finally {
