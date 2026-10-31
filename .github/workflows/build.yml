@@ -7,7 +7,15 @@ name: Build
 # 这个 workflow 在**全新虚拟机**上跑单测 + 打包，等于每次推送都替所有人生成
 # 一个"这个仓库现在能被编译吗"的答案。
 #
-# 状态徽章（README 顶部）：
+# 2026-10-31 适配 0.9.0 的 flavorDimensions 'engine'：
+#   引入 webview / kernel 两个 flavor 后，不带 flavor 的 `testDebugUnitTest` / `assembleDebug`
+#   会变成"任务名二义性"直接失败（2026-10-30 那次 CI 红就是这个，不是代码编不过）。
+#   因此拆成两个 job：
+#     webview —— 装机发布的那一个（≈6.3MB），红 = 拦截合并，是真正的门禁
+#     kernel  —— 内置 GeckoView 的实验变体（≈58MB，功能尚未成立），
+#                只提供"还能不能编译/单测过不过"的信号，continue-on-error 不阻塞合并
+#
+# 状态徽章（README 顶部）只看 webview job 所在的 workflow 结论：
 #   https://github.com/5h1iky/wanshang-yinfu/actions/workflows/build.yml/badge.svg
 
 on:
@@ -25,8 +33,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: 单测 + Debug 打包
+  webview:
+    name: webview 变体（发布用）· 单测 + Debug 打包
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -56,17 +64,67 @@ jobs:
             gradle-${{ runner.os }}-
 
       - name: 单元测试
-        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+        run: ./gradlew :app:testWebviewDebugUnitTest --no-daemon --stacktrace
 
       - name: 打包 Debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleWebviewDebug --no-daemon
 
       - name: 失败时上传测试报告
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-webview
           path: |
-            app/build/test-results/testDebugUnitTest/*.xml
-            app/build/reports/tests/testDebugUnitTest/**
+            app/build/test-results/testWebviewDebugUnitTest/*.xml
+            app/build/reports/tests/testWebviewDebugUnitTest/**
+          if-no-files-found: ignore
+
+  kernel:
+    name: kernel 变体（实验，非阻塞）· 单测 + Debug 打包
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # 实验变体：失败只作信号，不拦合并（0.9.0 内核线尚未成立，见工作日志）
+    continue-on-error: true
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-kernel-${{ runner.os }}-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-kernel-${{ runner.os }}-
+            gradle-${{ runner.os }}-
+
+      # kernel 变体会从 maven.mozilla.org 拉 geckoview-armeabi-v7a:100（≈52MB AAR）
+      - name: 单元测试
+        run: ./gradlew :app:testKernelDebugUnitTest --no-daemon --stacktrace
+
+      - name: 打包 Debug APK
+        run: ./gradlew :app:assembleKernelDebug --no-daemon
+
+      - name: 失败时上传测试报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-kernel
+          path: |
+            app/build/test-results/testKernelDebugUnitTest/*.xml
+            app/build/reports/tests/testKernelDebugUnitTest/**
           if-no-files-found: ignore
