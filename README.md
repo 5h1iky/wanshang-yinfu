@@ -57,22 +57,36 @@
 
 | 模块 | 说明 |
 |---|---|
-| 刷视频 | 上下滑切换 · 预加载缓冲 · H.264 / 540p 省流选档（AMOLED 省电）· 登录态个性化推荐 |
-| 播放控制 | 单击呼出面板（暂停键 + 进度条）· 双击左右半屏 ±10s · 拖动进度条跳转 |
+| 首页推荐 | 先展示封面＋标题选片列表，点具体一条才进全屏；上下滑继续按推荐流续拉 |
+| 视频搜索 | 视频 / 用户 / 直播三栏 · 搜索历史（本地）· 结果点具体一条进全屏或直播间 |
+| 关注 / 收藏 | 关注列表（作者主页 → 作品封面列表）；收藏夹目录 / 全部收藏 |
+| 互动通知 | 全部 / 评论 / 赞 / @我 / 粉丝筛选；作品可定位则进全屏，用户可定位则进主页 |
+| 评论 / 回复 | 一级评论、回复数、独立回复页、回复对象切换、发送二次确认 |
+| 播放控制 | 单击呼出面板（返回键 + 暂停键 + 进度条）· 正常滑动播放时面板隐藏 · 双击左右半屏 ±10s |
 | 全屏播放 | 进度条左侧一键全屏（画质不变大，但能腾出手势位并转横屏：横屏视频占屏高 48.6% → 65%）· 全屏内双指缩放 1x~5x · 放大后单指拖动画面 · 「复位」键或双击复位 · 手动旋转（横竖屏切换） |
+| 直播 | 搜索直播间 · HLS/FLV · 清晰度/线路切换 · 单击显隐控制、全屏/旋转/缩放/复位 · 首版无弹幕 |
 | 私信 | 会话列表 → 选人 → 聊天 · 文字收发 · 快捷回复（4 个槽位可自编，聊天与评论共用；留空即隐藏该按钮；默认关闭可在设置里打开） |
 | 互动 | 点赞 / 收藏 / 评论（看 + 发）/ 分享=复制作品链接 |
-| 我的 | 喜欢历史（服务端拉取）· 看过记录（本地账本）· 作者主页 |
-| 手表适配 | 圆屏边距百分比可调（点开面板用 − / + 步进 1%，0~30%，调的时候页面实时内缩）· 界面缩放与字体大小独立调节 · 表冠滚动（可选开关）· **无手势无按键设备完整可用**（全页面可见返回键）· 刷视频常亮开关 |
+| 我的 | 喜欢历史（服务端拉取）· 看过记录（本地账本）· 作者主页 · 作品/收藏列表 |
+| 手表适配 | 圆屏边距百分比可调（点开面板用 − / + 步进 1%，0~30%，调的时候页面实时内缩）· 界面缩放与字体大小独立调节 · 表冠滚动（可选开关）· 无手势无按键设备可用（页头返回键 / 播放面板返回键）· 刷视频常亮开关 |
 | 更新 | GitHub Releases 静默检测，不打扰 |
 
 **架构一句话**：读取类请求（视频流 / 评论列表 / 喜欢 / 主页）走**原生 API 直连**（App 内 Rhino 跑 a_bogus 签名，零后端、快首屏、省电）；写入类操作（点赞 / 评论 / 私信 / 登录）走 **App 内单例 WebView 引擎**（官方页面 SDK 承担全部签名与风控票据，零复刻成本）。这是本项目在"协议复刻风险"与"手表性能基线"之间取得的平衡，详见下方[技术](#参考与致谢)一节。
 
 ## 安装
 
-1. 到 [**Releases**](https://github.com/5h1iky/wanshang-yinfu/releases) 下载 `wanshang-yinfu-vX.Y.Z-release.apk`
+0.9.0 起同一个 Release 挂两个同包名、同签名、同 versionCode 的包，**只能装一个**：
+
+- `wanshang-yinfu-vX.Y.Z-webview-release.apk`：推荐，约 6.3MB，用系统 WebView，日常使用选它；
+- `wanshang-yinfu-vX.Y.Z-kernel-release.apk`：实验，约 61MB，内置 GeckoView，网页引擎不依赖系统 WebView；当前内核线仍可能被抖音风控/人机验证拦截，只有明确需要时才装。
+
+安装步骤：
+
+1. 到 [**Releases**](https://github.com/5h1iky/wanshang-yinfu/releases) 下载对应变体的 APK（文件名里带 `-webview-` 或 `-kernel-`）
 2. 传到手机/手表上，用文件管理器侧载安装（Android 5.0+；MIUI 等系统需允许"安装未知应用"）
 3. 首启阅读并同意免责声明 → 登录（扫码）→ 开刷
+
+两个变体同签名，覆盖安装不需要卸载，登录态会保留；不要同时装两个。
 
 > 表上没有浏览器？应用内的链接点击在无浏览器设备上会静默提示，不影响其它功能。
 
@@ -83,9 +97,11 @@
 ```bash
 git clone https://github.com/5h1iky/wanshang-yinfu.git
 cd wanshang-yinfu
-./gradlew assembleDebug          # 出 debug 包
-./gradlew assembleRelease        # 出 release 包（需自配 keystore.properties，见下）
-./gradlew testDebugUnitTest      # 全部单元测试
+./gradlew :app:assembleWebviewDevdiag    # webview 测试包（DEBUGGABLE，保留登录，勿发布）
+./gradlew :app:assembleWebviewRelease    # webview 发布包（需自配 keystore.properties，见下）
+./gradlew :app:assembleKernelRelease     # kernel 发布包（约 61MB，实验）
+./gradlew :app:testWebviewDebugUnitTest  # webview 单元测试
+./gradlew :app:testKernelDebugUnitTest   # kernel 单元测试
 ```
 
 > **不需要改任何配置文件就能编译**。如果你的默认 JDK 不是 17+，请在**自己的用户级**配置里
