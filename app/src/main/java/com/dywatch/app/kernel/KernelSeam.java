@@ -60,4 +60,23 @@ public final class KernelSeam {
             AppLog.i("kernel", "切换内核页面失败: " + t);
         }
     }
+
+    /**
+     * kernel 变体的聊天通道。返回 null = 当前不是内核构建 / 内核类不存在，调用方回落 WebView。
+     *
+     * 这里仍然用反射：`KernelChatPort` 只存在于 `src/kernel` 源集，webview 变体不能直接引用。
+     */
+    public static com.dywatch.app.chat.ChatPort chatPort(
+            android.app.Activity activity, com.dywatch.app.chat.ChatEngine.Listener listener) {
+        if (!enabled()) return null;
+        try {
+            Class<?> c = Class.forName("com.dywatch.app.kernel.KernelChatPort");
+            return (com.dywatch.app.chat.ChatPort) c
+                    .getConstructor(android.app.Activity.class, com.dywatch.app.chat.ChatEngine.Listener.class)
+                    .newInstance(activity, listener);
+        } catch (Throwable t) {
+            AppLog.i("kernel", "内核聊天通道不可用（回落 WebView）: " + t);
+            return null;
+        }
+    }
 }

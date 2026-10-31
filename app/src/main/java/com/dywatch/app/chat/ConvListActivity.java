@@ -25,7 +25,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     private androidx.recyclerview.widget.RecyclerView mConvs;
     private com.dywatch.app.ui.RowAdapter mAdapter;
     private TextView mHint;
-    private ChatEngine mEngine;
+    private ChatPort mEngine;
     private int mEmptyRetries;
     /** 登录态是否已确认（onAuth ok=true 后置起） */
     private boolean mAuthed;
@@ -120,11 +120,11 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         });
 
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
-            mEngine = ChatEngine.getInstance(this, this);
+            mEngine = ChatPorts.create(this, this);
             hint("正在加载会话…");
             setLoading(true);
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再拉）
-            mEngine.ensureImHome();
+            if (mEngine != null) mEngine.ensureImHome();
             // 进度心跳：只在"有登录态、在等数据"时才有意义
             mHint.postDelayed(mTick, TICK_MS);
         } else {
@@ -183,8 +183,12 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     @Override
     protected void onResume() {
         super.onResume();
-        ChatEngine.attachTo(this);
         if (mEngine != null) {
+            mEngine.attach(this);
+            // ⚠️ 从聊天页返回时，内核线的静态监听者还挂着 ChatActivity；
+            //    必须重新绑定回本页，否则新会话列表只会分发给已经销毁的聊天页。
+            //    WebView 线的 rebind() 是空实现，行为保持不变。
+            mEngine.rebind();
             // 从会话页返回时刷新列表
             mEngine.fetchConversations();
         }
@@ -193,7 +197,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     @Override
     protected void onPause() {
         super.onPause();
-        ChatEngine.detachFrom(this);
+        if (mEngine != null) mEngine.detach(this);
     }
 
     /**
@@ -314,6 +318,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     @Override
     public void onConversations(List<Conversation> list) {
+        AppLog.i("chat", "会话列表回调 n=" + list.size());
         render(list);
     }
 

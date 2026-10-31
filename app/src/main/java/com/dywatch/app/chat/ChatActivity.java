@@ -30,7 +30,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     private com.dywatch.app.ui.MessageAdapter mAdapter;
     private EditText mInput;
     private TextView mHint;
-    private ChatEngine mEngine;
+    private ChatPort mEngine;
     /** 上次渲染的消息条数：只有真的变多了才自动滚到底，否则每 5s 轮询都会把用户拽回底部 */
     private int mLastCount = -1;
     private String mConvName;
@@ -65,11 +65,11 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
 
         // 登录门：私信必须先登录（未登录时页面上没有聊天输入框，JS 桥必然找不到）
         if (com.dywatch.app.login.LoginManager.hasSession(this)) {
-            mEngine = ChatEngine.getInstance(this, this);
+            mEngine = ChatPorts.create(this, this);
             hint(mConvName == null ? "聊天通道启动中…" : ("打开会话: " + mConvName + "…"));
             com.dywatch.app.ui.Loading.show(this, true);
             // 引擎可能被上一次互动留在视频页 → 先归位（导航完成后经 onEngineReady 再开会话）
-            mEngine.ensureImHome();
+            if (mEngine != null) mEngine.ensureImHome();
         } else {
             mEngine = null;
             hint("请先登录再聊天（主屏→登录→扫码）");
@@ -257,14 +257,17 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     @Override
     protected void onResume() {
         super.onResume();
-        ChatEngine.attachTo(this);
-        if (mEngine != null) startPolling();
+        if (mEngine != null) {
+            mEngine.attach(this);
+            mEngine.rebind();
+            startPolling();
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        ChatEngine.detachFrom(this);
+        if (mEngine != null) mEngine.detach(this);
         mPoll.removeCallbacks(mPollTask);
     }
 

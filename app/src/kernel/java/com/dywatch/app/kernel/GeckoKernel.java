@@ -6,6 +6,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.ViewGroup;
 
+import com.dywatch.app.chat.ChatEngine;
+import com.dywatch.app.chat.model.ChatMessage;
+import com.dywatch.app.chat.model.Conversation;
 import com.dywatch.app.login.LoginManager;
 import com.dywatch.app.util.AppLog;
 
@@ -17,6 +20,7 @@ import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebExtension;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +50,8 @@ public final class GeckoKernel {
     private static final String NATIVE_APP = "browser";
 
     private static GeckoKernel sInst;
+    /** 聊天页当前监听者（会话列表页 / 聊天页共用；同一时刻只有一页在前台） */
+    private static ChatEngine.Listener sChatListener;
 
     private final Context mApp;
     private final Handler mUi = new Handler(Looper.getMainLooper());
@@ -62,6 +68,8 @@ public final class GeckoKernel {
 
     private volatile boolean mStarted;
     private volatile boolean mCookiesDone;
+    private volatile boolean mChatReadyNotified;
+    private boolean mDebugVisible;
     private int mSeq;
 
     private GeckoKernel(Context ctx) {
@@ -172,6 +180,63 @@ public final class GeckoKernel {
         }
     }
 
+    /**
+     * 正式聊天通道入口：绑定监听者、启动内核、把隐藏 GeckoView 挂到当前页面。
+     * 页面就绪后回调 {@link ChatEngine.Listener#onEngineReady()}，由页面去拉数据。
+     */
+    public static synchronized void chatStart(Context ctx, ChatEngine.Listener listener) {
+        if (sInst == null) sInst = new GeckoKernel(ctx);
+        sInst.startChat(ctx, listener);
+    }
+
+    private void startChat(Context ctx, ChatEngine.Listener listener) {
+        boolean sameListener = (sChatListener == listener);
+        sChatListener = listener;
+        if (!ensureStarted(ctx)) {
+            notifyChatError("内核启动失败");
+            return;
+        }
+        // 页面切到聊天页时，把隐藏视图从旧 Activity 上摘下来挂到新 Activity，
+        // 否则 view 已随旧页面 detached，Gecko 会把页面当后台标签（消息不刷新）。
+        attachToActivity(ctx);
+        try {
+            mSession.setActive(true);
+        } catch (Throwable ignored) {
+        }
+        if (mContentPort != null && (!sameListener || !mChatReadyNotified)) {
+            // 新页面进来必须重新通知一次：上一页可能已经消费过 onEngineReady
+            mChatReadyNotified = false;
+            notifyChatReady();
+        }
+    }
+
+    public static synchronized void clearChatListener(ChatEngine.Listener listener) {
+        if (sChatListener == listener) sChatListener = null;
+    }
+
+    private void notifyChatReady() {
+        if (mChatReadyNotified || sChatListener == null) return;
+        mChatReadyNotified = true;
+        final ChatEngine.Listener l = sChatListener;
+        mUi.post(new Runnable() {
+            @Override
+            public void run() {
+                if (sChatListener == l) l.onEngineReady();
+            }
+        });
+    }
+
+    private void notifyChatError(final String err) {
+        if (sChatListener == null) return;
+        final ChatEngine.Listener l = sChatListener;
+        mUi.post(new Runnable() {
+            @Override
+            public void run() {
+                if (sChatListener == l) l.onEngineError(err);
+            }
+        });
+    }
+
     /** 内核聊天验证入口：只做读列表/读消息/开会话/发送，结果打日志，不影响现有 WebView 聊天。 */
     public static synchronized void chat(Context ctx, String kind, String name, String text) {
         if (sInst == null) sInst = new GeckoKernel(ctx);
@@ -181,11 +246,21 @@ public final class GeckoKernel {
     private void chatSubmit(Context ctx, String kind, String name, String text) {
         if (!ensureStarted(ctx) || mContentPort == null) {
             AppLog.i(TAG, "聊天探测：内核未就绪（" + state() + "）");
+            if (sChatListener != null) {
+                sChatListener.onEngineWaiting("内核启动中（" + state() + "）");
+            }
             return;
         }
+        attachToActivity(ctx);
         String fn;
         String args;
         try {
+            if ("chatReload".equals(kind)) {
+                mChatReadyNotified = false;
+                loadChat();
+                AppLog.i(TAG, "聊天探测：重载私信页");
+                return;
+            }
             if ("chatFetch".equals(kind)) {
                 if (mBgPort == null) {
                     AppLog.i(TAG, "聊天网络探测：background 端口未就绪");
@@ -260,7 +335,7 @@ public final class GeckoKernel {
 
             mView = new GeckoView(mApp);
             mView.setSession(mSession);
-            attachHidden(ctx);
+            attachToActivity(ctx);
 
             if (mRuntime.getWebExtensionController() == null) {
                 AppLog.i(TAG, "getWebExtensionController() == null（引擎没起来）");
@@ -342,17 +417,24 @@ public final class GeckoKernel {
     }
 
     /** 引擎视图挂到内容层最底下：不可见、不抢点击，但**参与布局**（0×0 会让页面不渲染） */
-    private void attachHidden(Context ctx) {
+    private void attachToActivity(Context ctx) {
         try {
             if (!(ctx instanceof Activity)) return;
             Activity a = (Activity) ctx;
             ViewGroup root = a.findViewById(android.R.id.content);
-            if (root == null || mView.getParent() != null) return;
-            mView.setAlpha(0f);
-            mView.setClickable(false);
-            mView.setFocusable(false);
+            if (root == null || mView == null) return;
+            // 同一个 Activity 且真的还在窗口上 → 不用动
+            if (mView.getParent() == root && mView.isAttachedToWindow()) return;
+            // 从旧 Activity 的根布局摘下来（页面已经 finish 时它只是悬空的 parent）
+            if (mView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) mView.getParent()).removeView(mView);
+            }
+            mView.setAlpha(mDebugVisible ? 1f : 0f);
+            mView.setClickable(mDebugVisible);
+            mView.setFocusable(mDebugVisible);
             root.addView(mView, 0, new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            mSession.setActive(true);
         } catch (Throwable t) {
             AppLog.i(TAG, "挂载隐藏视图失败（不影响 DOM 能力）: " + t);
         }
@@ -382,6 +464,8 @@ public final class GeckoKernel {
                 AppLog.i(TAG, "内核 content 就绪 " + msg.optString("url")
                         + " nodes=" + msg.optInt("nodes") + " textLen=" + msg.optInt("textLen")
                         + " 登录墙=" + msg.optBoolean("loginWall") + " 有点赞按钮=" + msg.optBoolean("digg"));
+                mChatReadyNotified = false;
+                notifyChatReady();
                 break;
             case "cookiesDone":
                 mCookiesDone = true;
@@ -396,13 +480,16 @@ public final class GeckoKernel {
                 // 注意用 opt*：Android 的 JSONObject.get() 会抛受检 JSONException
                 AppLog.i(TAG, "内核登录态 ok=" + msg.opt("ok") + " user=" + msg.optString("user")
                         + " msg=" + msg.optString("message"));
+                dispatchAuth(msg.optBoolean("ok"), msg.optString("message"));
                 break;
             case "action":
                 result(msg);
                 break;
             case "conversations":
+                JSONArray convs = msg.optJSONArray("items");
                 AppLog.i(TAG, "内核会话 rows=" + msg.optInt("rows") + " tries=" + msg.optInt("tries")
-                        + " count=" + msg.optJSONArray("items").length() + " data=" + msg.optString("items"));
+                        + " count=" + (convs == null ? 0 : convs.length()) + " data=" + msg.optString("items"));
+                dispatchConversations(convs);
                 break;
             case "chatProbe":
                 AppLog.i(TAG, "内核聊天DOM " + msg.toString());
@@ -411,14 +498,17 @@ public final class GeckoKernel {
                 AppLog.i(TAG, "内核开会话 ok=" + msg.optBoolean("ok") + " name=" + msg.optString("name"));
                 break;
             case "messages":
-                AppLog.i(TAG, "内核消息 count=" + msg.optJSONArray("items").length()
+                JSONArray msgs = msg.optJSONArray("items");
+                AppLog.i(TAG, "内核消息 count=" + (msgs == null ? 0 : msgs.length())
                         + " data=" + msg.optString("items"));
+                dispatchMessages(msgs);
                 break;
             case "sent":
                 AppLog.i(TAG, "内核发送 ok=" + msg.optBoolean("ok") + " note=" + msg.optString("note"));
                 break;
             case "error":
                 AppLog.i(TAG, "内核桥错误 " + msg.optString("message"));
+                notifyChatError("内核桥错误: " + msg.optString("message"));
                 break;
             case "dyHook":
                 AppLog.i(TAG, "内核页面观测 " + summarizeHook(msg.optJSONObject("hook")));
@@ -488,6 +578,62 @@ public final class GeckoKernel {
         if (head.contains("NetworkError")) return "网络错误";
         if (head.contains("status_code\":0")) return "ok";
         return head.length() > 30 ? head.substring(0, 30).replace('\n', ' ') : head;
+    }
+
+    private void dispatchConversations(JSONArray arr) {
+        AppLog.i(TAG, "分发会话 listener=" + (sChatListener != null)
+                + " count=" + (arr == null ? 0 : arr.length()));
+        if (sChatListener == null) return;
+        final List<Conversation> list = new ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                list.add(new Conversation(o.optString("key"), o.optString("name"),
+                        o.optString("lastMsg"), o.optString("time")));
+            }
+        }
+        final ChatEngine.Listener l = sChatListener;
+        mUi.post(new Runnable() {
+            @Override
+            public void run() {
+                if (sChatListener == l) l.onConversations(list);
+            }
+        });
+    }
+
+    private void dispatchMessages(JSONArray arr) {
+        if (sChatListener == null) return;
+        final List<ChatMessage> list = new ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String dir = o.optString("dir");
+                ChatMessage cm = new ChatMessage("out".equals(dir) ? ChatMessage.OUT : ChatMessage.IN,
+                        o.optString("text"), 0L);
+                cm.timeText = o.optString("time");
+                list.add(cm);
+            }
+        }
+        final ChatEngine.Listener l = sChatListener;
+        mUi.post(new Runnable() {
+            @Override
+            public void run() {
+                if (sChatListener == l) l.onMessages(list);
+            }
+        });
+    }
+
+    private void dispatchAuth(final boolean ok, final String message) {
+        if (sChatListener == null) return;
+        final ChatEngine.Listener l = sChatListener;
+        mUi.post(new Runnable() {
+            @Override
+            public void run() {
+                if (sChatListener == l) l.onAuth(ok, message);
+            }
+        });
     }
 
     private static JSONObject asJson(Object raw) {
