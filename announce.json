@@ -10,10 +10,10 @@
     "enabled": "false 时整条忽略（留空模板用）"
   },
   "enabled": true,
-  "id": "2026-10-17-01",
+  "id": "2026-11-01-01",
   "level": "info",
-  "title": "0.8.3 已发布",
-  "text": "这次主要修播放稳定性：代理播放失败会自动删掉坏缓存并改直连重试，不再只能滑走；缓存达到 256KB 就能边下边播，直连时不再重复预加载同一条，少费流量。请下文件名带 -release 的 APK 覆盖安装（同证书，无需卸载）；本版仍不提供 debug 包。",
-  "link": "https://github.com/5h1iky/wanshang-yinfu/releases/latest",
+  "title": "0.9.0 已发布",
+  "text": "新增首页推荐选片、视频搜索、关注/收藏、互动通知、评论回复和直播；设置里新增检查更新页。webview 版推荐日常使用，kernel 版为实验变体。两个包同签名，覆盖安装保留登录。",
+  "link": "https://github.com/5h1iky/wanshang-yinfu/releases/tag/v0.9.0",
   "showUntil": 0
 }
