@@ -79,6 +79,109 @@
   window.ChatBridge = {
     __v5: true,
 
+    // 内核聊天专项：只回报类名与数量，不读 cookie、不读用户隐私正文。
+    // Gecko 隔离世界看到的 DOM 与页面是否一致，必须先用这个事实确认，不能靠截图猜。
+    probeChat: function () {
+      try {
+        var selectors = [
+          '[class~="conversationConversationItemwrapper"]',
+          '[class*="ConversationItem"]',
+          '[class*="conversation"]',
+          '[class*="chat"]',
+          '[class*="message"]',
+          '[class*="Message"]',
+          'iframe'
+        ];
+        var counts = [];
+        for (var i = 0; i < selectors.length; i++) {
+          counts.push({ q: selectors[i], n: document.querySelectorAll(selectors[i]).length });
+        }
+        var interesting = [];
+        var all = document.querySelectorAll('[class]');
+        for (var j = 0; j < all.length && interesting.length < 25; j++) {
+          var raw = all[j].className;
+          var cls = raw && raw.baseVal !== undefined ? raw.baseVal : String(raw || '');
+          if (/conversation|message|chat|websocket|loading|error/i.test(cls)) {
+            interesting.push(cls.slice(0, 180));
+          }
+        }
+        var storageKeys = [];
+        try {
+          for (var k = 0; k < localStorage.length && k < 30; k++) {
+            storageKeys.push(localStorage.key(k));
+          }
+        } catch (e) { storageKeys.push('ERR:' + e); }
+        // 消息气泡的类名单独取：会话行类名太多，混在 interesting 里会被 25 条上限截掉。
+        var msgClasses = [];
+        var msgNodes = document.querySelectorAll('[class*="Message"], [class*="message"]');
+        for (var m = 0; m < msgNodes.length && msgClasses.length < 40; m++) {
+          var mr = msgNodes[m].className;
+          var mc = mr && mr.baseVal !== undefined ? mr.baseVal : String(mr || '');
+          if (msgClasses.indexOf(mc) < 0) {
+            msgClasses.push(mc.slice(0, 220));
+          }
+        }
+        // 私信 UI 可能是 iframe 微前端：只查顶层 DOM 会永远"暂无会话"。
+        // 这里把每个 iframe 的 src/id/class 都报出来（不读内容，跨域也读不到）。
+        var frames = [];
+        var ifr = document.querySelectorAll('iframe');
+        for (var f = 0; f < ifr.length; f++) {
+          frames.push({
+            src: String(ifr[f].src || '').slice(0, 300),
+            id: String(ifr[f].id || ''),
+            cls: String(ifr[f].className || '').slice(0, 160),
+            w: ifr[f].clientWidth, h: ifr[f].clientHeight
+          });
+        }
+        // 消息气泡几何：不同主题/版本 isFromMe 类名不一定挂得上，左右位置才是稳的判据。
+        var boxDetails = [];
+        try {
+          var boxes = document.querySelectorAll('[class*="messageMessageBoxmessageBox"]');
+          for (var bi = 0; bi < boxes.length && bi < 8; bi++) {
+            var bb = boxes[bi];
+            var inner = bb.querySelector('[class*="messageMessageBoxcontentBox"]');
+            var rr = (inner || bb).getBoundingClientRect();
+            boxDetails.push({
+              cls: String(bb.className || '').slice(0, 120),
+              inner: inner ? String(inner.className || '').slice(0, 160) : '',
+              left: Math.round(rr.left), w: Math.round(rr.width),
+              text: (bb.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 24)
+            });
+          }
+        } catch (e3) { boxDetails.push('ERR:' + e3); }
+        post({
+          type: 'chatProbe', url: location.href, title: document.title,
+          ready: document.readyState, visibility: document.visibilityState,
+          counts: counts, classes: interesting, storageKeys: storageKeys, frames: frames,
+          msgClasses: msgClasses, boxes: boxDetails
+        });
+      } catch (e) {
+        post({ type: 'error', message: 'probeChat: ' + e });
+      }
+    },
+
+    // 只读私信网络状态，不打印任何 cookie/token 的值。
+    chatNet: function () {
+      try {
+        var entries = performance.getEntriesByType('resource');
+        var urls = [];
+        for (var i = 0; i < entries.length; i++) {
+          var u = String(entries[i].name || '');
+          if (/im|message|conversation|socket|sdk|init/i.test(u)) {
+            urls.push(u.replace(/([?&](?:token|ticket|sign|signature|verifyFp|fp|msToken|X-Bogus|_signature|a_bogus)=)[^&]*/gi, '$1<redacted>').slice(0, 500));
+          }
+        }
+        var scripts = [];
+        var ss = document.querySelectorAll('script[src]');
+        for (var j = 0; j < ss.length; j++) {
+          scripts.push(String(ss[j].src).slice(0, 300));
+        }
+        post({ type: 'chatNet', resources: urls.slice(-50), scripts: scripts.slice(-25) });
+      } catch (e) {
+        post({ type: 'error', message: 'chatNet: ' + e });
+      }
+    },
+
     // 登录态检查（DOM 登录墙 + profile/self 双重验证）
     checkAuth: function () {
       try {
@@ -696,11 +799,32 @@
         var boxes = document.querySelectorAll('[class*="messageMessageBoxmessageBox"]');
         for (var i = 0; i < boxes.length; i++) {
           var b = boxes[i];
-          var mine = !!b.querySelector('[class*="messageMessageBoxcontentBox"][class*="isFromMe"]');
+          var content = b.querySelector('[class*="messageMessageBoxcontentBox"]');
+          // 方向判据：优先 isFromMe 类（WebView 端一直可用）；Gecko 上类名有时不挂，
+          // 退化为"气泡中心在屏幕右半边 = 我方"，比猜类名稳。
+          var mine = !!(content && /isFromMe/i.test(String(content.className || '')));
+          if (!mine) {
+            // contentBox 是整行容器（左右都从 320 起、宽 456），拿它判方向必错；
+            // 要量真正的气泡/表情/卡片元素，并且看右边缘，不看中心。
+            var bubble = b.querySelector('[class*="MessageItemTextbubbleContent"]')
+              || b.querySelector('[class*="MessageItemEmoji"]')
+              || b.querySelector('[class*="FilteredFilteredMessage"]')
+              || content || b;
+            var rr = bubble.getBoundingClientRect();
+            if (rr && rr.width > 0) mine = rr.right > (window.innerWidth * 0.7);
+          }
           var textEl = b.querySelector('[class*="TextMessageTexttextInnerContent"]')
             || b.querySelector('[class*="MessageItemTextbubbleTextContent"]');
           var text = textEl ? (textEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
-          if (!text) continue;
+          if (!text) {
+            // 非文本消息也要占位：emoji / 视频分享卡片。否则整段会话读出来是空的，
+            // 用户会以为"消息没收到"，实际只是桥把它过滤了。
+            var emoji = b.querySelector('[class*="MessageItemEmoji"]');
+            var filtered = b.querySelector('[class*="FilteredFilteredMessage"]');
+            if (emoji) text = '[表情]';
+            else if (filtered) text = '[分享内容]';
+            else continue;
+          }
           var timeEl = b.querySelector('[class*="MessageBoxTimetimeLayout"]');
           var timeText = timeEl ? (timeEl.textContent || '').trim() : '';
           items.push({ dir: mine ? 'out' : 'in', text: text, time: timeText });

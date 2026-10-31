@@ -24,8 +24,20 @@ public class KernelTestReceiver extends BroadcastReceiver {
         if (intent == null) return;
         String kind = intent.getStringExtra("kind");
         String id = intent.getStringExtra("id");
+        String name = intent.getStringExtra("name");
+        String text = intent.getStringExtra("text");
         boolean want = intent.getBooleanExtra("want", true);
-        if (kind == null || id == null) {
+        if (kind == null) {
+            AppLog.i("kernel", "调试广播缺参数 kind");
+            return;
+        }
+        // 内核聊天线单独验证，不再借"点赞"的通用入口。
+        // 例：kind=chatList / kind=chatOpen&name=... / kind=chatMessages / kind=chatSend&text=...
+        if (kind.startsWith("chat")) {
+            GeckoKernel.chat(context, kind, name == null ? "" : name, text == null ? "" : text);
+            return;
+        }
+        if (id == null) {
             AppLog.i("kernel", "调试广播缺参数（kind/id）");
             return;
         }

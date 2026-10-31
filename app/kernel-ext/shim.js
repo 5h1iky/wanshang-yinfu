@@ -72,6 +72,110 @@
   // 告诉原生"这一页的桥已就位"（每页导航后会重跑一次）
   send({ type: 'dyReady', url: String(location.href) });
 
+  // ---- 诊断：页面级 WebSocket / XHR / fetch 观测（只读，不改请求参数） ----
+  // 为什么需要：私信页壳子正常、会话列表却空，可能是 IM 的 WS 或拉取接口失败；
+  // GeckoView 100 没有可用的 console delegate，只能从页面侧旁路记录。
+  // 注入 <script> 到页面上下文（内容脚本的 window 与页面隔离，直接 patch 看不到页面请求）。
+  (function installPageHook() {
+    try {
+      var host = document.documentElement || document.head;
+      if (!host) {
+        return;
+      }
+      var code = '(' + function () {
+        try {
+          var H = window.__dyHook = { ws: [], xhr: [], fetch: [], err: [] };
+          function push(a, o) { if (a.length < 40) { a.push(o); } }
+          var OW = window.WebSocket;
+          if (OW) {
+            var W = function (url, protocols) {
+              var ws = protocols === undefined ? new OW(url) : new OW(url, protocols);
+              var rec = { u: String(url).slice(0, 300), s: 'new' };
+              push(H.ws, rec);
+              try {
+                ws.addEventListener('open', function () { rec.s = 'open'; });
+                ws.addEventListener('error', function () { rec.s = 'error'; });
+                ws.addEventListener('close', function (e) { rec.s = 'close:' + e.code; });
+              } catch (e) { /* ignore */ }
+              return ws;
+            };
+            W.prototype = OW.prototype;
+            ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) {
+              try { W[k] = OW[k]; } catch (e) { /* ignore */ }
+            });
+            window.WebSocket = W;
+          }
+          var OX = window.XMLHttpRequest;
+          if (OX) {
+            var oOpen = OX.prototype.open;
+            var oSend = OX.prototype.send;
+            OX.prototype.open = function (m, u) {
+              this.__dy = { m: String(m), u: String(u).slice(0, 300) };
+              return oOpen.apply(this, arguments);
+            };
+            OX.prototype.send = function () {
+              var x = this;
+              try {
+                x.addEventListener('loadend', function () {
+                  var r = x.__dy || {};
+                  if (!/\/im\/|message|conversation|strategy\/config/i.test(r.u || '')) { return; }
+                  r.st = x.status;
+                  r.len = (x.responseText || '').length;
+                  r.head = String(x.responseText || '').slice(0, 200);
+                  push(H.xhr, r);
+                });
+              } catch (e) { /* ignore */ }
+              return oSend.apply(this, arguments);
+            };
+          }
+          var OF = window.fetch;
+          if (OF) {
+            window.fetch = function (input, init) {
+              var u = typeof input === 'string' ? input : ((input && input.url) || '');
+              var p = OF.apply(this, arguments);
+              if (/\/im\/|message|conversation|strategy\/config/i.test(u)) {
+                try {
+                  p.then(function (r) {
+                    r.clone().text().then(function (t) {
+                      push(H.fetch, { u: String(u).slice(0, 300), st: r.status, len: t.length, head: t.slice(0, 200) });
+                    }, function () { /* ignore */ });
+                  }, function (e) {
+                    push(H.fetch, { u: String(u).slice(0, 300), st: -1, len: 0, head: String(e).slice(0, 200) });
+                  });
+                } catch (e) { /* ignore */ }
+              }
+              return p;
+            };
+          }
+          window.addEventListener('error', function (e) {
+            push(H.err, { m: String(e.message || '').slice(0, 200), s: String(e.filename || '').slice(0, 200) });
+          });
+          window.addEventListener('unhandledrejection', function (e) {
+            var r = e.reason;
+            push(H.err, { m: ('reject:' + String((r && r.message) || r)).slice(0, 200) });
+          });
+        } catch (e) {
+          window.__dyHookErr = String(e);
+        }
+      } + ')();';
+      var s = document.createElement('script');
+      s.textContent = code;
+      host.appendChild(s);
+      s.remove();
+    } catch (e) { /* 注入失败就只剩顶层 DOM 诊断 */ }
+  })();
+
+  setInterval(function () {
+    try {
+      var hook = window.wrappedJSObject && window.wrappedJSObject.__dyHook;
+      if (!hook) {
+        return;
+      }
+      var json = JSON.parse(JSON.stringify(hook));
+      send({ type: 'dyHook', hook: json });
+    } catch (e) { /* ignore */ }
+  }, 5000);
+
   // 直接看一眼 profile/self 的**原文**：判断"没登录"到底是服务端说没登录、还是我们拿到的根本不是 JSON。
   setTimeout(function () {
     try {

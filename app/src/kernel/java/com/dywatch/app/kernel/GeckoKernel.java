@@ -111,32 +111,30 @@ public final class GeckoKernel {
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             }
             mView.bringToFront();
-            // 显示出来后落到**抖音首页**：首页有登录入口，方便用户直接在核心里登一次做定性验证
-            // （如果内核自己登录后会话列表就正常，那问题就只是"会话绑定"，不是引擎不行）
-            // ⚠️ 连发两次：第一次可能被启动时那次 /chat 加载覆盖掉（实测过）
-            mUi.post(new Runnable() {
-                @Override
-                public void run() {
-                    mSession.loadUri(HOME_URL);
-                }
-            });
-            mUi.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    mSession.loadUri(HOME_URL);
-                }
-            }, 2500);
-            AppLog.i(TAG, "内核页面已显示（载入 " + HOME_URL + "）");
+            // 显示出来后**不强制跳转**：内核里当前是什么页面就显示什么（用户可能正停在视频页/私信页）。
+            // 另外把会话标记为"活跃 + 有焦点"：GeckoView 在不可见/被遮挡时会把页面当后台标签，
+            // 媒体与部分请求会被节流（实测：后台时视频页停在"视频数据加载中"）。
+            try {
+                mSession.setActive(true);
+                mSession.setFocused(true);
+            } catch (Throwable ignored) {
+            }
+            AppLog.i(TAG, "内核页面已显示（setActive=true）");
         } else {
             mView.setAlpha(0f);
             mView.setClickable(false);
             mView.setFocusable(false);
+            try {
+                mSession.setFocused(false);
+                mSession.setActive(false);
+            } catch (Throwable ignored) {
+            }
             if (root != null && mView.getParent() == root) {
                 root.removeView(mView);
                 root.addView(mView, 0, new ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             }
-            AppLog.i(TAG, "内核页面已收回（透明、最底层）");
+            AppLog.i(TAG, "内核页面已收回（透明、最底层、setActive=false）");
         }
     }
 
@@ -171,6 +169,68 @@ public final class GeckoKernel {
             mPending.remove(reqId);
             AppLog.i(TAG, "内核下发失败: " + t);
             return null;
+        }
+    }
+
+    /** 内核聊天验证入口：只做读列表/读消息/开会话/发送，结果打日志，不影响现有 WebView 聊天。 */
+    public static synchronized void chat(Context ctx, String kind, String name, String text) {
+        if (sInst == null) sInst = new GeckoKernel(ctx);
+        sInst.chatSubmit(ctx, kind, name, text);
+    }
+
+    private void chatSubmit(Context ctx, String kind, String name, String text) {
+        if (!ensureStarted(ctx) || mContentPort == null) {
+            AppLog.i(TAG, "聊天探测：内核未就绪（" + state() + "）");
+            return;
+        }
+        String fn;
+        String args;
+        try {
+            if ("chatFetch".equals(kind)) {
+                if (mBgPort == null) {
+                    AppLog.i(TAG, "聊天网络探测：background 端口未就绪");
+                    return;
+                }
+                JSONObject cmd = new JSONObject();
+                cmd.put("cmd", "chatFetch");
+                mBgPort.postMessage(cmd);
+                AppLog.i(TAG, "聊天网络探测：由 background 发只读请求");
+                return;
+            }
+            if ("chatReload".equals(kind)) {
+                mUi.post(new Runnable() {
+                    @Override public void run() { mSession.reload(); }
+                });
+                AppLog.i(TAG, "聊天探测：重载 Gecko 私信页");
+                return;
+            }
+            if ("chatNet".equals(kind)) {
+                fn = "chatNet";
+                args = "[]";
+            } else if ("chatProbe".equals(kind)) {
+                fn = "probeChat";
+                args = "[]";
+            } else if ("chatOpen".equals(kind)) {
+                fn = "openConversation";
+                args = new JSONArray().put(name).toString();
+            } else if ("chatMessages".equals(kind)) {
+                fn = "fetchMessages";
+                args = "[]";
+            } else if ("chatSend".equals(kind)) {
+                fn = "sendText";
+                args = new JSONArray().put(text).toString();
+            } else {
+                fn = "fetchConversations";
+                args = "[]";
+            }
+            JSONObject msg = new JSONObject();
+            msg.put("cmd", "invoke");
+            msg.put("fn", fn);
+            msg.put("argsJson", args);
+            mContentPort.postMessage(msg);
+            AppLog.i(TAG, "聊天探测下发 " + fn + " name=" + name);
+        } catch (Throwable t) {
+            AppLog.i(TAG, "聊天探测下发失败: " + t);
         }
     }
 
@@ -325,7 +385,7 @@ public final class GeckoKernel {
                 break;
             case "cookiesDone":
                 mCookiesDone = true;
-                AppLog.i(TAG, "内核 cookie 完成 n=" + msg.optInt("n") + " ok=" + msg.optInt("ok") + " fail=" + msg.optInt("fail") + " sessionid=" + msg.optBoolean("sessionid") + " err=" + msg.optString("firstErr"));
+                AppLog.i(TAG, "内核 cookie 完成 n=" + msg.optInt("n") + " ok=" + msg.optInt("ok") + " fail=" + msg.optInt("fail") + " sessionid=" + msg.optBoolean("sessionid") + " 跳过=" + msg.optBoolean("skipped") + " err=" + msg.optString("firstErr"));
                 loadChat();
                 break;
             case "rawSelf":
@@ -340,9 +400,94 @@ public final class GeckoKernel {
             case "action":
                 result(msg);
                 break;
+            case "conversations":
+                AppLog.i(TAG, "内核会话 rows=" + msg.optInt("rows") + " tries=" + msg.optInt("tries")
+                        + " count=" + msg.optJSONArray("items").length() + " data=" + msg.optString("items"));
+                break;
+            case "chatProbe":
+                AppLog.i(TAG, "内核聊天DOM " + msg.toString());
+                break;
+            case "opened":
+                AppLog.i(TAG, "内核开会话 ok=" + msg.optBoolean("ok") + " name=" + msg.optString("name"));
+                break;
+            case "messages":
+                AppLog.i(TAG, "内核消息 count=" + msg.optJSONArray("items").length()
+                        + " data=" + msg.optString("items"));
+                break;
+            case "sent":
+                AppLog.i(TAG, "内核发送 ok=" + msg.optBoolean("ok") + " note=" + msg.optString("note"));
+                break;
+            case "error":
+                AppLog.i(TAG, "内核桥错误 " + msg.optString("message"));
+                break;
+            case "dyHook":
+                AppLog.i(TAG, "内核页面观测 " + summarizeHook(msg.optJSONObject("hook")));
+                break;
             default:
+                AppLog.i(TAG, "内核桥消息 " + t + " " + msg.toString());
                 break;
         }
+    }
+
+    /** 把页面观测压成一行：完整 JSON 太长，真机 logcat 会截断且淹掉重点。 */
+    private static String summarizeHook(JSONObject h) {
+        if (h == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        JSONArray ws = h.optJSONArray("ws");
+        sb.append("ws=");
+        if (ws != null) {
+            for (int i = 0; i < ws.length() && i < 4; i++) {
+                JSONObject o = ws.optJSONObject(i);
+                if (o == null) continue;
+                sb.append(hostOf(o.optString("u"))).append(':').append(o.optString("s")).append(' ');
+            }
+        }
+        JSONArray xhr = h.optJSONArray("xhr");
+        sb.append("| xhr=");
+        if (xhr != null) {
+            int from = Math.max(0, xhr.length() - 6);
+            for (int i = from; i < xhr.length(); i++) {
+                JSONObject o = xhr.optJSONObject(i);
+                if (o == null) continue;
+                String head = o.optString("head");
+                sb.append(hostOf(o.optString("u"))).append(" st=").append(o.optInt("st"))
+                        .append(" len=").append(o.optInt("len"))
+                        .append(" ").append(tagOf(head)).append("; ");
+            }
+        }
+        JSONArray fe = h.optJSONArray("fetch");
+        sb.append("| fetch=");
+        if (fe != null) {
+            int from = Math.max(0, fe.length() - 3);
+            for (int i = from; i < fe.length(); i++) {
+                JSONObject o = fe.optJSONObject(i);
+                if (o == null) continue;
+                sb.append(hostOf(o.optString("u"))).append(" st=").append(o.optInt("st"))
+                        .append(" ").append(tagOf(o.optString("head"))).append("; ");
+            }
+        }
+        JSONArray err = h.optJSONArray("err");
+        sb.append("| err=").append(err == null ? 0 : err.length());
+        return sb.toString();
+    }
+
+    private static String hostOf(String url) {
+        try {
+            String h = android.net.Uri.parse(url).getHost();
+            return h == null ? "?" : h;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /** 只留判定用的关键词，避免把整段响应写进日志。 */
+    private static String tagOf(String head) {
+        if (head == null) return "";
+        if (head.contains("用户未登录")) return "未登录";
+        if (head.contains("blocked")) return "blocked";
+        if (head.contains("NetworkError")) return "网络错误";
+        if (head.contains("status_code\":0")) return "ok";
+        return head.length() > 30 ? head.substring(0, 30).replace('\n', ' ') : head;
     }
 
     private static JSONObject asJson(Object raw) {

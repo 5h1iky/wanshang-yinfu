@@ -65,6 +65,10 @@ function connect() {
       queue.push(msg);
       return;
     }
+    if (msg.cmd === 'chatFetch') {
+      chatFetch();
+      return;
+    }
     if (msg.cmd === 'setCookies') {
       applyCookies(msg.cookies || []);
     }
@@ -76,6 +80,33 @@ function connect() {
 }
 
 function applyCookies(list) {
+  // ⚠️ 只在 Gecko 的 cookie 仓里**还没有会话**时才灌。
+  // 每次启动都覆盖会把 Gecko 自己刷新过的 __ac_signature / ttwid / msToken 冲掉，
+  // 连"人机验证已通过"的状态也会被一起重置（真机现象：过了验证、重开 App 又回到"暂无会话"）。
+  var run = function () {
+    applyCookiesNow(list);
+  };
+  try {
+    browser.cookies.get({ url: 'https://www.douyin.com/', name: 'sessionid' })
+      .then(function (found) {
+        // 已有 `.douyin.com` 域会话才跳过；如果只是旧的 host-only（www.douyin.com），
+        // 必须重灌一次，否则 IM 子域永远未登录（2026-10-31 实测）。
+        var domainOk = !!(found && found.domain && found.domain.charAt(0) === '.');
+        if (domainOk) {
+          toNative({
+            type: 'cookiesDone', n: 0, ok: 0, fail: 0, firstErr: '',
+            sessionid: true, skipped: true
+          });
+        } else {
+          run();
+        }
+      }, run);
+  } catch (e) {
+    run();
+  }
+}
+
+function applyCookiesNow(list) {
   var i = 0;
   var okCount = 0;
   var failCount = 0;
@@ -101,33 +132,82 @@ function applyCookies(list) {
       return;
     }
     var c = list[i++];
-    try {
-      browser.cookies.set({
-        url: 'https://www.douyin.com/',
-        name: c.name,
-        value: c.value,
-        path: '/',
-        secure: true,
-        httpOnly: !!c.httpOnly
-      }).then(function () {
-        okCount++;
-        next();
-      }, function (e) {
+    // ⚠️ 必须写成 `.douyin.com` 域 cookie：IM 的接口在 www-hj.douyin.com / imapi.douyin.com
+    //    这些子域上；只写 www.douyin.com 是 host-only，子域请求全部"用户未登录"（2026-10-31 实测）。
+    var base = {
+      url: 'https://www.douyin.com/',
+      name: c.name,
+      value: c.value,
+      path: '/',
+      secure: true,
+      httpOnly: !!c.httpOnly
+    };
+    var withDomain = {
+      url: base.url, name: base.name, value: base.value, path: base.path,
+      secure: base.secure, httpOnly: base.httpOnly, domain: '.douyin.com'
+    };
+    var ok = function () {
+      okCount++;
+      next();
+    };
+    var fail = function (e) {
+      // 有些 cookie 不允许带 domain（或值不合法），退回 host-only，至少 www 主站能用
+      try {
+        browser.cookies.set(base).then(ok, function (e2) {
+          failCount++;
+          if (!firstErr) {
+            firstErr = String(e2 || e).slice(0, 80);
+          }
+          next();
+        });
+      } catch (e2) {
         failCount++;
         if (!firstErr) {
-          firstErr = String(e).slice(0, 80);
+          firstErr = String(e2 || e).slice(0, 80);
         }
         next();
+      }
+    };
+    try {
+      // 先删同名旧 cookie（可能是上一版写入的 host-only），再写域 cookie；
+      // 否则同名的 host-only 与 .douyin.com 会同时存在，请求头里出现两份 sessionid。
+      browser.cookies.remove({ url: base.url, name: c.name }).then(function () {
+        try {
+          browser.cookies.set(withDomain).then(ok, fail);
+        } catch (e) {
+          fail(e);
+        }
+      }, function () {
+        try {
+          browser.cookies.set(withDomain).then(ok, fail);
+        } catch (e) {
+          fail(e);
+        }
       });
     } catch (e) {
-      failCount++;
-      if (!firstErr) {
-        firstErr = String(e).slice(0, 80);
-      }
-      next();
+      fail(e);
     }
   }
   next();
+}
+
+function chatFetch() {
+  // background 的扩展上下文不是页面：可用来区分"页面 JS/CSP 把请求吞了"与"网络/API 本身失败"。
+  var url = 'https://www.douyin.com/aweme/v1/web/im/resource/list/aggregation/'
+    + '?device_platform=webapp&aid=1128&channel=channel_pc_web&app_id=1128'
+    + '&scenes=CUSTOM_STICKER_PAGE&custom_cursor=0&custom_limit=50&source=CUSTOM_STICKER_PAGE';
+  try {
+    fetch(url, { credentials: 'include' }).then(function (r) {
+      return r.text().then(function (t) {
+        toNative({ type: 'chatFetch', status: r.status, url: r.url, len: t.length,
+                   head: String(t).slice(0, 500) });
+      });
+    }).catch(function (e) {
+      toNative({ type: 'chatFetch', status: -1, url: '', len: 0, head: String(e) });
+    });
+  } catch (e) {
+    toNative({ type: 'chatFetch', status: -2, url: '', len: 0, head: String(e) });
+  }
 }
 
 browser.runtime.onMessage.addListener(function (msg) {
@@ -149,6 +229,13 @@ browser.runtime.onMessage.addListener(function (msg) {
                           loginWall: msg.loginWall, digg: msg.digg, head: msg.head,
                           cookieCount: msg.cookieCount, hasSid: msg.hasSid, sidLen: msg.sidLen,
                           loginBtn: msg.loginBtn, avatar: msg.avatar });
+        } catch (e) { /* ignore */ }
+      }
+      return Promise.resolve({ ok: true });
+    case 'dyHook':
+      if (port && msg.hook) {
+        try {
+          toNative({ type: 'dyHook', hook: msg.hook });
         } catch (e) { /* ignore */ }
       }
       return Promise.resolve({ ok: true });
