@@ -10,7 +10,9 @@ import com.dywatch.app.chat.model.Conversation;
 import com.dywatch.app.kernel.KernelSeam;
 import com.dywatch.app.util.AppLog;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * kernel 变体的聊天通道包装：优先内核，内核启动失败/超时后自动切回系统 WebView。
@@ -47,6 +49,31 @@ final class FallbackChatPort implements ChatPort {
     private boolean mDetached;
     private boolean mKernelGotData;
     private boolean mNeedWebFetch;
+
+    /**
+     * 会话/消息缓存：内核页在 Activity 销毁后会被 Gecko 挂起，content script 的轮询停摆，
+     * 再进聊天拿不到数据（2026-10-31 手表实测）。缓存让第二次进入先秒显上次内容，
+     * 再去后台刷新；刷新若 5 秒无回包，自动重载内核页把 content script 拉活。
+     */
+    private static List<Conversation> sConvCache;
+    private static final Map<String, List<ChatMessage>> sMsgCache = new HashMap<>();
+    private String mCurrentConv;
+    private boolean mConvResponseThisRound;
+    private boolean mReviveScheduled;
+
+    private final Runnable mRevive = new Runnable() {
+        @Override
+        public void run() {
+            mReviveScheduled = false;
+            if (!mUsingKernel || mDetached || mConvResponseThisRound) return;
+            AppLog.i("kernel", "内核页无响应，后台重载一次（列表继续用缓存）");
+            try {
+                active().reloadIm();
+            } catch (Throwable t) {
+                AppLog.i("kernel", "后台重载内核页失败: " + t);
+            }
+        }
+    };
 
     private final Runnable mTimeout = new Runnable() {
         @Override
@@ -108,22 +135,42 @@ final class FallbackChatPort implements ChatPort {
         mAttached = false;
         mMain.removeCallbacks(mTimeout);
         mMain.removeCallbacks(mDataTimeout);
+        mMain.removeCallbacks(mRevive);
+        mReviveScheduled = false;
         active().detach(activity);
     }
 
     @Override
     public void fetchConversations() {
+        if (mUsingKernel && sConvCache != null && !sConvCache.isEmpty()) {
+            // 先秒显上次的列表，别让用户对着转圈等内核重新拉
+            mOuter.onConversations(sConvCache);
+            mConvResponseThisRound = false;
+            if (!mReviveScheduled) {
+                mReviveScheduled = true;
+                mMain.postDelayed(mRevive, 5_000L);
+            }
+        }
         active().fetchConversations();
         scheduleDataTimeout();
     }
 
     @Override
     public void fetchMessages() {
+        if (mUsingKernel && mCurrentConv != null) {
+            List<ChatMessage> cached = sMsgCache.get(mCurrentConv);
+            if (cached != null && !cached.isEmpty()) mOuter.onMessages(cached);
+        }
         active().fetchMessages();
     }
 
     @Override
     public void openConversation(String name) {
+        mCurrentConv = name;
+        if (mUsingKernel && name != null) {
+            List<ChatMessage> cached = sMsgCache.get(name);
+            if (cached != null && !cached.isEmpty()) mOuter.onMessages(cached);
+        }
         active().openConversation(name);
     }
 
@@ -207,14 +254,22 @@ final class FallbackChatPort implements ChatPort {
 
         @Override
         public void onMessages(List<ChatMessage> list) {
-            if (mUsingKernel) mOuter.onMessages(list);
+            if (!mUsingKernel) return;
+            if (list != null && !list.isEmpty() && mCurrentConv != null) {
+                sMsgCache.put(mCurrentConv, list);
+            }
+            mOuter.onMessages(list);
         }
 
         @Override
         public void onConversations(List<Conversation> list) {
             if (!mUsingKernel) return;
+            mConvResponseThisRound = true;
+            mMain.removeCallbacks(mRevive);
+            mReviveScheduled = false;
             if (list != null && !list.isEmpty()) {
                 mKernelGotData = true;
+                sConvCache = list;
                 mMain.removeCallbacks(mDataTimeout);
             }
             mOuter.onConversations(list);
