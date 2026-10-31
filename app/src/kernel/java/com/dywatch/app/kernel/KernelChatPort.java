@@ -76,5 +76,7 @@ public final class KernelChatPort implements ChatPort {
     @Override
     public void setListenerDetached(ChatEngine.Listener listener) {
         GeckoKernel.clearChatListener(listener);
+        // 页面销毁前把内核视图停到主界面，别让它跟着已销毁的窗口一起被挂起
+        GeckoKernel.parkToHost();
     }
 }

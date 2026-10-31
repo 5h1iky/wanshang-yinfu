@@ -52,6 +52,8 @@ public final class GeckoKernel {
     private static GeckoKernel sInst;
     /** 聊天页当前监听者（会话列表页 / 聊天页共用；同一时刻只有一页在前台） */
     private static ChatEngine.Listener sChatListener;
+    /** 常驻宿主（主界面）：聊天页销毁时把 GeckoView 挪过去，避免窗口销毁导致页面被挂起 */
+    private static java.lang.ref.WeakReference<Activity> sHostActivity;
 
     private final Context mApp;
     private final Handler mUi = new Handler(Looper.getMainLooper());
@@ -74,6 +76,7 @@ public final class GeckoKernel {
 
     private GeckoKernel(Context ctx) {
         mApp = ctx.getApplicationContext();
+        watchHostActivity();
     }
 
     /** 入口（由 {@link KernelSeam} 反射调用）。返回 null = 未就绪，调用方回落 WebView。 */
@@ -187,6 +190,59 @@ public final class GeckoKernel {
     public static synchronized void chatStart(Context ctx, ChatEngine.Listener listener) {
         if (sInst == null) sInst = new GeckoKernel(ctx);
         sInst.startChat(ctx, listener);
+    }
+
+    /** 由主界面登记常驻宿主（内部通过 ActivityLifecycleCallbacks 自动识别 MainActivity）。 */
+    public static synchronized void setHostActivity(Activity activity) {
+        sHostActivity = activity == null ? null : new java.lang.ref.WeakReference<>(activity);
+    }
+
+    /**
+     * 聊天页销毁时把内核视图停到主界面窗口上。
+     *
+     * 2026-10-31 手表实测：不这么做的话，退到主屏后 GeckoView 跟着旧窗口一起销毁，
+     * content script 的 250ms 轮询停摆；再进聊天时指令发下去没有任何回应，只能整页重载。
+     */
+    public static synchronized void parkToHost() {
+        if (sInst != null) sInst.parkView();
+    }
+
+    /**
+     * 注册生命周期回调，自动把 MainActivity 记为常驻宿主。
+     * 这样不用改 MainActivity（另一个 agent 正在改它，避免冲突）。
+     */
+    private void watchHostActivity() {
+        try {
+            ((android.app.Application) mApp).registerActivityLifecycleCallbacks(
+                    new android.app.Application.ActivityLifecycleCallbacks() {
+                        @Override
+                        public void onActivityResumed(Activity activity) {
+                            if ("com.dywatch.app.MainActivity".equals(activity.getClass().getName())) {
+                                sHostActivity = new java.lang.ref.WeakReference<>(activity);
+                            }
+                        }
+
+                        @Override public void onActivityCreated(Activity activity, android.os.Bundle b) { }
+                        @Override public void onActivityStarted(Activity activity) { }
+                        @Override public void onActivityPaused(Activity activity) { }
+                        @Override public void onActivityStopped(Activity activity) { }
+                        @Override public void onActivitySaveInstanceState(Activity activity, android.os.Bundle b) { }
+                        @Override public void onActivityDestroyed(Activity activity) { }
+                    });
+        } catch (Throwable t) {
+            AppLog.i(TAG, "注册宿主生命周期失败: " + t);
+        }
+    }
+
+    private void parkView() {
+        try {
+            Activity a = sHostActivity == null ? null : sHostActivity.get();
+            if (a == null || a.isFinishing() || mView == null) return;
+            attachToActivity(a);
+            AppLog.i(TAG, "内核视图已停到常驻宿主: " + a.getClass().getSimpleName());
+        } catch (Throwable t) {
+            AppLog.i(TAG, "内核视图停靠失败: " + t);
+        }
     }
 
     private void startChat(Context ctx, ChatEngine.Listener listener) {

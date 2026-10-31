@@ -797,13 +797,19 @@
       try {
         var items = [];
         var boxes = document.querySelectorAll('[class*="messageMessageBoxmessageBox"]');
+        // 2026-10-31 手表实测：这一版页面是**用 class 标方向的**（我方 contentBox 带 isFromMe，
+        // 对方不带）。只要页面上出现过 isFromMe，就必须以 class 为准；不能再拿"气泡靠右"
+        // 兜底去覆盖它——手表上 window.innerWidth=596、所有行都右对齐到 596，几何判据会把
+        // 对方消息也判成我方（实测 1111 被标成 dir=out）。
+        var classSignal = !!document.querySelector(
+          '[class*="messageMessageBoxcontentBox"][class*="isFromMe"]');
         for (var i = 0; i < boxes.length; i++) {
           var b = boxes[i];
           var content = b.querySelector('[class*="messageMessageBoxcontentBox"]');
-          // 方向判据：优先 isFromMe 类（WebView 端一直可用）；Gecko 上类名有时不挂，
-          // 退化为"气泡中心在屏幕右半边 = 我方"，比猜类名稳。
+          // 方向判据：页面上有 isFromMe 就只信 class；只有整页都没有 class 信号时，
+          // 才退化为几何判据（老主题/旧版本）。
           var mine = !!(content && /isFromMe/i.test(String(content.className || '')));
-          if (!mine) {
+          if (!classSignal) {
             // contentBox 是整行容器（左右都从 320 起、宽 456），拿它判方向必错；
             // 要量真正的气泡/表情/卡片元素，并且看右边缘，不看中心。
             var bubble = b.querySelector('[class*="MessageItemTextbubbleContent"]')
