@@ -38,6 +38,16 @@ public final class AnnounceStore {
         sp(c).edit().putString(KEY_LAST_READ, id).apply();
     }
 
+    /** 检查更新页要展示的公告：忽略“已读”，但保留过期/停用判定。 */
+    public static AnnounceApi.Announcement current(Context c) {
+        String json = sp(c).getString(KEY_CACHED, "");
+        if (json == null || json.isEmpty()) return null;
+        AnnounceApi.Announcement a = AnnounceApi.parse(json, System.currentTimeMillis());
+        if (a == null) return null;
+        if (a.showUntil > 0 && System.currentTimeMillis() > a.showUntil) return null;
+        return a;
+    }
+
     /** 主屏要展示的公告（来自缓存 + 已读/过期判定）；没有则 null */
     public static AnnounceApi.Announcement pending(Context c) {
         String json = sp(c).getString(KEY_CACHED, "");

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  检查更新页：公告在上，下载链接按钮在公告下面。
+  公告来自 AnnounceStore 缓存；版本/下载地址来自 GitHub latest Release。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base"
+    android:orientation="vertical">
+
+    <include layout="@layout/include_header" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="@dimen/s3">
+
+            <TextView
+                android:id="@+id/tv_update_current"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/t_caption" />
+
+            <TextView
+                android:id="@+id/tv_update_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s2"
+                android:text="正在检查更新…"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/t_body"
+                android:textStyle="bold" />
+
+            <!-- 公告卡 -->
+            <LinearLayout
+                android:id="@+id/update_announce_card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s3"
+                android:background="@drawable/bg_media_card"
+                android:orientation="vertical"
+                android:padding="@dimen/s4">
+
+                <TextView
+                    android:id="@+id/tv_announce_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="公告"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/t_body"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_announce_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/s2"
+                    android:text="正在读取公告…"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/t_card_summary" />
+            </LinearLayout>
+
+            <!-- 公告下面的下载按钮 -->
+            <Button
+                android:id="@+id/btn_update_download"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/ctrl_min"
+                android:layout_marginTop="@dimen/s3"
+                android:background="@drawable/bg_pill"
+                app:backgroundTint="@null"
+                android:enabled="false"
+                android:text="正在获取下载地址…"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/t_body" />
+
+            <TextView
+                android:id="@+id/tv_update_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s2"
+                android:autoLink="web"
+                android:textColor="@color/text_muted"
+                android:textSize="@dimen/t_caption"
+                android:visibility="gone" />
+
+            <!-- 版本说明放在公告和下载按钮之后，避免长文把公告顶出首屏 -->
+            <TextView
+                android:id="@+id/tv_update_notes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s3"
+                android:textColor="@color/text_muted"
+                android:textSize="@dimen/t_caption"
+                android:visibility="gone" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/s4"
+                android:gravity="center"
+                android:text="检查更新只读取 GitHub 公开 Release 信息，不携带账号身份。"
+                android:textColor="@color/text_faint"
+                android:textSize="@dimen/t_caption" />
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

@@ -46,6 +46,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 设置 → 检查更新：公告 + 最新 Release 下载入口 -->
+        <activity
+            android:name=".ui.UpdateActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait" />
+
         <!-- 首页“刷视频”选片页：先封面/标题列表，点一条才进全屏 -->
         <activity
             android:name=".ui.BrowseActivity"

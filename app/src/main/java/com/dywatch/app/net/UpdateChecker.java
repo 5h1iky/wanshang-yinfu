@@ -114,26 +114,27 @@ public final class UpdateChecker {
         return false;
     }
 
-    /** 联网检查；失败返回 null（静默） */
-    public UpdateInfo check(String currentVersion) {
+    /** 拉取 latest Release，不管本机是否已是最新；供“检查更新”页展示版本和下载地址。 */
+    public UpdateInfo fetchLatest() {
         try {
             Request req = new Request.Builder()
                     .url(RELEASES_API)
-                    .header("User-Agent", "wanshang-yinfu/" + currentVersion)
+                    .header("User-Agent", "wanshang-yinfu")
                     .header("Accept", "application/vnd.github+json")
                     .build();
             try (Response resp = client.newCall(req).execute()) {
                 if (resp.body() == null || resp.code() != 200) return null;
-                UpdateInfo info = parseRelease(resp.body().string(),
-                        com.dywatch.app.BuildConfig.FLAVOR);
-                if (info == null) return null;
-                return isNewer(info.version, currentVersion) ? info : null;
+                return parseRelease(resp.body().string(), com.dywatch.app.BuildConfig.FLAVOR);
             }
         } catch (Exception e) {
-            // 宽catch（审计 M5）：这条路径跑在一个裸线程上，漏出去任何异常都是启动闪退。
-            // 更新检查失败的正确表现是"安静地什么都不显示"。
             return null;
         }
+    }
+
+    /** 联网检查；失败或已是最新返回 null（静默） */
+    public UpdateInfo check(String currentVersion) {
+        UpdateInfo info = fetchLatest();
+        return info != null && isNewer(info.version, currentVersion) ? info : null;
     }
 
     private static String opt(JsonObject o, String key) {

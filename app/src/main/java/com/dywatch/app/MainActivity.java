@@ -46,7 +46,7 @@ public class MainActivity extends UiActivity {
         // 版本行读真实包版本号，杜绝手写值随发版漂移（v0.1.0 曾一直挂在 0.2.0 的包上）
         TextView about = findViewById(R.id.tv_about);
         if (about != null) {
-            about.setText("v" + versionName() + " · 与官方无关 · 风险自负");
+            about.setText("v" + versionName());
             // 方案 F：版本行兼做关于页入口（主屏一级位已满 2×2，用最轻的方式加入口）
             about.setOnClickListener(new View.OnClickListener() {
                 @Override

@@ -55,6 +55,7 @@ public class SettingsActivity extends UiActivity {
 
     private void buildRows() {
         mRoot.removeAllViews();
+        section("界面与显示");
         row("界面缩放", SCALE_NAMES[index(SCALES, Settings.scale(this))], new Runnable() {
             @Override public void run() {
                 int i = (index(SCALES, Settings.scale(SettingsActivity.this)) + 1) % SCALES.length;
@@ -73,26 +74,6 @@ public class SettingsActivity extends UiActivity {
                 recreate();   // 字号改了同样要重建才生效
             }
         });
-        // 快捷回复条：压成 28dp 细条之后仍给一个总开关（用户反馈"太占位置"）
-        // ⚠️ 默认值已改「关」（软件内问题 ③a）；老用户存过键的仍按存的来，不会突然消失
-        row("快捷回复条", onOff(Settings.quickReplyVisible(this)), new Runnable() {
-            @Override public void run() {
-                boolean v = !Settings.quickReplyVisible(SettingsActivity.this);
-                Settings.setQuickReplyVisible(SettingsActivity.this, v);
-                toast("快捷回复条：" + onOff(v));
-                buildRows();
-            }
-        });
-        // 内容可编辑（软件内问题 ③b）：聊天/评论共用这 4 个槽位
-        row("快捷回复内容", QuickReplyTexts.summary(Settings.quickReplyTexts(this)), new Runnable() {
-            @Override public void run() {
-                QuickReplyEditDialog.show(SettingsActivity.this, new QuickReplyEditDialog.OnChanged() {
-                    @Override public void onChanged() {
-                        buildRows();   // 那一行的摘要跟着变
-                    }
-                });
-            }
-        });
         row("屏幕形状", SHAPE_NAMES[Settings.shapeMode(this)], new Runnable() {            @Override public void run() {
                 int next = (Settings.shapeMode(SettingsActivity.this) + 1) % 3;
                 Settings.setShapeMode(SettingsActivity.this, next);
@@ -104,6 +85,8 @@ public class SettingsActivity extends UiActivity {
         // 边距：点开调节面板（软件内问题 ②）——原来只能正向循环，2% 想回 0% 要点 6 次
         addPaddingRow(true);
         addPaddingRow(false);
+
+        section("播放与交互");
         row("视频画质", QUALITY_NAMES[Settings.qualityMode(this)] + " · " + qualityHint(), new Runnable() {
             @Override public void run() {
                 int next = (Settings.qualityMode(SettingsActivity.this) + 1) % 3;
@@ -158,6 +141,30 @@ public class SettingsActivity extends UiActivity {
                 }
             });
         }
+
+        section("快捷回复");
+        // 快捷回复条：压成 28dp 细条之后仍给一个总开关（用户反馈"太占位置"）
+        // ⚠️ 默认值已改「关」（软件内问题 ③a）；老用户存过键的仍按存的来，不会突然消失
+        row("快捷回复条", onOff(Settings.quickReplyVisible(this)), new Runnable() {
+            @Override public void run() {
+                boolean v = !Settings.quickReplyVisible(SettingsActivity.this);
+                Settings.setQuickReplyVisible(SettingsActivity.this, v);
+                toast("快捷回复条：" + onOff(v));
+                buildRows();
+            }
+        });
+        // 内容可编辑（软件内问题 ③b）：聊天/评论共用这 4 个槽位
+        row("快捷回复内容", QuickReplyTexts.summary(Settings.quickReplyTexts(this)), new Runnable() {
+            @Override public void run() {
+                QuickReplyEditDialog.show(SettingsActivity.this, new QuickReplyEditDialog.OnChanged() {
+                    @Override public void onChanged() {
+                        buildRows();   // 那一行的摘要跟着变
+                    }
+                });
+            }
+        });
+
+        section("存储与清理");
         actionRow("清除「看过」记录", "重置后推荐可能重复出现旧视频", new Runnable() {
             @Override public void run() {
                 SeenStore.clear(SettingsActivity.this);
@@ -201,6 +208,13 @@ public class SettingsActivity extends UiActivity {
                 boolean ok = com.dywatch.app.cache.ProxyVideoCacheManager.clearAllCache(SettingsActivity.this);
                 toast(ok ? "已清空视频缓存" : "部分文件没删掉，稍后再试");
                 buildRows();   // 这一行的容量数字跟着刷新
+            }
+        });
+        section("诊断与关于");
+        actionRow("检查更新", "查看公告与新版本下载地址", new Runnable() {
+            @Override public void run() {
+                startActivity(new android.content.Intent(SettingsActivity.this,
+                        UpdateActivity.class));
             }
         });
         actionRow("诊断日志", "WebView 版本 / 上次崩溃 / 最近运行记录", new Runnable() {
@@ -357,6 +371,18 @@ public class SettingsActivity extends UiActivity {
     private static int index(float[] arr, float v) {
         for (int i = 0; i < arr.length; i++) if (Math.abs(arr[i] - v) < 0.01f) return i;
         return 1;
+    }
+
+    /** 设置分组标题：小号、次要色，只负责把长列表分段。 */
+    private void section(String title) {
+        TextView tv = new TextView(this);
+        tv.setText(title);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.t_caption));
+        tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_secondary));
+        tv.setTypeface(null, android.graphics.Typeface.BOLD);
+        tv.setPadding(dp(6), dp(8), dp(6), dp(2));
+        mRoot.addView(tv);
     }
 
     /** 普通设置行；onClick 为 null 时只建行不接线（边距行要自己拿到 TextView 做实时刷新） */
