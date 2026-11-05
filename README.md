@@ -75,18 +75,18 @@
 
 ## 安装
 
-0.9.0 起同一个 Release 挂两个同包名、同签名、同 versionCode 的包，**只能装一个**：
+0.9.0 当前 Release 只提供 webview 版本：
 
-- `wanshang-yinfu-vX.Y.Z-webview-release.apk`：推荐，约 6.3MB，用系统 WebView，日常使用选它；
-- `wanshang-yinfu-vX.Y.Z-kernel-release.apk`：实验，约 61MB，内置 GeckoView，网页引擎不依赖系统 WebView；当前内核线仍可能被抖音风控/人机验证拦截，只有明确需要时才装。
+- `wanshang-yinfu-vX.Y.Z-webview-release.apk`：推荐，约 6.3MB，使用系统 WebView，日常使用选它。
+- kernel 版本已暂停对外发布，继续在本地调试；源码和 `kernel` 构建变体保留，待稳定后再提供。
 
 安装步骤：
 
-1. 到 [**Releases**](https://github.com/5h1iky/wanshang-yinfu/releases) 下载对应变体的 APK（文件名里带 `-webview-` 或 `-kernel-`）
+1. 到 [**Releases**](https://github.com/5h1iky/wanshang-yinfu/releases) 下载 APK
 2. 传到手机/手表上，用文件管理器侧载安装（Android 5.0+；MIUI 等系统需允许"安装未知应用"）
 3. 首启阅读并同意免责声明 → 登录（扫码）→ 开刷
 
-两个变体同签名，覆盖安装不需要卸载，登录态会保留；不要同时装两个。
+覆盖安装不需要卸载，登录态会保留。
 
 > 表上没有浏览器？应用内的链接点击在无浏览器设备上会静默提示，不影响其它功能。
 
@@ -99,7 +99,7 @@ git clone https://github.com/5h1iky/wanshang-yinfu.git
 cd wanshang-yinfu
 ./gradlew :app:assembleWebviewDevdiag    # webview 测试包（DEBUGGABLE，保留登录，勿发布）
 ./gradlew :app:assembleWebviewRelease    # webview 发布包（需自配 keystore.properties，见下）
-./gradlew :app:assembleKernelRelease     # kernel 发布包（约 61MB，实验）
+./gradlew :app:assembleKernelDebug       # kernel 本地调试包（约 61MB，暂不对外发布）
 ./gradlew :app:testWebviewDebugUnitTest  # webview 单元测试
 ./gradlew :app:testKernelDebugUnitTest   # kernel 单元测试
 ```
