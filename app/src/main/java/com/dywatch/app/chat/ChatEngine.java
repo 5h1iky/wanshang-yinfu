@@ -434,6 +434,16 @@ public class ChatEngine {
         runJs("ChatBridge.sendText(" + org.json.JSONObject.quote(text) + ");");
     }
 
+    /**
+     * 引擎是否真的可用（2026-11-07 审计 H4）。
+     *
+     * `mReady` 在 onPageFinished 时就置真，但桥注入是异步的；调用方用它判断
+     * "现在发出去有没有意义"，比 `mWebView != null` 更准确（渲染进程被回收后 mWebView 会置空）。
+     */
+    public boolean isReady() {
+        return mWebView != null && mReady;
+    }
+
     /** 拉取消息（结果经 onMessages 回调） */
     public void fetchMessages() {
         runJs("ChatBridge.fetchMessages();");

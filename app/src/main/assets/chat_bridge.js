@@ -655,20 +655,33 @@
           return;
         }
         clearInterval(boxTimer);
-        if (replyTarget && !self.__openReplyTarget(replyTarget)) {
-          post({ type: 'action', action: 'sendCommentReply', ok: false, reqId: reqId,
-                 detail: '未定位到这条评论，未发送任何内容' });
-          return;
+        if (replyTarget) {
+          var pick = self.__findReplyTarget(replyTarget);
+          if (!pick.ok) {
+            // 目标不唯一/未定位：**明确失败**并带上具体原因（审计 M13）。
+            // 注意必须用本层的 reqId 回报，否则 UI 只能等 20s 超时。
+            post({ type: 'action', action: 'sendCommentReply', ok: false, reqId: reqId,
+                   detail: pick.detail });
+            return;
+          }
+          fireClick(pick.btn);
         }
         fireClick(b);
         self.__doSendCommentEdit(text, reqId, replyTarget);
       }, 500);
     },
 
-    // 网页当前没有可靠的 cid DOM 属性：以昵称 + 原正文前缀限定目标，找不到就中止。
-    // 绝不能点第一个“回复”或回退为一级评论，那会把内容发错对象。
-    __openReplyTarget: function (target) {
+    /**
+     * 定位"回复"按钮（纯查找，不点击；2026-11-07 审计 M13）。
+     *
+     * 网页没有可靠的 cid DOM 属性，只能靠"昵称 + 正文前缀"限定目标。原实现命中第一条就点，
+     * 同名/同前缀的评论会稳定回复到第一条 —— 发错对象是对外可见的社交事故。
+     *
+     * @return {ok:true, btn} 唯一命中；{ok:false, detail} 未命中或命中多条
+     */
+    __findReplyTarget: function (target) {
       var wraps = document.querySelectorAll('[class*="comment-item-info-wrap"]');
+      var cands = [];
       for (var i = 0; i < wraps.length; i++) {
         var col = wraps[i].parentElement;
         if (!col) continue;
@@ -676,15 +689,22 @@
         if (target.name && name !== target.name) continue;
         var text = (col.textContent || '').replace(/\s+/g, ' ');
         if (target.textPrefix && text.indexOf(target.textPrefix) < 0) continue;
+        var btn = null;
         var nodes = col.querySelectorAll('span,button');
         for (var n = 0; n < nodes.length; n++) {
           if (nodes[n].children.length === 0 && (nodes[n].textContent || '').trim() === '回复') {
-            fireClick(nodes[n]);
-            return true;
+            btn = nodes[n];
+            break;
           }
         }
+        if (btn) cands.push(btn);
+        if (cands.length > 1) break;   // 已能确定"不唯一"，不必再扫
       }
-      return false;
+      if (cands.length === 1) return { ok: true, btn: cands[0] };
+      if (cands.length > 1) {
+        return { ok: false, detail: '有 ' + cands.length + ' 条同名同内容的评论，无法确定回复对象，已取消发送' };
+      }
+      return { ok: false, detail: '未定位到这条评论（可能已被删除或折叠），已取消发送' };
     },
 
     __doSendCommentEdit: function (text, reqId, replyTarget) {

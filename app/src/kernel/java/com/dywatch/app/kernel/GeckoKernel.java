@@ -299,6 +299,17 @@ public final class GeckoKernel {
         sInst.chatSubmit(ctx, kind, name, text);
     }
 
+    /**
+     * 内核聊天通道现在能不能发消息（2026-11-07 审计 H4）。
+     *
+     * 判据与 {@link #chatSubmit} 的前置条件一致：引擎起来 + content 端口已挂。
+     * 不满足时 {@code chatSend} 只是排队等待，用户看不到"发出去了"的证据 ——
+     * 所以调用方拿这个返回 false 就别显示乐观气泡。
+     */
+    public static synchronized boolean isChatReady() {
+        return sInst != null && sInst.mContentPort != null;
+    }
+
     private void chatSubmit(Context ctx, String kind, String name, String text) {
         if (!ensureStarted(ctx) || mContentPort == null) {
             AppLog.i(TAG, "聊天探测：内核未就绪（" + state() + "）");
@@ -374,6 +385,103 @@ public final class GeckoKernel {
     }
 
     // ---------- 启动（只做一次） ----------
+
+    /**
+     * 退出登录时清内核会话（由 {@link LoginManager#clear} 反射调用）。
+     *
+     * ⚠️ 2026-11-07 代码审计 H2：原来退出登录只清 WebView cookie + SharedPreferences，
+     * 内核那条线一样没动 —— 界面上显示"已退出"，Gecko 里仍带着旧账号的 cookie，
+     * 私信照样能收发。这里做四件事：
+     *   ① 解绑并销毁视图/会话/运行时（常驻单例置空，下次重建）；
+     *   ② 让扩展清掉它写进 Gecko cookie 仓的那批 cookie；
+     *   ③ 清内核缓存目录（页面数据/IndexedDB 都在里面，含私信正文）；
+     *   ④ 把内存里的监听者/端口全部摘掉，防旧页面继续回调。
+     *
+     * 失败只记日志：退出登录的主目标是"凭证没了"，内核清理属尽力而为（下次冷启动也不会复活，
+     * 因为 Gecko 的用户数据目录已删）。
+     */
+    public static synchronized void clearSession(Context ctx) {
+        if (sInst != null) {
+            sInst.teardown();
+            sInst = null;
+        }
+        sChatListener = null;
+        sHostActivity = null;
+        // 内核的用户数据（cookie / localStorage / IndexedDB）落在 filesDir 下，随 App 卸载才清；
+        // 这里显式删掉，避免"退出登录后换个账号，页面还带着上一个人的 local 状态"。
+        if (ctx != null) {
+            try {
+                java.io.File base = ctx.getApplicationContext().getFilesDir();
+                String[] candidates = { "mozilla", "gecko", "geckoview" };
+                for (String name : candidates) {
+                    java.io.File f = new java.io.File(base, name);
+                    if (f.exists()) {
+                        deleteTree(f);
+                        AppLog.i(TAG, "内核数据目录已清除: " + name);
+                    }
+                }
+            } catch (Throwable t) {
+                AppLog.i(TAG, "清内核数据目录失败: " + t);
+            }
+        }
+    }
+
+    /** 递归删除（不跟随符号链接；失败不抛） */
+    private static void deleteTree(java.io.File f) {
+        try {
+            java.io.File[] kids = f.listFiles();
+            if (kids != null) for (java.io.File k : kids) deleteTree(k);
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 拆掉当前内核实例（主线程以外也能调，内部转主线程） */
+    private void teardown() {
+        mStarted = false;
+        mCookiesDone = false;
+        mChatReadyNotified = false;
+        try {
+            if (mBgPort != null) {
+                org.json.JSONObject clear = new org.json.JSONObject();
+                clear.put("cmd", "clearCookies");
+                mBgPort.postMessage(clear);
+                mBgPort = null;
+            }
+        } catch (Throwable t) {
+            AppLog.i(TAG, "通知扩展清 cookie 失败: " + t);
+        }
+        mContentPort = null;
+        mExt = null;
+        mPending.clear();
+        final GeckoView view = mView;
+        final GeckoSession session = mSession;
+        final GeckoRuntime runtime = mRuntime;
+        mView = null;
+        mSession = null;
+        mRuntime = null;
+        try {
+            if (view != null) {
+                view.setSession(null);
+                if (view.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) view.getParent()).removeView(view);
+                }
+            }
+        } catch (Throwable t) {
+            AppLog.i(TAG, "拆内核视图失败: " + t);
+        }
+        try {
+            if (session != null) session.close();
+        } catch (Throwable t) {
+            AppLog.i(TAG, "关内核会话失败: " + t);
+        }
+        try {
+            if (runtime != null) runtime.shutdown();
+        } catch (Throwable t) {
+            AppLog.i(TAG, "关内核运行时失败: " + t);
+        }
+    }
 
     private synchronized boolean ensureStarted(Context ctx) {
         if (mStarted) return true;
@@ -534,8 +642,10 @@ public final class GeckoKernel {
                 break;
             case "auth":
                 // 注意用 opt*：Android 的 JSONObject.get() 会抛受检 JSONException
-                AppLog.i(TAG, "内核登录态 ok=" + msg.opt("ok") + " user=" + msg.optString("user")
-                        + " msg=" + msg.optString("message"));
+                // ⚠️ 2026-11-07 代码审计 H3：昵称属于账号身份，不落日志（只记有没有）
+                AppLog.i(TAG, "内核登录态 ok=" + msg.opt("ok")
+                        + " 有昵称=" + !msg.optString("user").isEmpty()
+                        + " 提示长度=" + msg.optString("message").length());
                 dispatchAuth(msg.optBoolean("ok"), msg.optString("message"));
                 break;
             case "action":
@@ -543,20 +653,23 @@ public final class GeckoKernel {
                 break;
             case "conversations":
                 JSONArray convs = msg.optJSONArray("items");
+                // ⚠️ 审计 H3：原来把 items 整段写日志 = 会话昵称 + 最近消息正文全部落盘
                 AppLog.i(TAG, "内核会话 rows=" + msg.optInt("rows") + " tries=" + msg.optInt("tries")
-                        + " count=" + (convs == null ? 0 : convs.length()) + " data=" + msg.optString("items"));
+                        + " count=" + (convs == null ? 0 : convs.length()));
                 dispatchConversations(convs);
                 break;
             case "chatProbe":
-                AppLog.i(TAG, "内核聊天DOM " + msg.toString());
+                AppLog.i(TAG, "内核聊天DOM 节点数=" + msg.optInt("nodes")
+                        + " 文本长度=" + msg.optInt("textLen"));
                 break;
             case "opened":
-                AppLog.i(TAG, "内核开会话 ok=" + msg.optBoolean("ok") + " name=" + msg.optString("name"));
+                AppLog.i(TAG, "内核开会话 ok=" + msg.optBoolean("ok")
+                        + " 名字长度=" + msg.optString("name").length());
                 break;
             case "messages":
                 JSONArray msgs = msg.optJSONArray("items");
-                AppLog.i(TAG, "内核消息 count=" + (msgs == null ? 0 : msgs.length())
-                        + " data=" + msg.optString("items"));
+                // ⚠️ 审计 H3：原来打 `data=items` = 私信正文直接落盘
+                AppLog.i(TAG, "内核消息 count=" + (msgs == null ? 0 : msgs.length()));
                 dispatchMessages(msgs);
                 break;
             case "sent":
@@ -570,7 +683,8 @@ public final class GeckoKernel {
                 AppLog.i(TAG, "内核页面观测 " + summarizeHook(msg.optJSONObject("hook")));
                 break;
             default:
-                AppLog.i(TAG, "内核桥消息 " + t + " " + msg.toString());
+                // ⚠️ 审计 H3：默认分支原来打整条 msg，未知类型（很可能是新的正文类事件）会整段落盘
+                AppLog.i(TAG, "内核桥消息 " + t + " 字段=" + msg.length() + "B");
                 break;
         }
     }

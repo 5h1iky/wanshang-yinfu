@@ -100,8 +100,10 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
                 new com.dywatch.app.ui.QuickReply.Pick() {
                     @Override
                     public void onPick(String t) {
-                        safeSend(t);
-                        appendLocal(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
+                        // ⚠️ 2026-11-07 审计 H4：快捷回复也走同一条"先确认能发、再显示气泡"的路
+                        if (safeSend(t)) {
+                            appendLocal(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
+                        }
                     }
                 });
 
@@ -111,9 +113,16 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     private void sendCurrent() {
         String text = mInput.getText() == null ? "" : mInput.getText().toString().trim();
         if (TextUtils.isEmpty(text)) return;
-        mInput.setText("");
-        safeSend(text);
-        appendLocal(new ChatMessage(ChatMessage.OUT, text, System.currentTimeMillis()));
+        // ⚠️ 2026-11-07 审计 H4：**先发、成功才清空输入框**。
+        //    原来是先 setText("") 再发 —— 通道没就绪时用户打的字直接没了，
+        //    而且界面上还多出一条"已发出"的假气泡（评论页 M6 是同一个毛病）。
+        boolean accepted = safeSend(text);
+        AppLog.i("chat", "发送提交 textLen=" + text.length() + " accepted=" + accepted
+                + " channel=" + (mEngine == null ? "null" : mEngine.getClass().getSimpleName()));
+        if (accepted) {
+            mInput.setText("");
+            appendLocal(new ChatMessage(ChatMessage.OUT, text, System.currentTimeMillis()));
+        }
     }
 
     /**
@@ -128,13 +137,41 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         scrollToBottomIfGrew(mAdapter.size());
     }
 
-    /** 安全发送：引擎未就绪时给提示而不是崩溃 */
-    private void safeSend(String text) {
+    /**
+     * 安全发送。
+     *
+     * @return true = 通道已接手（可以显示乐观气泡）；false = 根本没发出去
+     *         （未登录/引擎未就绪/还没进会话），调用方**不要**显示气泡、也不要清空输入框。
+     *
+     * ⚠️ 2026-11-07 审计 H4：原实现返回 void，UI 无条件追加气泡 + 清空输入框，
+     *    于是"没发出去"和"发出去了"在界面上长得一模一样。
+     */
+    private boolean safeSend(String text) {
         if (mEngine == null) {
             hint("未登录，不能发送（主屏→登录→扫码）");
-            return;
+            return false;
         }
-        mEngine.sendText(text);
+        final String sent = text;
+        boolean accepted = mEngine.sendText(text, new ChatPort.SendCallback() {
+            @Override
+            public void onSendResult(boolean ok, String detail, String text2) {
+                if (isFinishing() || isDestroyed()) return;
+                if (ok) {
+                    // 成功：不额外动作（下一次拉取会用服务端数据整批替换本地回声）
+                    return;
+                }
+                // 失败：提示 + 把原文回填输入框（用户不用重打一遍）
+                hint("⚠ " + detail);
+                if (mInput != null && (mInput.getText() == null || mInput.getText().length() == 0)) {
+                    mInput.setText(sent);
+                    mInput.setSelection(mInput.getText().length());
+                }
+            }
+        });
+        if (!accepted) {
+            hint("通道还没就绪，消息未发出");
+        }
+        return accepted;
     }
 
     /** 发送失败/未登录等提示：只在有事时占一行，通道正常就让位给消息 */

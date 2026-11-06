@@ -144,10 +144,45 @@ public final class LoginManager {
         } catch (Throwable t) {
             AppLog.i("login", "退出登录：清 WebStorage 失败 " + t);
         }
+        // ⚠️ 2026-11-07 代码审计 H2：发送凭证（EC 私钥 / ticket）也是账号级敏感数据，必须一起清。
+        //    只清 cookie 不清它，等于把"能不能发消息"的钥匙留在设备上。
+        try {
+            com.dywatch.app.chat.api.ImCreds.clear(ctx);
+            AppLog.i("login", "退出登录：已清除 IM 发送凭证");
+        } catch (Throwable t) {
+            AppLog.i("login", "退出登录：清 IM 凭证失败 " + t);
+        }
         try {
             ChatEngine.resetForLogout();
         } catch (Throwable t) {
             AppLog.i("login", "退出登录：重置聊天引擎失败 " + t);
+        }
+        // ⚠️ 2026-11-07 代码审计 H2：静态聊天缓存（FallbackChatPort）+ kernel 会话/扩展 cookie
+        //    原来一条都没清 —— 界面上"已退出"，可内核页仍带旧会话，同进程再进聊天还会先秒显
+        //    上一个账号的会话列表（隐私事故）。两处都要走反射，保持 webview 变体可编译。
+        try {
+            com.dywatch.app.chat.ChatCache.clearAll();
+        } catch (Throwable t) {
+            AppLog.i("login", "退出登录：清聊天缓存失败 " + t);
+        }
+        clearKernelSession(ctx);
+    }
+
+    /**
+     * kernel 变体的会话清理（反射调用，webview 变体里没有那些类）。
+     *
+     * 清三样：Gecko 的 cookie / site data、内置扩展写进去的 cookie、常驻的 GeckoRuntime。
+     * 任何一步失败都只记日志——退出登录的主目标是"cookie 与备份没了"，内核是尽力而为。
+     */
+    private static void clearKernelSession(Context ctx) {
+        try {
+            Class<?> c = Class.forName("com.dywatch.app.kernel.GeckoKernel");
+            c.getMethod("clearSession", Context.class).invoke(null, ctx);
+            AppLog.i("login", "退出登录：已清 kernel 会话");
+        } catch (ClassNotFoundException e) {
+            // webview 变体：没有内核，正常
+        } catch (Throwable t) {
+            AppLog.i("login", "退出登录：清 kernel 会话失败 " + t);
         }
     }
 }

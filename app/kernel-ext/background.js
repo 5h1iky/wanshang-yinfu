@@ -71,6 +71,13 @@ function connect() {
     }
     if (msg.cmd === 'setCookies') {
       applyCookies(msg.cookies || []);
+      return;
+    }
+    // 2026-11-07（代码审计 H2）：退出登录时把 Gecko cookie 仓里 .douyin.com 的会话全部删掉。
+    // 不删的话 "退出登录 → 换个账号登录" 会继续用上一个人的 cookie 拉私信。
+    if (msg.cmd === 'clearCookies') {
+      clearCookies();
+      return;
     }
   });
   try {
@@ -189,6 +196,53 @@ function applyCookiesNow(list) {
     }
   }
   next();
+}
+
+/**
+ * 清掉 .douyin.com 下的全部 cookie（2026-11-07，代码审计 H2）。
+ *
+ * 为什么必须由扩展来做：GeckoView 没有任何公开的 cookie 清理 API（11 号调研已确认），
+ * 唯一能摸到 cookie 仓的就是这个内置扩展的 `browser.cookies`。
+ * 退出登录时原生侧发 `{"cmd":"clearCookies"}` 过来。
+ */
+function clearCookies() {
+  var domains = ['.douyin.com', 'www.douyin.com', 'imapi.douyin.com'];
+  var done = 0;
+  var removed = 0;
+  var next = function () {
+    if (++done >= domains.length) {
+      toNative({ type: 'cookiesCleared', removed: removed });
+    }
+  };
+  domains.forEach(function (domain) {
+    var query = { domain: domain };
+    try {
+      browser.cookies.getAll(query).then(function (list) {
+        var pending = (list || []).length;
+        if (!pending) {
+          next();
+          return;
+        }
+        list.forEach(function (c) {
+          var url = (c.secure ? 'https://' : 'http://') + (c.domain || 'www.douyin.com').replace(/^\./, '') + (c.path || '/');
+          try {
+            browser.cookies.remove({ url: url, name: c.name }).then(function () {
+              removed++;
+              if (--pending === 0) next();
+            }, function () {
+              if (--pending === 0) next();
+            });
+          } catch (e) {
+            if (--pending === 0) next();
+          }
+        });
+      }, function () {
+        next();
+      });
+    } catch (e) {
+      next();
+    }
+  });
 }
 
 function chatFetch() {

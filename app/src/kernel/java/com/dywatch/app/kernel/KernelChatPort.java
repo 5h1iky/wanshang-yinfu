@@ -58,8 +58,13 @@ public final class KernelChatPort implements ChatPort {
     }
 
     @Override
-    public void sendText(String text) {
+    public boolean sendText(String text, SendCallback cb) {
+        // ⚠️ 2026-11-07 审计 H4：内核没就绪时不要假装发出去了。
+        //    GeckoKernel.chat 会自己排队，但从用户视角"现在这条到底发没发"必须能答。
+        if (!GeckoKernel.isChatReady()) return false;
         GeckoKernel.chat(mActivity, "chatSend", null, text);
+        // 内核的 `sent` 也是"编辑器是否被清空"级证据，不是服务端确认 → 不回调 cb，由 UI 超时兜底。
+        return true;
     }
 
     @Override

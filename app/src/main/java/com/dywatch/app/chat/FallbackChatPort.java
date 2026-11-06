@@ -61,6 +61,17 @@ final class FallbackChatPort implements ChatPort {
     private boolean mConvResponseThisRound;
     private boolean mReviveScheduled;
 
+    /**
+     * 清空进程内缓存（退出登录时由 {@link ChatCache#clearAll()} 调）。
+     *
+     * ⚠️ 2026-11-07 代码审计 H2：这两个缓存是 static，退出登录后还留着**上一个账号**的
+     * 会话列表与消息，重新登录另一个账号进聊天会先秒显出别人的数据。
+     */
+    static synchronized void clearCaches() {
+        sConvCache = null;
+        sMsgCache.clear();
+    }
+
     private final Runnable mRevive = new Runnable() {
         @Override
         public void run() {
@@ -175,8 +186,10 @@ final class FallbackChatPort implements ChatPort {
     }
 
     @Override
-    public void sendText(String text) {
-        active().sendText(text);
+    public boolean sendText(String text, SendCallback cb) {
+        // ⚠️ 2026-11-07 审计 H4：把"能不能发"如实回传（内核未就绪时 active() 可能还是内核，
+        //    KernelChatPort 会给出自己的判断；这里不再无条件返回"已发出"）。
+        return active().sendText(text, cb);
     }
 
     @Override

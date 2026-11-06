@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 只在 kernel 变体里挂这个调试入口（webview 变体没有），用于 adb 广播验证内核动作 -->
+    <!--
+      只在 kernel 变体里挂这个调试入口（webview 变体没有），用于 adb 广播验证内核动作。
+
+      ⚠️ 2026-11-07 代码审计 H1 修复：原来 `exported="true"` 且无权限校验，
+      同设备上任意应用都能显式广播触发聊天打开/发消息、点赞收藏 = 把写操作暴露给第三方。
+      现在两道门：
+        ① 自定义 **signature 级权限**：只有同签名的应用才能发这条广播；
+        ② receiver 内部再查一次调用方（防 OEM 把权限判错）+ 只在 debuggable 构建里放行。
+      调试方式见 KernelTestReceiver 的类注释（devdiag 包 + run-as 可用）。
+    -->
+    <permission
+        android:name="com.dywatch.app.permission.KERNEL_TEST"
+        android:protectionLevel="signature" />
+
     <application>
         <receiver
             android:name=".kernel.KernelTestReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.dywatch.app.permission.KERNEL_TEST">
             <intent-filter>
                 <action android:name="com.dywatch.app.KERNEL_TEST" />
             </intent-filter>

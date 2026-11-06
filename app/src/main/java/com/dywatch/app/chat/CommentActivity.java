@@ -44,6 +44,11 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
     private boolean mSending;
     /** 本次发送的请求号（onDestroy 时撤销登记，防结果回调到已销毁的页面） */
     private String mSendReqId;
+    /**
+     * 发送中的草稿（2026-11-07 审计 M6）。
+     * 发送前存一份，成功才丢；失败/超时回填输入框，避免断网时整段评论永久丢失。
+     */
+    private String mDraft;
     /** 手表内存有限，评论攒到 300 条就停，别无限往下拉 */
     private static final int MAX_COMMENTS = 300;
 
@@ -158,6 +163,9 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
             return;
         }
         mSending = true;
+        // ⚠️ 2026-11-07 审计 M6：**先记下草稿再清空**，失败/超时要能回填。
+        //    原来一进来就 setText("")，断网或桥无响应时长评论直接永久丢失。
+        mDraft = text;
         mInput.setText("");
         mHint.setVisibility(View.VISIBLE);
         mHint.setText("发送中…");
@@ -171,6 +179,7 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
                 mHint.setVisibility(View.VISIBLE);
                 mHint.setText(ok ? "已发送，刷新中…" : ("发送失败: " + detail));
                 if (ok) {
+                    mDraft = null;   // 成功才真正丢草稿
                     mList.postDelayed(new Runnable() {
                         @Override
                         public void run() {
@@ -185,6 +194,8 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
                             }
                         }
                     }, 1500);
+                } else {
+                    restoreDraft();
                 }
             }
         });
@@ -196,9 +207,24 @@ public class CommentActivity extends UiActivity implements ChatEngine.Listener {
                     mHint.setText("发送无回应，可重试");
                     if (mEngine != null && mSendReqId != null) mEngine.cancelAction(mSendReqId);
                     mSendReqId = null;
+                    restoreDraft();
                 }
             }
         }, 20000);
+    }
+
+    /**
+     * 把上一次没发出去的草稿放回输入框（审计 M6）。
+     *
+     * 只在输入框为空时回填 —— 用户已经重新打了字，就不要覆盖他新的内容。
+     */
+    private void restoreDraft() {
+        if (mDraft == null || mDraft.isEmpty()) return;
+        if (mInput == null) return;
+        if (mInput.getText() != null && mInput.getText().length() > 0) return;
+        mInput.setText(mDraft);
+        mInput.setSelection(mInput.getText().length());
+        mDraft = null;
     }
 
     /**

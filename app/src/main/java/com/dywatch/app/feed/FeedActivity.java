@@ -279,10 +279,22 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
 
     /** 来源流追加：不能经过推荐流的“已看过”过滤，更不能替换成推荐内容。 */
     private void loadMoreFromSource() {
+        loadMoreFromSource(0);
+    }
+
+    /**
+     * @param emptyPages 已连续拿到的"全重复页"数量（见下）
+     *
+     * ⚠️ 2026-11-07 审计 M9：原来"一页全是重复"就直接收工 —— 而列表没变长，
+     *    用户滚到底也很难再触发下一次 onPageSelected，后面的内容永远到不了。
+     *    现在对空页做**有上限的连续补拉**，并检测游标是否前进（游标不动就停，防死循环）。
+     */
+    private void loadMoreFromSource(final int emptyPages) {
         if (mSource == null || !mSource.hasMore || mLoading || isFinishing() || isDestroyed()) return;
         mLoading = true;
         new Thread(() -> {
             try {
+                final int sizeBefore = mVideoList.size();
                 final java.util.List<FeedVideo> page = mSource.next(ensureApi());
                 runOnUiThread(() -> {
                     mLoading = false;
@@ -298,9 +310,27 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     mVideoList.addAll(fresh);
                     mAdapter.notifyDataSetChanged();
                     startPlay(mViewPager.getCurrentItem());
-                    if (fresh.isEmpty() && !mSource.hasMore) showHint("没有更多了");
-                    AppLog.i("feed", "来源流续拉 +" + fresh.size() + "，共 " + mVideoList.size()
-                            + "，hasMore=" + mSource.hasMore);
+                    AppLog.i("feed", "来源流续拉 +" + fresh.size() + "（本页 " + page.size() + " 条），共 "
+                            + mVideoList.size() + "，hasMore=" + mSource.hasMore
+                            + (emptyPages > 0 ? "，连续重复页=" + (emptyPages + 1) : ""));
+                    if (!fresh.isEmpty()) {
+                        mEmptyPages = 0;
+                        return;
+                    }
+                    // 拿到的全是重复（或空页）
+                    if (!mSource.hasMore) {
+                        showHint("没有更多了");
+                        return;
+                    }
+                    // 游标没前进 = 服务端在重复吐同一页 → 停，别无限请求
+                    boolean cursorStuck = mVideoList.size() == sizeBefore && page.isEmpty() && emptyPages >= 1;
+                    if (cursorStuck || emptyPages + 1 >= MAX_EMPTY_PAGES) {
+                        showHint("没有更多了");
+                        AppLog.i("feed", "来源流连续 " + (emptyPages + 1) + " 页无新内容，停止续拉");
+                        return;
+                    }
+                    // 预算内补拉下一页（稍微延迟，别把读接口打满）
+                    mViewPager.postDelayed(() -> loadMoreFromSource(emptyPages + 1), 600);
                 });
             } catch (Exception e) {
                 AppLog.i("feed", "来源流翻页失败: " + e.getClass().getSimpleName());
@@ -703,7 +733,12 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         }
         if (replace) mVideoList.clear();
         mVideoList.addAll(accepted);
-        SeenStore.markSeen(this, acceptedIds);
+        // ⚠️ 2026-11-07 审计 M4：**不要**在这里批量 markSeen。
+        //    原来整页十几条在"接受"时就全记成已看过，用户只看第一条就退出，
+        //    剩下十几条下次被过滤掉 → 表现为"推荐总是不够看/一直空翻页"。
+        //    真正的记账在 startPlay 里（确实开始播放那一条才算看过）。
+        //    这里只清 acceptedIds 的引用，避免"没用变量"的误解——下面缓存仍要用 mVideoList。
+        acceptedIds.clear();
         // 应用级缓存：重进页面直接接着放（不再闪固件老视频）
         if (!mVideoList.isEmpty()) {
             sCache.clear();

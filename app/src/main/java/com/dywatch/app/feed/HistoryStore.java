@@ -34,6 +34,11 @@ public final class HistoryStore {
 
     /** 进程内镜像（最新在前）。null = 尚未从磁盘读过 */
     private static List<Entry> sCache;
+    /**
+     * 代次（2026-11-07 审计 M12）：每次 clear() 自增，排队中的旧任务发现代次不符就丢弃。
+     * 用来让"清空"与"写盘"在同一条 AsyncDisk 队列里严格有序、且旧快照不会复活。
+     */
+    private static int sGeneration;
 
     private HistoryStore() {}
 
@@ -75,15 +80,39 @@ public final class HistoryStore {
         }
     }
 
+    /**
+     * 清空历史。
+     *
+     * ⚠️ 2026-11-07 审计 M12：原来在主线程直接改缓存 + `prefs.remove().apply()`，
+     * 而记账走的是 AsyncDisk 单线程队列 —— 两条路径之间**没有任何顺序保证**。
+     * 现场：播放一条（提交一个写盘任务）→ 马上去设置里清空 → 排队中的写盘任务在清空之后
+     * 才执行，读的是"已清空的缓存"（一般无害），但若期间又有一次 mark()，就可能
+     * "清完又冒出来"。真正的病根是 clear 不在同一条串行队列里。
+     *
+     * 修法：clear 也走 AsyncDisk（与写盘同队列 → 严格有序），并带**代次**：
+     * 清空时 ++sGeneration，旧代次的任务执行时发现代次不符就丢弃（不做无用的旧快照写回）。
+     */
     public static void clear(Context ctx) {
         final Context app = app(ctx);
+        final int generation;
         synchronized (HistoryStore.class) {
             sCache = new ArrayList<>();
+            generation = ++sGeneration;
         }
-        try {
-            prefs(app).edit().remove(KEY).apply();
-        } catch (Throwable ignored) {
-        }
+        final Context target = app;
+        com.dywatch.app.util.AsyncDisk.run(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (HistoryStore.class) {
+                    // 有更新的清空/写入发生后，这次清盘就不必做了（后来者会写对的状态）
+                    if (sGeneration != generation) return;
+                }
+                try {
+                    prefs(target).edit().remove(KEY).apply();
+                } catch (Throwable ignored) {
+                }
+            }
+        });
     }
 
     public static int size(Context ctx) {
@@ -116,12 +145,18 @@ public final class HistoryStore {
     }
 
     private static void persistAsync(final Context ctx) {
+        final int generation;
+        synchronized (HistoryStore.class) {
+            generation = sGeneration;
+        }
         com.dywatch.app.util.AsyncDisk.run(new Runnable() {
             @Override
             public void run() {
                 JSONArray arr = new JSONArray();
                 try {
                     synchronized (HistoryStore.class) {
+                        // 期间发生过 clear()：这份快照已经过期，丢弃（否则会把清掉的历史写回去）
+                        if (sGeneration != generation) return;
                         for (Entry e : cacheList(ctx)) {
                             JSONObject o = new JSONObject();
                             o.put("id", e.awemeId);

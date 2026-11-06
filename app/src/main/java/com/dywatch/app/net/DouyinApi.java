@@ -933,14 +933,47 @@ public final class DouyinApi {
         return q.toString();
     }
 
-    /** 拼 query 并签名（LinkedHashMap 保序：a_bogus 必须对最终串算） */
+    /**
+     * 拼 query 并签名（LinkedHashMap 保序：a_bogus 必须对最终串算）。
+     *
+     * ⚠️ 2026-11-07 审计 M10：原来 key/value **原样拼**，搜索词里的 `&` `#` `+` `%` 空格
+     * 会变成额外参数、被截断、或被服务端按 `+`=空格 解释 —— 搜 `a&b` 实际搜的是 `a`。
+     *
+     * 修法刻意做得**很窄**：只对会破坏 query 结构的 5 个字符做百分号编码
+     * （`& # + % 空格`），其余（含 `{}"` `:` `,` —— `filter_selected` 这类 JSON 参数里有）
+     * 一律原样保留，因此对现有全部接口**逐字节等价**，a_bogus 的输入不变、签名不受影响。
+     * 完整编码路径（joinQuery）留给需要严格编码的接口，不动。
+     */
     private String joinAndSign(Map<String, String> p) {
         StringBuilder q = new StringBuilder();
         for (Map.Entry<String, String> e : p.entrySet()) {
             if (q.length() > 0) q.append('&');
-            q.append(e.getKey()).append('=').append(e.getValue());
+            q.append(e.getKey()).append('=').append(escapeQueryValue(e.getValue()));
         }
         return q + "&a_bogus=" + urlEncode(signer.makeABogus(q.toString()));
+    }
+
+    /**
+     * 只转义会破坏 query 结构的字符（审计 M10）。纯函数，可单测。
+     *
+     * 为什么不用 URLEncoder：它会把空格编成 `+`（表单语义，query 里再被解回空格）、
+     * 并把 `{}" :,` 等一律编码，导致 `filter_selected` 的 JSON 参数变形。
+     */
+    static String escapeQueryValue(String v) {
+        if (v == null || v.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(v.length() + 8);
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            switch (c) {
+                case '&': sb.append("%26"); break;
+                case '#': sb.append("%23"); break;
+                case '+': sb.append("%2B"); break;
+                case '%': sb.append("%25"); break;
+                case ' ': sb.append("%20"); break;
+                default: sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /** 构造 favorite query（参数族照实测探针）；纯函数（除签名外无副作用） */
@@ -1415,6 +1448,12 @@ public final class DouyinApi {
         FeedVideo v = new FeedVideo(title, playUrl, coverUrl, awemeId, author, digg, comment, collect);
         v.authorSecUid = authorSecUid;
         v.authorAvatar = authorAvatar;
+        // ⚠️ 2026-11-07 审计 M11：把"我是否已赞/已收藏"读出来。
+        //    原来一律默认 false，于是从"喜欢"/收藏夹进播放页时，用户已赞的内容显示未赞，
+        //    首次点击会把"取消点赞"当成"点赞"发出去（计数与状态都会错）。
+        //    字段来源：aweme 顶层 user_digged（0/1）、collect_stat（0/1，与页面一致）。
+        v.liked = optLong(item, "user_digged") == 1;
+        v.collected = optLong(item, "collect_stat") == 1;
         return v;
     }
 

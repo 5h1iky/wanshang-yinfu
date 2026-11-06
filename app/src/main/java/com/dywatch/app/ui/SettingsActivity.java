@@ -131,7 +131,10 @@ public class SettingsActivity extends UiActivity {
                 buildRows();
             }
         });
+        // ⚠️ 2026-11-07 审计 M14：这一行只是说明——主屏/设置/关于/更新四个长页面
+        //    已经换成 RotaryScrollView 了（原来开了开关对它们无效，用户以为表冠坏了）。
         if (Settings.rotaryEnabled(this)) {
+            row("表冠生效页面", "主屏/设置/关于/更新 · 列表页", null);
             row("表冠灵敏度", sensitivityLabel(), new Runnable() {
                 @Override public void run() {
                     float v = nextSensitivity(Settings.rotarySensitivity(SettingsActivity.this));
@@ -211,6 +214,18 @@ public class SettingsActivity extends UiActivity {
             }
         });
         section("诊断与关于");
+        // 0.9.1 新增：聊天通道（原生 API / WebView DOM）。
+        // 默认走原生 API（更快、不依赖页面改版）；留这个开关是为了"某台设备/某个账号
+        // 新链路出问题时，用户点一下就能回到旧通道"，不用等下一版。
+        row("聊天通道", Settings.nativeChatEnabled(this) ? "原生 API（推荐）" : "网页抓取（兼容）",
+                new Runnable() {
+            @Override public void run() {
+                boolean v = !Settings.nativeChatEnabled(SettingsActivity.this);
+                Settings.setNativeChatEnabled(SettingsActivity.this, v);
+                toast("聊天通道：" + (v ? "原生 API" : "网页抓取") + "，重进聊天页生效");
+                buildRows();
+            }
+        });
         actionRow("检查更新", "查看公告与新版本下载地址", new Runnable() {
             @Override public void run() {
                 startActivity(new android.content.Intent(SettingsActivity.this,

@@ -4,7 +4,7 @@
   应用图标 + 名称 + 版本 → GitHub / 个人主页 / 开源协议 / 免责声明 四张卡。
   数据不写死：版本读包信息（手写值随发版漂移的老坑），链接由 AboutActivity 兜底拼接。
 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.dywatch.app.ui.RotaryScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_base"
@@ -84,4 +84,4 @@
             android:textColor="@color/text_faint"
             android:textSize="@dimen/t_caption" />
     </LinearLayout>
-</ScrollView>
+</com.dywatch.app.ui.RotaryScrollView>

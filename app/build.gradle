@@ -21,8 +21,8 @@ android {
         applicationId 'com.dywatch.app'
         minSdk 21
         targetSdk 36
-        versionCode 14
-        versionName '0.9.0'
+        versionCode 15
+        versionName '0.9.1'
     }
 
     // ---- 0.9.0 起同版本两个构建（用户 2026-10-25 拍板）----

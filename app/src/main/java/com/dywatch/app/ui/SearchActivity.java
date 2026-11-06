@@ -99,7 +99,10 @@ public class SearchActivity extends UiActivity {
         if (tab < VIDEO || tab > LIVE) tab = VIDEO;
         mTab = tab;
         for (int i = 0; i < mTabs.length; i++) {
-            mTabs[i].setTextColor(getColor(i == tab ? R.color.text_primary : R.color.text_secondary));
+            // ⚠️ 2026-11-07 审计 M1：Context.getColor 是 API 23，minSdk 21 → 用 ContextCompat。
+            //    原来在 Android 5.x 上进搜索页直接 NoSuchMethodError（README 承诺 5.0+）。
+            mTabs[i].setTextColor(androidx.core.content.ContextCompat.getColor(this,
+                    i == tab ? R.color.text_primary : R.color.text_secondary));
             mTabs[i].setAlpha(i == tab ? 1f : 0.68f);
         }
         mGeneration++;
@@ -135,6 +138,12 @@ public class SearchActivity extends UiActivity {
         mAdapter.clear();
         mHasMore = true;
         mGeneration++;
+        // ⚠️ 2026-11-07 审计 M2：**必须**在这里复位 mLoading。
+        //    原实现只 ++generation 不复位，而旧请求回来时"代次不符"会在 mLoading=false 之前就 return，
+        //    于是锁永远不解 → 上一条请求在途时改关键词再搜，新搜索根本不发，页面空白转圈到切 tab 为止。
+        //    （旧请求的回调也会自己清锁，两条路径都清是幂等的，不会误放新请求的锁：
+        //      新请求开始时 mLoading 立刻被 load() 置回 true。）
+        mLoading = false;
         load(true);
     }
 

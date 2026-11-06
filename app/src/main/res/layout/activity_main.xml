@@ -5,7 +5,7 @@
   现在：一级功能做成 2×2 图标卡，次要动作压成底部一行；整体再套 ScrollView 兜底，
   这样即使某块表更矮也只是能滚，不会把「退出」挤出屏幕。
 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.dywatch.app.ui.RotaryScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
@@ -183,4 +183,4 @@
             android:textColor="@color/text_faint"
             android:textSize="@dimen/t_caption" />
     </LinearLayout>
-</ScrollView>
+</com.dywatch.app.ui.RotaryScrollView>

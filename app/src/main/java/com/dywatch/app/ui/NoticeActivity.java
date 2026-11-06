@@ -75,7 +75,9 @@ public class NoticeActivity extends UiActivity {
         if (mGroup == group && !mNotices.isEmpty()) return;
         mGroup = group;
         for (int i = 0; i < mTabs.length; i++) {
-            mTabs[i].setTextColor(getColor(i == index ? R.color.text_primary : R.color.text_secondary));
+            // ⚠️ 2026-11-07 审计 M1：Context.getColor 是 API 23 → minSdk 21 上切分类会崩，改 ContextCompat
+            mTabs[i].setTextColor(androidx.core.content.ContextCompat.getColor(this,
+                    i == index ? R.color.text_primary : R.color.text_secondary));
             mTabs[i].setAlpha(i == index ? 1f : 0.68f);
         }
         mGeneration++;

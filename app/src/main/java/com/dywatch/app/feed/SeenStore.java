@@ -34,6 +34,11 @@ public final class SeenStore {
     private static List<String> sCache;
     /** isSeen 用的查表集合，与 sCache 同步重建 */
     private static Set<String> sLookup;
+    /**
+     * 代次（2026-11-07 审计 M12）：每次 clear() 自增。
+     * 排队中的写盘任务发现自己代次过期就丢弃，避免"清空后又被旧快照写回来"。
+     */
+    private static int sGeneration;
 
     private SeenStore() {}
 
@@ -54,16 +59,33 @@ public final class SeenStore {
         persistAsync(app);
     }
 
+    /**
+     * 清空去重账本。
+     *
+     * ⚠️ 2026-11-07 审计 M12（与 HistoryStore 同一病根）：原来主线程直改缓存 + `prefs.clear()`，
+     * 而记账走 AsyncDisk 队列，两者之间没有顺序保证 → "清完又出现"。
+     * 现在清空也进同一条串行队列，并用代次丢弃"清空前提交、清空后才执行"的旧快照。
+     */
     public static void clear(Context ctx) {
         final Context app = app(ctx);
+        final int generation;
         synchronized (SeenStore.class) {
             sCache = new ArrayList<>();
             rebuildLookup();
+            generation = ++sGeneration;
         }
-        try {
-            prefs(app).edit().clear().apply();
-        } catch (Throwable ignored) {
-        }
+        com.dywatch.app.util.AsyncDisk.run(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (SeenStore.class) {
+                    if (sGeneration != generation) return;
+                }
+                try {
+                    prefs(app).edit().clear().apply();
+                } catch (Throwable ignored) {
+                }
+            }
+        });
     }
 
     /** 当前记账条数（诊断/测试用） */
@@ -121,11 +143,17 @@ public final class SeenStore {
 
     /** 整份覆盖写；单线程队列保证"后提交的更新快照"不会先落盘 */
     private static void persistAsync(final Context ctx) {
+        final int generation;
+        synchronized (SeenStore.class) {
+            generation = sGeneration;
+        }
         com.dywatch.app.util.AsyncDisk.run(new Runnable() {
             @Override
             public void run() {
                 final String snapshot;
                 synchronized (SeenStore.class) {
+                    // 期间 clear() 过：这份快照过期了，丢弃（否则会把清空的账本写回去）
+                    if (sGeneration != generation) return;
                     StringBuilder sb = new StringBuilder(cacheList(ctx).size() * 21);
                     List<String> list = cacheList(ctx);
                     for (int i = 0; i < list.size(); i++) {

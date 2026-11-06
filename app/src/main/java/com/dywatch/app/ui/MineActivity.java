@@ -189,54 +189,54 @@ public class MineActivity extends UiActivity {
     private void openAt(int index) {
         if (index < 0 || index >= mVideos.size()) return;
         // 看过的记录只存了 id/标题/封面（没有播放地址）→ 先按 aweme/detail 换址再播。
-        // 一次换一批（并发会显得像攻击，串行几秒用户可接受），换好的列表才进播放页。
+        //
+        // ⚠️ 2026-11-07 审计 M8：原来把**整个历史列表**逐条 fetchDetail 完才进播放页，
+        //    历史越长等越久（50 条 = 50 次串行请求，手表上要几十秒），而且连点会叠加多批。
+        //    现在只换**当前点的那一条**，进播放页后其余条目由 FeedActivity 的
+        //    resolveAndPlayDetail 按需单条换址（它自带 mDetailInFlight 去重）。
         if (mTab == TAB_HISTORY) {
             final FeedVideo stub = mVideos.get(index);
             hint("正在取回播放地址…");
             Loading.show(this, true);
-            final java.util.List<FeedVideo> resolved = new ArrayList<>();
-            final java.util.List<FeedVideo> queue = new ArrayList<>(mVideos);
+            final int targetIndex = index;
             new Thread(new Runnable() {
                 @Override
                 public void run() {
+                    FeedVideo playable = stub;
                     try {
-                        DouyinApi api = ensureApi();
-                        for (FeedVideo v : queue) {
-                            if (isFinishing()) return;
-                            try {
-                                FeedVideo full = api.fetchDetail(v.awemeId);
-                                resolved.add(full != null ? full : v);
-                            } catch (Exception e) {
-                                // 单条换址失败只影响它自己（留 stub，播放页会报错而不是黑屏）
-                                AppLog.i("mine", "换址失败 " + v.awemeId + ": " + e.getMessage());
-                                resolved.add(v);
-                            }
+                        if (!isFinishing()) {
+                            DouyinApi api = ensureApi();
+                            FeedVideo full = api.fetchDetail(stub.awemeId);
+                            if (full != null) playable = full;
                         }
-                        final int targetIndex = queue.indexOf(stub);
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                Loading.show(MineActivity.this, false);
-                                clearHint();
-                                android.content.Intent it = new android.content.Intent(MineActivity.this,
-                                        com.dywatch.app.feed.FeedActivity.class);
-                                it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_LIST,
-                                        new ArrayList<>(resolved));
-                                it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_START_INDEX,
-                                        Math.max(0, targetIndex));
-                                startActivity(it);
-                            }
-                        });
-                    } catch (final Exception e) {
-                        AppLog.i("mine", "看过换址失败: " + e);
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                Loading.show(MineActivity.this, false);
-                                hint("取播放地址失败: " + e.getMessage());
-                            }
-                        });
+                    } catch (Exception e) {
+                        // 换址失败就带 stub 进去（播放页自己会再试/报错，而不是黑屏）
+                        AppLog.i("mine", "换址失败 " + stub.awemeId + ": " + e.getMessage());
                     }
+                    final FeedVideo resolvedOne = playable;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (isFinishing() || isDestroyed()) return;
+                            Loading.show(MineActivity.this, false);
+                            clearHint();
+                            // 进播放页的列表 = 原来的历史列表，只把当前条换成换好址的版本。
+                            // 其余条目在播放页里按需换址（FeedActivity 已实现单条换址路径）。
+                            java.util.List<FeedVideo> list = new ArrayList<>(mVideos);
+                            if (targetIndex >= 0 && targetIndex < list.size()) {
+                                list.set(targetIndex, resolvedOne);
+                            }
+                            android.content.Intent it = new android.content.Intent(MineActivity.this,
+                                    com.dywatch.app.feed.FeedActivity.class);
+                            it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_LIST,
+                                    new ArrayList<>(list));
+                            it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_START_INDEX,
+                                    Math.max(0, targetIndex));
+                            // 标记"需要按需换址"，让播放页知道这些条目可能没有播放地址
+                            it.putExtra("need_detail_resolve", true);
+                            startActivity(it);
+                        }
+                    });
                 }
             }, "mine-resolve").start();
             return;

@@ -211,6 +211,23 @@ public final class Settings {
     }
 
     /**
+     * 原生 API 聊天通道（0.9.1，默认开）。
+     *
+     * 开：会话列表 / 消息 / 发送走 imapi 原生 HTTP（快、省内存、不受页面改版影响）；
+     * 关：回到旧的 WebView DOM 抓取通道。
+     *
+     * ⚠️ 为什么做成可关：新链路第一次大规模上车，万一某个账号的协议细节不一致，
+     *    用户点一下就能回到旧通道，不用等下一版。这是灰度期该有的退路。
+     */
+    public static boolean nativeChatEnabled(Context c) {
+        return sp(c).getBoolean("native_chat", true);
+    }
+
+    public static void setNativeChatEnabled(Context c, boolean v) {
+        sp(c).edit().putBoolean("native_chat", v).apply();
+    }
+
+    /**
      * 全屏手势开关（软件内问题 ⑤，2026-10-01，默认开）。
      *
      * 借鉴 BiliClient 的 `player_scale` / `player_doublemove` 开关思路：双指缩放/平移是"用得上的人

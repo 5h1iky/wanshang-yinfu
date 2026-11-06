@@ -128,7 +128,8 @@ public class LiveActivity extends UiActivity {
                     mLoadingRoom = false;
                     mStreams.clear();
                     // HLS 优先、低分辨率档优先；不会因为“原画”默认拉最大流量。
-                    streams.sort((a, b) -> {
+                    // ⚠️ 2026-11-07 审计 M1：List.sort 是 API 24 → 用 Collections.sort（minSdk 21 可用）
+                    java.util.Collections.sort(streams, (a, b) -> {
                         if (a.hls != b.hls) return a.hls ? -1 : 1;
                         return streamRank(a) - streamRank(b);
                     });
