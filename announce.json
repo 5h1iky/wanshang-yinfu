@@ -10,10 +10,10 @@
     "enabled": "false 时整条忽略（留空模板用）"
   },
   "enabled": true,
-  "id": "2026-11-01-01",
+  "id": "2026-11-07-01",
   "level": "info",
-  "title": "0.9.0 已发布",
-  "text": "新增首页推荐选片、视频搜索、关注/收藏、互动通知、评论回复和直播；设置里新增检查更新页。当前提供 webview 版，kernel 版暂停对外发布、继续调试。覆盖安装保留登录。",
-  "link": "https://github.com/5h1iky/wanshang-yinfu/releases/tag/v0.9.0",
+  "title": "0.9.1 已发布",
+  "text": "聊天改为原生直连：打开会话列表从几十秒降到 1 秒内，发送链路已真机验证。同时修复了退出登录未清聊天缓存、发送失败显示假气泡、Android 5.x 崩溃等一批问题。若新通道有问题，设置→聊天通道可一键切回网页抓取。覆盖安装保留登录。",
+  "link": "https://github.com/5h1iky/wanshang-yinfu/releases/tag/v0.9.1",
   "showUntil": 0
 }
