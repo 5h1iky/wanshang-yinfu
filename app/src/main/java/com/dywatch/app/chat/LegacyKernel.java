@@ -234,6 +234,20 @@ public final class LegacyKernel {
      */
     public static Hint decideHint(Kernel k, boolean authed, boolean pageOk, int retries,
                                   boolean patched, long waitedMs, boolean networkUp) {
+        return decideHint(k, authed, pageOk, retries, patched, waitedMs, networkUp, false);
+    }
+
+    /**
+     * 同上 + “列表已被原生接口确认 0 条”。
+     *
+     * 2026-11-07 审计：原生 API 成功返回空列表时，旧逻辑仍会走 stuckHint
+     * → 真实 0 会话被误报成“卡在会话数据”。确认空必须是独立终态，优先级最高，
+     * 不参与 DOM/内核诊断（那些诊断只适用于“页面该有数据却没抓到”）。
+     */
+    public static Hint decideHint(Kernel k, boolean authed, boolean pageOk, int retries,
+                                  boolean patched, long waitedMs, boolean networkUp,
+                                  boolean listConfirmedEmpty) {
+        if (listConfirmedEmpty) return emptyHint();
         int attempts = Math.max(1, retries + 1);
         if (stillLoading(waitedMs)) {
             if (!networkUp) {
@@ -249,6 +263,13 @@ public final class LegacyKernel {
             return new Hint(false, kernelHint(k, waitedMs));
         }
         return new Hint(false, stuckHint(k, authed, pageOk, attempts, patched));
+    }
+
+    /** 原生接口已确认 0 个会话时的统一空态文案 */
+    public static final String EMPTY_TEXT = "暂无会话（0 个）";
+
+    public static Hint emptyHint() {
+        return new Hint(false, EMPTY_TEXT);
     }
 
     /** {@link #decideHint} 的结果：loading=true 时应当继续转圈并显示进度 */

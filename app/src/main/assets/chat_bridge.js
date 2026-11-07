@@ -806,18 +806,20 @@
 
     // 发送文本：粘贴注入 → 回车（2026-09-25 实测：消息真实送达，编辑器自动清空）
     // 防抖：同文 2.5s 内重复触发只发一次（真机踩过一次点击两条的坑）
-    sendText: function (text) {
+    // reqId：由 ChatEngine 传入并原样回传；迟到结果据此丢弃，不会污染下一次发送。
+    sendText: function (text, reqId) {
+      var rid = reqId || '';
       try {
         var now = Date.now();
         if (window.__ChatBridgeLastSend && window.__ChatBridgeLastSend.text === text
             && now - window.__ChatBridgeLastSend.ts < 2500) {
-          post({ type: 'sent', ok: true, note: '防抖跳过（重复触发）' });
+          post({ type: 'sent', ok: true, note: '防抖跳过（重复触发）', reqId: rid });
           return;
         }
         window.__ChatBridgeLastSend = { text: text, ts: now };
         var editor = document.querySelector('[class~="messageEditorinputArea"][contenteditable="true"]');
         if (!editor) {
-          post({ type: 'error', message: '未找到聊天输入框（引擎可能不在私信页，会自动归位重试）' });
+          post({ type: 'error', message: '未找到聊天输入框（引擎可能不在私信页，会自动归位重试）', reqId: rid });
           ChatBridge.ensureImHome();
           return;
         }
@@ -837,12 +839,12 @@
             });
             setTimeout(function () {
               var cleared = (editor.textContent || '').replace(/[\u200b\u200c\u200d\ufeff]/g, '').trim().length === 0;
-              post({ type: 'sent', ok: cleared, note: cleared ? '已发送（编辑器已清空）' : '编辑器未清空，可能未发出' });
+              post({ type: 'sent', ok: cleared, note: cleared ? '已发送（编辑器已清空）' : '编辑器未清空，可能未发出', reqId: rid });
             }, 600);
           }, 200);
         }, 200);
       } catch (e) {
-        post({ type: 'error', message: String(e) });
+        post({ type: 'error', message: String(e), reqId: rid });
       }
     },
 

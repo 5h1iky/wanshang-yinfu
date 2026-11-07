@@ -75,9 +75,9 @@
 
 ## 安装
 
-0.9.1 当前 Release 只提供 webview 版本：
+0.9.2 当前 Release 只提供 webview 版本：
 
-- `wanshang-yinfu-vX.Y.Z-webview-release.apk`：推荐，约 6.4MB，使用系统 WebView，日常使用选它。
+- `wanshang-yinfu-vX.Y.Z-webview-release.apk`：推荐，约 6.7MB，使用系统 WebView，日常使用选它。
 - kernel 版本已暂停对外发布，继续在本地调试；源码和 `kernel` 构建变体保留，待稳定后再提供。
 
 安装步骤：

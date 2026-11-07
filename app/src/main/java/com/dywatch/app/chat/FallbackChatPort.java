@@ -177,12 +177,24 @@ final class FallbackChatPort implements ChatPort {
 
     @Override
     public void openConversation(String name) {
-        mCurrentConv = name;
-        if (mUsingKernel && name != null) {
-            List<ChatMessage> cached = sMsgCache.get(name);
+        openConversation(null, name);
+    }
+
+    @Override
+    public void openConversation(String key, String name) {
+        // 缓存键优先用稳定 key（原生通道=conversation_id）；老通道没有 key 时退回 name。
+        mCurrentConv = (key != null && !key.isEmpty()) ? key : name;
+        if (mUsingKernel && mCurrentConv != null) {
+            List<ChatMessage> cached = sMsgCache.get(mCurrentConv);
             if (cached != null && !cached.isEmpty()) mOuter.onMessages(cached);
         }
-        active().openConversation(name);
+        active().openConversation(key, name);
+    }
+
+    @Override
+    public boolean isConvListAuthoritative() {
+        // 只有原生 API 的 0 条是权威结果；内核/DOM 的 0 条仍要等待重试。
+        return active().isConvListAuthoritative();
     }
 
     @Override

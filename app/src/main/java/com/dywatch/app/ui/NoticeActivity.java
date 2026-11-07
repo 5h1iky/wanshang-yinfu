@@ -99,13 +99,15 @@ public class NoticeActivity extends UiActivity {
         new Thread(() -> {
             try {
                 DouyinApi api = ensureApi();
-                List<DouyinApi.NoticeItem> list = api.fetchNotices(group, cursor);
-                boolean more = api.lastNoticeHasMore;
-                long next = api.lastNoticeCursor;
+                final com.dywatch.app.net.PageResult<DouyinApi.NoticeItem> page =
+                        api.fetchNotices(group, cursor);
+                final List<DouyinApi.NoticeItem> list = page.items();
                 runOnUiThread(() -> {
                     if (generation != mGeneration || isFinishing() || isDestroyed()) return;
                     mLoading = false;
-                    mCursor = next;
+                    // 下一页游标只属于本次请求；切分组后的迟到响应已被 generation 丢掉，
+                    // 不会再出现用 A 组的 max_time 去接 B 组列表的串页。
+                    mCursor = page.cursor();
                     for (DouyinApi.NoticeItem item : list) {
                         boolean duplicate = false;
                         for (DouyinApi.NoticeItem old : mNotices) {
@@ -113,8 +115,10 @@ public class NoticeActivity extends UiActivity {
                         }
                         if (!duplicate) mNotices.add(item);
                     }
+                    // 服务端 says more 但本页为空、或游标没前进时，PageResult 已把
+                    // hasMore 归一为 false；这里再兜底，避免滚动反复触发同一页。
+                    if (!page.hasMore() || list.isEmpty()) mCursor = -1;
                     render();
-                    if (!more) mCursor = -1;
                 });
             } catch (Exception e) {
                 AppLog.i("notice", "读取失败: " + e.getClass().getSimpleName());
@@ -184,7 +188,7 @@ public class NoticeActivity extends UiActivity {
         }
     }
 
-    private DouyinApi ensureApi() throws Exception {
+    private synchronized DouyinApi ensureApi() throws Exception {
         if (mApi == null) {
             mApi = new DouyinApi(new Signer(Arrays.asList(readAsset("sign/utils.js"),
                     readAsset("sign/sm3.js"), readAsset("sign/vm_decode.js"))));

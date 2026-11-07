@@ -29,6 +29,10 @@ public class UpdateActivity extends UiActivity {
         setContentView(R.layout.activity_update);
         setPageTitle("检查更新");
 
+        // activity_update.xml 通过 include_header 引入返回箭头；不绑定的话该箭头点了没反应，
+        // 只有系统返回键能退出（2026-11-07 审计 P3-1，手机上已复现）。
+        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
+
         mCurrent = findViewById(R.id.tv_update_current);
         mStatus = findViewById(R.id.tv_update_status);
         mNotes = findViewById(R.id.tv_update_notes);

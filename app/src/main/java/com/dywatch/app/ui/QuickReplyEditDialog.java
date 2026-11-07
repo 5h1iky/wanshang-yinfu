@@ -105,7 +105,25 @@ public final class QuickReplyEditDialog {
         Window win = dlg.getWindow();
         if (win != null) {
             int screenW = act.getResources().getDisplayMetrics().widthPixels;
-            win.setLayout((int) (screenW * 0.92f), ViewGroup.LayoutParams.WRAP_CONTENT);
+            int width = (int) (screenW * 0.92f);
+
+            // 2026-11-07 审计 P2-4：不能再用 WRAP_CONTENT 当高度。
+            // getWindowVisibleDisplayFrame 返回的是扣除状态栏/导航栏（以及键盘占用）后的
+            // 可用区域；只取 90% 再留一点触摸余量。内容本身在 ScrollView 里，超过就滚动。
+            android.graphics.Rect usable = new android.graphics.Rect();
+            win.getDecorView().getWindowVisibleDisplayFrame(usable);
+            int available = usable.height();
+            if (available <= 0) {
+                available = act.getResources().getDisplayMetrics().heightPixels;
+            }
+            int maxHeight = Math.max(1, (int) (available * 0.90f));
+
+            content.measure(
+                    View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int desired = content.getMeasuredHeight();
+            int height = desired > 0 ? Math.min(desired, maxHeight) : maxHeight;
+            win.setLayout(width, height);
         }
     }
 }

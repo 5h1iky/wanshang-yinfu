@@ -23,21 +23,43 @@ import java.util.Locale;
 
 public class ChatActivity extends UiActivity implements ChatEngine.Listener {
 
-    /** 进入指定会话（ConvListActivity 传入会话名） */
+    /** 进入指定会话（ConvListActivity 传入稳定 key / 显示名） */
+    public static final String EXTRA_CONV_KEY = "conv_key";
     public static final String EXTRA_CONV_NAME = "conv_name";
+
+    /** 发送在途保护（防连点/迟到回调污染下一条） */
+    private static final long SEND_TIMEOUT_MS = 60_000L;
 
     private androidx.recyclerview.widget.RecyclerView mMessages;
     private com.dywatch.app.ui.MessageAdapter mAdapter;
     private EditText mInput;
     private TextView mHint;
+    private View mSendButton;
     private ChatPort mEngine;
     /** 上次渲染的消息条数：只有真的变多了才自动滚到底，否则每 5s 轮询都会把用户拽回底部 */
     private int mLastCount = -1;
+    /** 稳定会话 key（原生通道=conversation_id）；可能为 null（老 WebView 通道只有 name） */
+    private String mConvKey;
     private String mConvName;
-    /** 本页打开时刻：首屏预算（LegacyKernel.FIRST_LOAD_BUDGET_MS）从这一刻算起 */
+    /** 本次发送的草稿：成功才丢，失败/超时回填（审计 M6 同款思路） */
+    private String mDraft;
+    /** 本次发送的本地回声：失败时要撤回，不能留“已发送”假象 */
+    private ChatMessage mLocalEcho;
+    /** 发送状态机（纯逻辑，见 ChatSendGuard） */
+    private final ChatSendGuard mSendGuard = new ChatSendGuard();
+    /** 首屏预算（LegacyKernel.FIRST_LOAD_BUDGET_MS）从这一刻算起 */
     private long mOpenedAt;
     private final SimpleDateFormat mFmt = new SimpleDateFormat("HH:mm", Locale.US);
     private final android.os.Handler mPoll = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler mUi = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable mSendTimeout = new Runnable() {
+        @Override
+        public void run() {
+            if (!mSendGuard.isSending()) return;
+            long token = mSendGuard.currentToken();
+            finishSend(token, false, "发送超时，请重试", mDraft == null ? "" : mDraft);
+        }
+    };
     private final Runnable mPollTask = new Runnable() {
         @Override
         public void run() {
@@ -59,8 +81,10 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         mMessages.setAdapter(mAdapter);
         mInput = findViewById(R.id.et_input);
         mHint = findViewById(R.id.tv_chat_hint);
+        mSendButton = findViewById(R.id.btn_send);
         // 方案 C：输入框 = 正文面，吃「字体大小」（发送键/快捷回复条等 chrome 不跟）
         com.dywatch.app.ui.Fonts.scale(mInput, R.dimen.t_body);
+        mConvKey = getIntent().getStringExtra(EXTRA_CONV_KEY);
         mConvName = getIntent().getStringExtra(EXTRA_CONV_NAME);
 
         // 登录门：私信必须先登录（未登录时页面上没有聊天输入框，JS 桥必然找不到）
@@ -75,7 +99,7 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
             hint("请先登录再聊天（主屏→登录→扫码）");
         }
 
-        findViewById(R.id.btn_send).setOnClickListener(new View.OnClickListener() {
+        mSendButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 sendCurrent();
@@ -100,10 +124,9 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
                 new com.dywatch.app.ui.QuickReply.Pick() {
                     @Override
                     public void onPick(String t) {
-                        // ⚠️ 2026-11-07 审计 H4：快捷回复也走同一条"先确认能发、再显示气泡"的路
-                        if (safeSend(t)) {
-                            appendLocal(new ChatMessage(ChatMessage.OUT, t, System.currentTimeMillis()));
-                        }
+                        // 快捷回复也走同一条发送状态机：在途防重、失败撤回气泡、恢复输入。
+                        // 不覆盖用户已经打好的草稿（clearInput=false）。
+                        submitSend(t, false);
                     }
                 });
 
@@ -113,16 +136,112 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     private void sendCurrent() {
         String text = mInput.getText() == null ? "" : mInput.getText().toString().trim();
         if (TextUtils.isEmpty(text)) return;
-        // ⚠️ 2026-11-07 审计 H4：**先发、成功才清空输入框**。
-        //    原来是先 setText("") 再发 —— 通道没就绪时用户打的字直接没了，
-        //    而且界面上还多出一条"已发出"的假气泡（评论页 M6 是同一个毛病）。
-        boolean accepted = safeSend(text);
+        if (mSendGuard.isSending()) {
+            hint("上一条还在发送中…");
+            return;
+        }
+        submitSend(text, true);
+    }
+
+    /**
+     * 发送状态机（2026-11-07 审计 H4 + 私信链路修复）。
+     *
+     * 顺序很关键：
+     *   ① 先拿 in-flight 锁（同一时刻只允许一条）；
+     *   ② 记住草稿、清空输入框、插入本地回声；
+     *   ③ 调用通道；返回 false（根本没发）或回调失败 → 撤回回声 + 回填草稿；
+     *   ④ 超时也走同一个终态，绝不让按钮永久锁死。
+     *
+     * @param clearInput true=发送键（清空输入框）；false=快捷回复（保留用户原草稿）
+     * @return true = 通道已接手；false = 根本没发出去
+     */
+    private boolean submitSend(final String text, boolean clearInput) {
+        if (TextUtils.isEmpty(text)) return false;
+        if (mSendGuard.isSending()) {
+            hint("上一条还在发送中…");
+            return false;
+        }
+        if (mEngine == null) {
+            hint("未登录，不能发送（主屏→登录→扫码）");
+            return false;
+        }
+
+        final long token = mSendGuard.begin();
+        if (token == 0L) {
+            hint("上一条还在发送中…");
+            return false;
+        }
+        mDraft = text;
+        if (clearInput && mInput != null) mInput.setText("");
+
+        final ChatMessage echo = new ChatMessage(ChatMessage.OUT, text, System.currentTimeMillis());
+        mLocalEcho = echo;
+        appendLocal(echo);
+        hint("发送中…");
+        setSendingUi(true);
+
+        boolean accepted;
+        try {
+            accepted = mEngine.sendText(text, new ChatPort.SendCallback() {
+                @Override
+                public void onSendResult(boolean ok, String detail, String text2) {
+                    if (isFinishing() || isDestroyed()) return;
+                    finishSend(token, ok, detail, text2 == null ? text : text2);
+                }
+            });
+        } catch (Throwable t) {
+            accepted = false;
+            AppLog.i("chat", "发送调用异常: " + t.getClass().getSimpleName());
+        }
         AppLog.i("chat", "发送提交 textLen=" + text.length() + " accepted=" + accepted
                 + " channel=" + (mEngine == null ? "null" : mEngine.getClass().getSimpleName()));
-        if (accepted) {
-            mInput.setText("");
-            appendLocal(new ChatMessage(ChatMessage.OUT, text, System.currentTimeMillis()));
+
+        if (!accepted) {
+            finishSend(token, false, "通道还没就绪，消息未发出", text);
+            return false;
         }
+        // 只有仍在途才挂超时；同步回调已经结束的情况不要留下多余定时器。
+        if (mSendGuard.isCurrent(token)) mUi.postDelayed(mSendTimeout, SEND_TIMEOUT_MS);
+        return true;
+    }
+
+    /**
+     * 发送唯一终态。token 不匹配 = 迟到/重复回调，直接丢弃，绝不改下一条发送的状态。
+     */
+    private void finishSend(long token, boolean ok, String detail, String text) {
+        if (!mSendGuard.finish(token)) return;
+        mUi.removeCallbacks(mSendTimeout);
+        setSendingUi(false);
+
+        if (ok) {
+            // 成功：不额外动作（下一次拉取会用服务端数据整批替换本地回声）
+            mDraft = null;
+            mLocalEcho = null;
+            clearHint();
+            return;
+        }
+
+        // 失败：撤回假气泡 + 回填原文（用户不用重打一遍）
+        if (mLocalEcho != null) {
+            mAdapter.remove(mLocalEcho);
+            mLocalEcho = null;
+        }
+        String draft = mDraft == null ? text : mDraft;
+        mDraft = null;
+        restoreDraft(draft);
+        hint("⚠ " + (detail == null || detail.isEmpty() ? "发送失败" : detail));
+    }
+
+    /** 失败/超时把草稿放回输入框；用户已经重新打字就不覆盖他的新内容。 */
+    private void restoreDraft(String draft) {
+        if (draft == null || draft.isEmpty() || mInput == null) return;
+        if (mInput.getText() != null && mInput.getText().length() > 0) return;
+        mInput.setText(draft);
+        mInput.setSelection(mInput.getText().length());
+    }
+
+    private void setSendingUi(boolean sending) {
+        if (mSendButton != null) mSendButton.setEnabled(!sending);
     }
 
     /**
@@ -135,43 +254,6 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         one.add(msg);
         mAdapter.appendLocal(one);
         scrollToBottomIfGrew(mAdapter.size());
-    }
-
-    /**
-     * 安全发送。
-     *
-     * @return true = 通道已接手（可以显示乐观气泡）；false = 根本没发出去
-     *         （未登录/引擎未就绪/还没进会话），调用方**不要**显示气泡、也不要清空输入框。
-     *
-     * ⚠️ 2026-11-07 审计 H4：原实现返回 void，UI 无条件追加气泡 + 清空输入框，
-     *    于是"没发出去"和"发出去了"在界面上长得一模一样。
-     */
-    private boolean safeSend(String text) {
-        if (mEngine == null) {
-            hint("未登录，不能发送（主屏→登录→扫码）");
-            return false;
-        }
-        final String sent = text;
-        boolean accepted = mEngine.sendText(text, new ChatPort.SendCallback() {
-            @Override
-            public void onSendResult(boolean ok, String detail, String text2) {
-                if (isFinishing() || isDestroyed()) return;
-                if (ok) {
-                    // 成功：不额外动作（下一次拉取会用服务端数据整批替换本地回声）
-                    return;
-                }
-                // 失败：提示 + 把原文回填输入框（用户不用重打一遍）
-                hint("⚠ " + detail);
-                if (mInput != null && (mInput.getText() == null || mInput.getText().length() == 0)) {
-                    mInput.setText(sent);
-                    mInput.setSelection(mInput.getText().length());
-                }
-            }
-        });
-        if (!accepted) {
-            hint("通道还没就绪，消息未发出");
-        }
-        return accepted;
     }
 
     /** 发送失败/未登录等提示：只在有事时占一行，通道正常就让位给消息 */
@@ -211,8 +293,12 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
         mHint.post(new Runnable() {
             @Override
             public void run() {
-                if (mEngine != null && mConvName != null && !mConvName.isEmpty()) {
-                    mEngine.openConversation(mConvName);
+                if (mEngine != null) {
+                    boolean hasKey = mConvKey != null && !mConvKey.isEmpty();
+                    boolean hasName = mConvName != null && !mConvName.isEmpty();
+                    if (hasKey || hasName) {
+                        mEngine.openConversation(mConvKey, mConvName);
+                    }
                 }
                 startPolling();
             }
@@ -312,6 +398,10 @@ public class ChatActivity extends UiActivity implements ChatEngine.Listener {
     protected void onDestroy() {
         super.onDestroy();
         mPoll.removeCallbacks(mPollTask);
+        mUi.removeCallbacks(mSendTimeout);
+        mSendGuard.cancel();
+        mDraft = null;
+        mLocalEcho = null;
         // 引擎是单例（WebView 复用），仅解除监听
         if (mEngine != null) mEngine.setListenerDetached(this);
     }

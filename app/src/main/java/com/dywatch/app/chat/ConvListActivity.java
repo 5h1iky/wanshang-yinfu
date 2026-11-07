@@ -39,6 +39,10 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
     private static final long TICK_MS = 5000L;
     /** 是否已经有会话内容（有内容就不再刷"正在拉取"） */
     private boolean mHasContent;
+    /** 是否已经拿到**可信**的列表结果（非空，或原生接口确认 0 条） */
+    private boolean mListSettled;
+    /** 原生接口已确认"真实 0 会话"（不是 DOM 还没渲染出来） */
+    private boolean mConfirmedEmpty;
     /** 终态提示是否已给过（避免每 5 秒重复写一遍同一句） */
     private boolean mTerminalShown;
     /** 上一次心跳时是否断网：用于"网络恢复 → 重启首屏预算"（否则文案承诺的"自动继续"是空话） */
@@ -72,10 +76,10 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
                 if (mEngine != null) mEngine.reloadIm();
             }
             long waited = System.currentTimeMillis() - mOpenedAt;
-            if (!mHasContent && !mTerminalShown) {
+            if (!mListSettled && !mTerminalShown) {
                 boolean patched = mEngine != null && mEngine.isPatchApplied();
                 LegacyKernel.Hint h = LegacyKernel.decideHint(
-                        kernel(), mAuthed, mPageReady, mEmptyRetries, patched, waited, up);
+                        kernel(), mAuthed, mPageReady, mEmptyRetries, patched, waited, up, mConfirmedEmpty);
                 if (h.loading) {
                     loadingHint(h.text);
                 } else {
@@ -105,6 +109,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
                         if (!(payload instanceof Conversation)) return;
                         Conversation c = (Conversation) payload;
                         Intent it = new Intent(ConvListActivity.this, ChatActivity.class);
+                        // 稳定 key 优先（原生通道=conversation_id）；name 只用于显示/老通道兼容。
+                        it.putExtra(ChatActivity.EXTRA_CONV_KEY, c.key);
                         it.putExtra(ChatActivity.EXTRA_CONV_NAME, c.name);
                         startActivity(it);
                     }
@@ -233,7 +239,26 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
 
     private void render(List<Conversation> list) {
         if (list.isEmpty()) {
+            // 原生 API 的 init 成功返回 0 条 = 服务端确认“真实 0 会话”。
+            // 这时必须清掉旧行（否则旧会话还能点、可能点进已删除/已切换账号的会话），
+            // 并且**不能**再套 DOM 的“卡在会话数据”诊断。
+            if (mEngine != null && mEngine.isConvListAuthoritative()) {
+                mEmptyRetries = 0;
+                mHasContent = false;
+                mListSettled = true;
+                mConfirmedEmpty = true;
+                mTerminalShown = true;
+                setLoading(false);
+                setPageTitle("会话 0");
+                mAdapter.clear();
+                hint(LegacyKernel.emptyHint().text);
+                AppLog.i("chat", "会话列表：原生接口确认 0 个会话 → 空态");
+                return;
+            }
+
             mHasContent = false;
+            mListSettled = false;
+            mConfirmedEmpty = false;
             if (mTerminalShown) {
                 // 终态已经给过（心跳那一路），引擎再来空结果也不用重复刷屏
                 return;
@@ -246,7 +271,7 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
             LegacyKernel.Kernel k = kernel();
             boolean patched = mEngine != null && mEngine.isPatchApplied();
             LegacyKernel.Hint h = LegacyKernel.decideHint(
-                    k, mAuthed, mPageReady, mEmptyRetries, patched, waited, networkUp());
+                    k, mAuthed, mPageReady, mEmptyRetries, patched, waited, networkUp(), false);
             if (h.loading) {
                 loadingHint(h.text);
             } else {
@@ -273,6 +298,8 @@ public class ConvListActivity extends UiActivity implements ChatEngine.Listener 
         }
         mEmptyRetries = 0;
         mHasContent = true;
+        mListSettled = true;
+        mConfirmedEmpty = false;
         mTerminalShown = false;
         setLoading(false);
         // 计数折进页名，省掉常驻提示行——手表那点高度要留给会话本身

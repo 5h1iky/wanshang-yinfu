@@ -87,6 +87,11 @@ public class TikTokController extends BaseVideoController {
         // 进度刷新开关（TikTokView.setProgress 消费回调更新 UI）
         if (playState == VideoView.STATE_PLAYING || playState == VideoView.STATE_PAUSED) {
             mControlWrapper.startProgress();
+        } else if (playState == VideoView.STATE_BUFFERED) {
+            // ⚠️ 2026-11-07：缓冲结束必须恢复进度刷新。老实现只在 BUFFERING 停掉，
+            // 之后没有任何分支重新 startProgress → 长视频缓冲一次后进度条就永久停住。
+            // BaseVideoController.startProgress() 内部有 mIsStartProgress 去重，不会重复调度。
+            mControlWrapper.startProgress();
         } else if (playState == VideoView.STATE_BUFFERING) {
             mControlWrapper.stopProgress();
         } else if (playState == VideoView.STATE_IDLE

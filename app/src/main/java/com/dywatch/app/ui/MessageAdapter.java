@@ -43,6 +43,19 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Holder> 
         notifyItemRangeInserted(from, list.size());
     }
 
+    /**
+     * 撤回一条本地回声（2026-11-07 私信修复）：发送失败时不能把乐观气泡留成“已发送”。
+     * 按对象身份定位；如果服务端数据已经整批替换过列表，这里自然找不到（返回 false），无副作用。
+     */
+    public boolean remove(ChatMessage msg) {
+        if (msg == null) return false;
+        int i = mItems.indexOf(msg);
+        if (i < 0) return false;
+        mItems.remove(i);
+        notifyItemRemoved(i);
+        return true;
+    }
+
     public int size() {
         return mItems.size();
     }

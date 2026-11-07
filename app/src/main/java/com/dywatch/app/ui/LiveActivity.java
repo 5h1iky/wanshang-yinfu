@@ -225,30 +225,31 @@ public class LiveActivity extends UiActivity {
     }
 
     private void toggleFullscreen() {
-        mFullscreen = !mFullscreen;
-        if (mFullscreen) {
-            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            applyImmersive(true);
-            mFullscreenBtn.setText("退出");
-        } else {
-            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            applyImmersive(false);
-            mFullscreenBtn.setText("全屏");
-        }
-        resetZoom();
-        showControls();
+        applyFullscreenState(!mFullscreen);
         AppLog.i("live", "全屏切换：" + (mFullscreen ? "进入" : "退出"));
     }
 
     private void toggleRotation() {
-        int cur = getRequestedOrientation();
-        boolean toLandscape = cur != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
-        setRequestedOrientation(toLandscape
+        // 2026-11-07 审计 P2-3：旋转和全屏必须共用同一套状态机。
+        // 旧实现只改 requestedOrientation，mFullscreen 仍是 false，于是：
+        //   · 按钮文案/沉浸式状态不对；
+        //   · 横屏后按返回键会直接 finish，而不是像“全屏”那样先回竖屏。
+        boolean toLandscape = getRequestedOrientation()
+                != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        applyFullscreenState(toLandscape);
+        AppLog.i("live", "旋转：" + (toLandscape ? "横屏" : "竖屏"));
+    }
+
+    /** 全屏/旋转的唯一状态入口：方向、沉浸式、按钮文案、缩放一起同步。 */
+    private void applyFullscreenState(boolean fullscreen) {
+        mFullscreen = fullscreen;
+        setRequestedOrientation(fullscreen
                 ? android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                 : android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        applyImmersive(fullscreen);
+        if (mFullscreenBtn != null) mFullscreenBtn.setText(fullscreen ? "退出" : "全屏");
         resetZoom();
         showControls();
-        AppLog.i("live", "旋转：" + (toLandscape ? "横屏" : "竖屏"));
     }
 
     private void applyImmersive(boolean on) {
@@ -277,8 +278,12 @@ public class LiveActivity extends UiActivity {
 
     @Override
     public void onBackPressed() {
-        if (mFullscreen) {
-            toggleFullscreen();
+        // 全屏或“旋转”进横屏时，返回先退回竖屏并保持本页；竖屏下返回才 finish。
+        // 用 mFullscreen || 方向双重判断，防止系统/旧状态只改了其中一个。
+        if (mFullscreen || getRequestedOrientation()
+                == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
+            applyFullscreenState(false);
+            AppLog.i("live", "返回：先退出全屏");
             return;
         }
         super.onBackPressed();

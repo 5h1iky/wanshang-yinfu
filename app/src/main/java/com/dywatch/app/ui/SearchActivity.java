@@ -152,48 +152,64 @@ public class SearchActivity extends UiActivity {
         mLoading = true;
         final int generation = mGeneration;
         final int offset = mOffset;
-        final String keyword = mKeyword, searchId = mSearchId, tabAtRequest = String.valueOf(mTab);
+        final String keyword = mKeyword, searchId = mSearchId;
+        final int tab = mTab;
         hint(first ? "正在搜索…" : "正在加载更多…");
         if (first) Loading.show(this, true);
         new Thread(() -> {
             try {
                 DouyinApi api = ensureApi();
-                List<FeedVideo> videos = null;
-                List<DouyinApi.UserSummary> users = null;
-                List<DouyinApi.LiveRoom> lives = null;
-                int tab = Integer.parseInt(tabAtRequest);
-                if (tab == VIDEO) videos = api.searchVideos(keyword, offset, searchId);
-                else if (tab == USER) users = api.searchUsers(keyword, offset);
-                else lives = api.searchLive(keyword, offset);
-                final List<FeedVideo> finalVideos = videos;
-                final List<DouyinApi.UserSummary> finalUsers = users;
-                final List<DouyinApi.LiveRoom> finalLives = lives;
-                final boolean more = api.lastSearchHasMore;
-                final int next = api.lastSearchOffset;
-                final String nextSearchId = api.lastSearchId;
+                // 每个请求拿自己的不可变 PageResult，绝不回读 mApi 上的共享游标字段。
+                final com.dywatch.app.net.PageResult<?> page;
+                final List<FeedVideo> videos;
+                final List<DouyinApi.UserSummary> users;
+                final List<DouyinApi.LiveRoom> lives;
+                if (tab == VIDEO) {
+                    com.dywatch.app.net.PageResult<FeedVideo> p =
+                            api.searchVideos(keyword, offset, searchId);
+                    page = p;
+                    videos = p.items();
+                    users = null;
+                    lives = null;
+                } else if (tab == USER) {
+                    com.dywatch.app.net.PageResult<DouyinApi.UserSummary> p =
+                            api.searchUsers(keyword, offset);
+                    page = p;
+                    videos = null;
+                    users = p.items();
+                    lives = null;
+                } else {
+                    com.dywatch.app.net.PageResult<DouyinApi.LiveRoom> p =
+                            api.searchLive(keyword, offset);
+                    page = p;
+                    videos = null;
+                    users = null;
+                    lives = p.items();
+                }
                 runOnUiThread(() -> {
                     if (generation != mGeneration || isFinishing() || isDestroyed()) return;
                     mLoading = false;
-                    mHasMore = more;
-                    mOffset = next;
-                    mSearchId = nextSearchId;
-                    if (mTab == VIDEO && finalVideos != null) {
-                        for (FeedVideo v : finalVideos) {
+                    mHasMore = page.hasMore();
+                    long next = page.cursor();
+                    mOffset = next > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) next;
+                    mSearchId = page.searchId();
+                    if (mTab == VIDEO && videos != null) {
+                        for (FeedVideo v : videos) {
                             if (containsVideo(v.awemeId)) continue;
                             int index = mVideos.size();
                             mVideos.add(v);
                             mAdapter.append(java.util.Collections.singletonList(VideoRows.of(v, index)));
                         }
-                    } else if (mTab == USER && finalUsers != null) {
-                        for (DouyinApi.UserSummary u : finalUsers) {
+                    } else if (mTab == USER && users != null) {
+                        for (DouyinApi.UserSummary u : users) {
                             if (containsUser(u.secUid)) continue;
                             mUsers.add(u);
                             String meta = u.followerCount > 0 ? FeedVideo.formatCount(u.followerCount) + " 粉丝" : "";
                             mAdapter.append(java.util.Collections.singletonList(new MediaRowAdapter.Item(
                                     u.nickname, meta, u.signature, u.avatarUrl, u, MediaRowAdapter.KIND_USER)));
                         }
-                    } else if (mTab == LIVE && finalLives != null) {
-                        for (DouyinApi.LiveRoom room : finalLives) {
+                    } else if (mTab == LIVE && lives != null) {
+                        for (DouyinApi.LiveRoom room : lives) {
                             mLives.add(room);
                             mAdapter.append(java.util.Collections.singletonList(new MediaRowAdapter.Item(
                                     room.title, room.ownerName, room.viewerText + " · 直播中",
@@ -260,7 +276,7 @@ public class SearchActivity extends UiActivity {
         hint(history.isEmpty() ? "输入关键词，查找视频、用户或直播" : "点历史词重新搜索 · 历史仅保存在本机");
     }
 
-    private DouyinApi ensureApi() throws Exception {
+    private synchronized DouyinApi ensureApi() throws Exception {
         if (mApi == null) {
             mApi = new DouyinApi(new Signer(Arrays.asList(readAsset("sign/utils.js"),
                     readAsset("sign/sm3.js"), readAsset("sign/vm_decode.js"))));

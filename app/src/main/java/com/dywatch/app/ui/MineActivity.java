@@ -17,8 +17,10 @@ import com.dywatch.app.feed.FeedVideo;
 import com.dywatch.app.feed.HistoryStore;
 import com.dywatch.app.login.LoginManager;
 import com.dywatch.app.net.DouyinApi;
+import com.dywatch.app.net.PageResult;
 import com.dywatch.app.sign.Signer;
 import com.dywatch.app.util.AppLog;
+import com.dywatch.app.util.InFlightGuard;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -39,6 +41,11 @@ public class MineActivity extends UiActivity {
     private DouyinApi mApi;
     private int mTab = TAB_LIKE;
     private boolean mLoading;
+    /** 喜欢第一页的服务端 next cursor / has_more；进播放页续拉时必须用它，不能用列表条数。 */
+    private long mLikesCursor = -1;
+    private boolean mLikesHasMore;
+    /** 历史条目点击换址一次只允许一个在途，防止连点重复 fetch/startActivity。 */
+    private final InFlightGuard mHistoryOpenGuard = new InFlightGuard();
     /** 当前 tab 的数据源（点击后进播放页要用） */
     private final List<FeedVideo> mVideos = new ArrayList<>();
 
@@ -121,14 +128,21 @@ public class MineActivity extends UiActivity {
                     // 顺带修：原来写成 ensureApi().fetchFavorite(ensureApi().fetchSelfSecUid(), 0)，
                     // 同一个 api 对象取两遍（第一次还要读 3 个 assets 建签名器），没必要
                     final DouyinApi api = ensureApi();
-                    final List<FeedVideo> list = api.fetchFavorite(api.fetchSelfSecUid(), 0);
+                    final PageResult<FeedVideo> page =
+                            api.fetchFavorite(api.fetchSelfSecUid(), 0);
+                    final List<FeedVideo> list = page.items();
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             mLoading = false;
                             if (mTab != tab) return; // 请求回来时已切到“看过”，别覆盖当前列表
+                            // 记录服务端下一页游标：播放页续拉喜欢列表时用它，
+                            // 不能再用 mVideos.size() 冒充 max_cursor。
+                            mLikesCursor = page.cursor();
+                            mLikesHasMore = page.hasMore();
                             // 成功路径也落一行：只记失败的话，"列表是空的"到底是没数据还是没拉到就分不清
-                            AppLog.i("mine", "喜欢列表拉到 " + list.size() + " 条");
+                            AppLog.i("mine", "喜欢列表拉到 " + list.size() + " 条，hasMore="
+                                    + mLikesHasMore);
                             show(list, "还没有喜欢过的视频");
                         }
                     });
@@ -195,16 +209,21 @@ public class MineActivity extends UiActivity {
         //    现在只换**当前点的那一条**，进播放页后其余条目由 FeedActivity 的
         //    resolveAndPlayDetail 按需单条换址（它自带 mDetailInFlight 去重）。
         if (mTab == TAB_HISTORY) {
+            // 2026-11-07 审计：历史条目换址是慢网络请求，连点会重复 fetch + 重复 startActivity。
+            // CAS 闸门保证一次只在途一个；成功/失败/页面结束都会在 UI 回调里 release。
+            if (!mHistoryOpenGuard.tryAcquire()) return;
             final FeedVideo stub = mVideos.get(index);
+            final int targetIndex = index;
+            // 固定点击时的列表快照：等待换址期间用户切 tab/列表被清空也不会串到别的条目。
+            final java.util.List<FeedVideo> snapshot = new ArrayList<>(mVideos);
             hint("正在取回播放地址…");
             Loading.show(this, true);
-            final int targetIndex = index;
             new Thread(new Runnable() {
                 @Override
                 public void run() {
                     FeedVideo playable = stub;
                     try {
-                        if (!isFinishing()) {
+                        if (!isFinishing() && !isDestroyed()) {
                             DouyinApi api = ensureApi();
                             FeedVideo full = api.fetchDetail(stub.awemeId);
                             if (full != null) playable = full;
@@ -217,12 +236,13 @@ public class MineActivity extends UiActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            mHistoryOpenGuard.release();
                             if (isFinishing() || isDestroyed()) return;
                             Loading.show(MineActivity.this, false);
                             clearHint();
-                            // 进播放页的列表 = 原来的历史列表，只把当前条换成换好址的版本。
+                            // 进播放页的列表 = 点击时的历史快照，只把当前条换成换好址的版本。
                             // 其余条目在播放页里按需换址（FeedActivity 已实现单条换址路径）。
-                            java.util.List<FeedVideo> list = new ArrayList<>(mVideos);
+                            java.util.List<FeedVideo> list = new ArrayList<>(snapshot);
                             if (targetIndex >= 0 && targetIndex < list.size()) {
                                 list.set(targetIndex, resolvedOne);
                             }
@@ -246,12 +266,16 @@ public class MineActivity extends UiActivity {
         it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_LIST,
                 new ArrayList<>(mVideos));
         it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_START_INDEX, index);
-        if (mTab == TAB_LIKE) it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_SOURCE,
-                com.dywatch.app.feed.VideoSource.likes(mVideos.size(), true));
+        if (mTab == TAB_LIKE) {
+            com.dywatch.app.feed.VideoSource source =
+                    com.dywatch.app.feed.VideoSource.likes(mLikesCursor, mLikesHasMore);
+            source.seedLikes(mVideos);
+            it.putExtra(com.dywatch.app.feed.FeedActivity.EXTRA_VIDEO_SOURCE, source);
+        }
         startActivity(it);
     }
 
-    private DouyinApi ensureApi() throws Exception {
+    private synchronized DouyinApi ensureApi() throws Exception {
         if (mApi != null) return mApi;
         mApi = new DouyinApi(new Signer(Arrays.asList(
                 readAll(getAssets().open("sign/utils.js")),

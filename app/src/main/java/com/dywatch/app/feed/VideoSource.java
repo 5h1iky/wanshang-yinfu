@@ -1,9 +1,11 @@
 package com.dywatch.app.feed;
 
 import com.dywatch.app.net.DouyinApi;
+import com.dywatch.app.net.PageResult;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Collection;
 import java.util.List;
 
 /** 视频流的可序列化来源：换页后仍按原列表翻页，不串回推荐流。 */
@@ -18,6 +20,9 @@ public final class VideoSource implements Serializable {
     public String searchId = "";
     public long cursor;
     public boolean hasMore;
+
+    /** 喜欢列表的跨页去重/游标状态；只在 LIKES 模式下使用。 */
+    private LikesPager mLikesPager;
 
     public static VideoSource user(String secUid, long cursor, boolean hasMore) {
         return of(USER, secUid, cursor, hasMore);
@@ -48,10 +53,18 @@ public final class VideoSource implements Serializable {
         return s;
     }
 
+    /** 把「我的」页已经展示的喜欢条目放进跨页去重集合，避免播放页续拉时重复。 */
+    public void seedLikes(Collection<FeedVideo> alreadyShown) {
+        if (type != LIKES) return;
+        if (mLikesPager == null) mLikesPager = new LikesPager(cursor, hasMore);
+        mLikesPager.seed(alreadyShown);
+    }
+
     /** 只由 FeedActivity 单个后台线程串行调用。 */
     public List<FeedVideo> next(DouyinApi api) throws IOException {
         if (!hasMore) return java.util.Collections.emptyList();
         List<FeedVideo> list;
+        PageResult<FeedVideo> page;
         switch (type) {
             case USER:
                 list = api.fetchUserPosts(key, cursor);
@@ -59,27 +72,33 @@ public final class VideoSource implements Serializable {
                 cursor = api.lastPostsCursor;
                 break;
             case COLLECTION:
-                list = api.fetchCollectionVideos(key, cursor);
-                hasMore = api.lastCollectionHasMore;
-                cursor = api.lastCollectionCursor;
+                page = api.fetchCollectionVideos(key, cursor);
+                list = page.items();
+                hasMore = page.hasMore();
+                cursor = page.cursor();
                 break;
             case ALL_COLLECTIONS:
-                list = api.fetchAllCollectionVideos(cursor);
-                hasMore = api.lastCollectionHasMore;
-                cursor = api.lastCollectionCursor;
+                page = api.fetchAllCollectionVideos(cursor);
+                list = page.items();
+                hasMore = page.hasMore();
+                cursor = page.cursor();
                 break;
             case SEARCH:
-                list = api.searchVideos(keyword, (int) cursor, searchId);
-                hasMore = api.lastSearchHasMore;
-                cursor = api.lastSearchOffset;
-                searchId = api.lastSearchId;
+                page = api.searchVideos(keyword, (int) cursor, searchId);
+                list = page.items();
+                hasMore = page.hasMore();
+                cursor = page.cursor();
+                searchId = page.searchId();
                 break;
             case LIKES:
+                // 2026-11-07 审计 P1-4：游标只认服务端 max_cursor，不再 cursor += list.size()；
+                // 去重与“游标不前进就停”由 LikesPager 统一处理。
+                if (mLikesPager == null) mLikesPager = new LikesPager(cursor, hasMore);
                 String secUid = api.fetchSelfSecUid();
-                list = api.fetchFavorite(secUid, cursor);
-                // 喜欢接口历史版本未暴露游标；请求到空页即停，避免重复请求。
-                hasMore = !list.isEmpty();
-                cursor += list.size();
+                page = api.fetchFavorite(secUid, mLikesPager.cursor());
+                list = mLikesPager.accept(page);
+                cursor = mLikesPager.cursor();
+                hasMore = mLikesPager.hasMore();
                 break;
             case RECOMMEND:
                 // 首页“刷视频”先给选片列表；进入全屏后继续按推荐流翻页。

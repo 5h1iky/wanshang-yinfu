@@ -7,6 +7,8 @@ package com.dywatch.app.feed;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -79,10 +81,24 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     private boolean mProxyFallbackTried;
     /** 播放代次：换条后旧播放器迟到的 ERROR 不再误重播 */
     private int mPlayToken;
+    /**
+     * 页面生命周期代次：onDestroy 后所有网络/延时/preload 回调统一失效。
+     * （网络线程的 runOnUiThread 不受 removeCallbacks 约束，必须靠代次兜住。）
+     */
+    private final PlaybackLifecycle mLifecycle = new PlaybackLifecycle();
+    /** 播放页统一的主线程延时入口，onDestroy 一次性清空（含 startPlay 重试、自动补拉） */
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    /** 当前是否 onResume~onPause 之间；缓冲结束回调据此阻止后台出声 */
+    private boolean mActivityVisible;
+    /** 本次暂停是否由切后台/锁屏引起（回前台才自动续播，不把用户手动暂停拉起来） */
+    private boolean mPausedForBackground;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // onCreate→onResume 之间可能已经有 post 的 startPlay 执行；先按“可见”处理，
+        // 真正的 onPause 会把标志置 false，避免首帧被误判成后台起播而暂停。
+        mActivityVisible = true;
         setContentView(R.layout.activity_feed);
         installKernelDebugButton();
         initViewPager();
@@ -119,12 +135,23 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         showHint("正在拉取视频…");
         loadFeed();           // 主源：原生 tab/feed（实测 2026-09-26：PC 推荐页换条时调的就是这个 endpoint，10 屏 55 条零重复）
         wireBack();
-        mViewPager.post(new Runnable() {
+        mMainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (!isAlive()) return;
                 startPlay(0);
             }
         });
+    }
+
+    /** 页面仍未销毁且没有正在结束。所有跨线程回调的第一道闸。 */
+    private boolean isAlive() {
+        return !mLifecycle.isDestroyed() && !isFinishing() && !isDestroyed();
+    }
+
+    /** 指定代次仍然有效（捕获后经过线程切换/延时，再校验一次）。 */
+    private boolean isAlive(int generation) {
+        return mLifecycle.isValid(generation) && !isFinishing() && !isDestroyed();
     }
 
     /** 返回键已收进播放面板（TikTokView 的点击暂停界面），不再常驻画面。 */
@@ -185,15 +212,17 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             return;
         }
         // 页面已经在关：别再起新的网络请求（补拉的延时任务会走到这里）
-        if (isFinishing() || isDestroyed()) return;
+        if (!isAlive()) return;
         if (mLoading) return;
         mLoading = true;
+        final int generation = mLifecycle.capture();
         // 首屏要等签名 + 拉流（手表上更久），内容区正中给个在转的圈
         if (first) com.dywatch.app.ui.Loading.show(this, true);
         com.dywatch.app.util.AppLog.i("feed", "拉取下一页（已 " + mVideoList.size() + " 条）");
         new Thread(new Runnable() {
             @Override
             public void run() {
+                if (!mLifecycle.isValid(generation)) return;
                 try {
                     final java.util.List<FeedVideo> list = ensureApi().fetchFeed(10);
                     // 游标落盘 + 登录态标记进日志（验证个性化）
@@ -213,6 +242,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            if (!isAlive(generation)) return;
                             mLoading = false;
                             // 列表里若还混着固件/缓存项（URL 是几小时甚至上次会话烤的，签名早过期→必死链），
                             // 首批真数据到货就整批换掉，否则播放器会一直卡在 #0 那个放不出画面的垫场项上。
@@ -242,10 +272,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                                     showHint("这一批都看过了，稍后再来");
                                     com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
                                 } else {
-                                    mViewPager.postDelayed(new Runnable() {
+                                    mMainHandler.postDelayed(new Runnable() {
                                         @Override
                                         public void run() {
-                                            if (isFinishing() || isDestroyed()) return;
+                                            if (!isAlive(generation)) return;
                                             loadMore(false);
                                         }
                                     }, 300);
@@ -264,10 +294,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            if (!isAlive(generation)) return;
                             mLoading = false;
                             mEmptyPages = 0;   // 失败就重新开始计数，别把上一次的失败算进上限
                             com.dywatch.app.ui.Loading.show(FeedActivity.this, false);
-                            if (isFinishing() || isDestroyed()) return;
                             if (first) loadFixtureOrCache();
                             showHint((first ? "网络加载失败，已回退内置数据。\n" : "翻页失败: ") + err);
                         }
@@ -290,15 +320,17 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      *    现在对空页做**有上限的连续补拉**，并检测游标是否前进（游标不动就停，防死循环）。
      */
     private void loadMoreFromSource(final int emptyPages) {
-        if (mSource == null || !mSource.hasMore || mLoading || isFinishing() || isDestroyed()) return;
+        if (mSource == null || !mSource.hasMore || mLoading || !isAlive()) return;
         mLoading = true;
+        final int generation = mLifecycle.capture();
         new Thread(() -> {
+            if (!mLifecycle.isValid(generation)) return;
             try {
                 final int sizeBefore = mVideoList.size();
                 final java.util.List<FeedVideo> page = mSource.next(ensureApi());
                 runOnUiThread(() -> {
+                    if (!isAlive(generation)) return;
                     mLoading = false;
-                    if (isFinishing() || isDestroyed()) return;
                     java.util.List<FeedVideo> fresh = new java.util.ArrayList<>();
                     for (FeedVideo v : page) {
                         boolean duplicate = false;
@@ -330,15 +362,17 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                         return;
                     }
                     // 预算内补拉下一页（稍微延迟，别把读接口打满）
-                    mViewPager.postDelayed(() -> loadMoreFromSource(emptyPages + 1), 600);
+                    mMainHandler.postDelayed(() -> {
+                        if (!isAlive(generation)) return;
+                        loadMoreFromSource(emptyPages + 1);
+                    }, 600);
                 });
             } catch (Exception e) {
                 AppLog.i("feed", "来源流翻页失败: " + e.getClass().getSimpleName());
                 runOnUiThread(() -> {
+                    if (!isAlive(generation)) return;
                     mLoading = false;
-                    if (!isFinishing() && !isDestroyed()) {
-                        showHint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
-                    }
+                    showHint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
                 });
             }
         }, "source-feed-load").start();
@@ -377,6 +411,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         mVideoView.addOnStateChangeListener(new VideoView.OnStateChangeListener() {
             @Override
             public void onPlayerStateChanged(int playerState) {
+                if (mLifecycle.isDestroyed()) return;
                 com.dywatch.app.util.AppLog.i("feed", "播放器状态: " + playerStateName(playerState));
                 // 全屏状态跟**实际**走（软件内问题 ⑤）：进全屏的不一定是我们点的那个键——
                 // dkplayer 的传感器监听在横屏时也会自动进全屏（见 BaseVideoController.onOrientationLandscape）。
@@ -398,19 +433,34 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
 
             @Override
             public void onPlayStateChanged(int playState) {
+                if (mLifecycle.isDestroyed()) return;
                 com.dywatch.app.util.AppLog.i("feed", "播放状态: " + playerStateName(playState));
                 if (playState == VideoView.STATE_PLAYING && mPlayingViaProxy) {
                     com.dywatch.app.cache.ProxyVideoCacheManager.noteProxyPlaybackSuccess();
+                }
+                // 页面已经不可见（Home/锁屏/被全屏页面盖住）：缓冲结束后绝不能让声音自己响起来。
+                // 这里再兜一次，覆盖 onPause 时还在 PREPARING、之后才真正开始播放的情况。
+                if (!mActivityVisible
+                        && (playState == VideoView.STATE_PLAYING || playState == VideoView.STATE_BUFFERING)) {
+                    mMainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (mLifecycle.isDestroyed() || mActivityVisible || mVideoView == null) return;
+                            mPausedForBackground = true;
+                            mVideoView.pause();
+                            com.dywatch.app.util.AppLog.i("feed", "页面不可见，拦截后台起播");
+                        }
+                    });
                 }
                 if (playState == VideoView.STATE_ERROR) {
                     // dkplayer 的 STATE_ERROR(-1) 只走这条回调（BaseVideoView.setPlayState），
                     // 不会出现在 onPlayerStateChanged（那里只有 PLAYER_NORMAL/FULL_SCREEN/TINY_SCREEN）。
                     // post 一拍再重播：避免在状态分发里同步 release()/setUrl() 造成重入。
                     final int token = mPlayToken;
-                    mVideoView.post(new Runnable() {
+                    mMainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (token != mPlayToken) return;   // 用户已经滑走
+                            if (!isAlive() || token != mPlayToken) return;   // 页面销毁/用户已经滑走
                             if (!fallbackToDirectPlay()) {
                                 com.dywatch.app.util.AppLog.i("feed", "播放失败且无法降级，等用户滑动");
                             }
@@ -435,10 +485,14 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      * ⚠️ 只降级一次：直连还失败就说明确实是内容/网络的问题，再试只会死循环重播。
      */
     private boolean fallbackToDirectPlay() {
-        if (!mPlayingViaProxy || mProxyFallbackTried || mPlayingRawUrl.isEmpty()) return false;
+        if (!isAlive() || !mPlayingViaProxy || mProxyFallbackTried || mPlayingRawUrl.isEmpty()) return false;
         mProxyFallbackTried = true;
         final String rawUrl = mPlayingRawUrl;
-        com.dywatch.app.util.AppLog.i("feed", "代理播放失败 → 删掉坏缓存，改直连重播");
+        // ⚠️ 2026-11-07：release() 前必须抓住当前位置。老实现 release → setUrl → start
+        // 会从 0 重播，用户看到的正是「播到一半失败后，再点播放又从开头开始/后半段永远打不开」。
+        final long resumePosition = mVideoView == null ? 0 : mVideoView.getCurrentPosition();
+        com.dywatch.app.util.AppLog.i("feed", "代理播放失败 → 删掉坏缓存，改直连重播，恢复位置 "
+                + (resumePosition / 1000) + "s");
         // 先停预加载：否则删完缓存，后台任务可能立刻把同一个坏文件写回来
         if (mPreloadManager != null) mPreloadManager.removePreloadTask(rawUrl);
         com.dywatch.app.cache.ProxyVideoCacheManager.evict(this, rawUrl);
@@ -446,15 +500,25 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         try {
             mVideoView.release();
             // 删完坏缓存后由 getPlayUrl 重新决定：缓存已不够门槛，它会自然给出直连
-            String retryUrl = mPreloadManager.getPlayUrl(rawUrl);
+            String retryUrl = mPreloadManager == null ? rawUrl : mPreloadManager.getPlayUrl(rawUrl);
             mPlayingViaProxy = !retryUrl.equals(rawUrl);
             mVideoView.setUrl(retryUrl, com.dywatch.app.net.DouyinApi.playHeaders());
+            // setUrl 会清零续播位置，这里显式恢复到出错瞬间的位置
+            if (resumePosition > 0) {
+                mVideoView.skipPositionWhenPlay(
+                        (int) Math.min(Integer.MAX_VALUE, resumePosition));
+            }
             // release() 会走 STATE_IDLE → 控制器摘掉 isDissociate=true 的组件（TikTokView 就是），
             // 重播前必须重新挂上，否则这条的按钮/进度不再跟播放状态同步。
             if (mCurTikTokView != null) {
                 mController.addControlComponent(mCurTikTokView, true);
             }
             mVideoView.start();
+            if (!mActivityVisible) {
+                // 后台发生的降级重播也不能出声：PREPARING 阶段先记暂停意图。
+                mPausedForBackground = true;
+                mVideoView.pause();
+            }
         } catch (Throwable e) {
             com.dywatch.app.util.AppLog.i("feed", "降级重播失败：" + e);
         }
@@ -545,10 +609,16 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             @Override
             public void onPageSelected(final int position) {
                 if (position == mCurPos) return;
-                // 等 ViewPager populate 完成（新页实例化）再挂播放器
-                mViewPager.post(new Runnable() {
+                final int generation = mLifecycle.capture();
+                final int playToken = mPlayToken;
+                // 等 ViewPager populate 完成（新页实例化）再挂播放器。
+                // ⚠️ 2026-11-07：post 期间用户可能又滑走/页面可能销毁，回调必须校验
+                // 代次、播放代次和「当前仍是这一页」，否则旧页的播放器会抢挂到新页上。
+                mMainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (!isAlive(generation) || playToken != mPlayToken) return;
+                        if (mViewPager == null || mViewPager.getCurrentItem() != position) return;
                         startPlay(position);
                     }
                 });
@@ -560,6 +630,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
 
             @Override
             public void onPageScrollStateChanged(int state) {
+                if (!isAlive() || mPreloadManager == null) return;
                 if (state == VerticalViewPager.SCROLL_STATE_DRAGGING) {
                     mCurItem = mViewPager.getCurrentItem();
                 }
@@ -582,7 +653,10 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
      * ② onPageSelected 时新页可能尚未实例化 → 找不到视图不能静默放弃，要重试。
      */
     private void startPlay(final int position, final int attempt) {
+        if (!isAlive() || mViewPager == null) return;
         if (position < 0 || position >= mVideoList.size()) return;
+        // 旧页的延时重试/迟到的 onPageSelected 不允许抢当前页的播放器
+        if (mViewPager.getCurrentItem() != position) return;
         final FeedVideo pending = mVideoList.get(position);
         if (pending.playUrl.isEmpty() && !pending.awemeId.isEmpty()) {
             resolveAndPlayDetail(position, pending.awemeId);
@@ -598,6 +672,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             FeedAdapter.ViewHolder viewHolder = (FeedAdapter.ViewHolder) itemView.getTag();
             if (viewHolder != null && viewHolder.mPosition == position) {
                 mPlayToken++;
+                mPausedForBackground = false;
                 mVideoView.release();
                 if (mVideoView.getParent() instanceof ViewGroup) {
                     ((ViewGroup) mVideoView.getParent()).removeView(mVideoView);
@@ -632,6 +707,14 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                 mCurTikTokView = viewHolder.mTikTokView;
                 viewHolder.mPlayerContainer.addView(mVideoView, 0);
                 mVideoView.start();
+                // ⚠️ 页面已不可见（Home/锁屏/被别的页面盖住）才走到这里：绝不允许出声。
+                // start() 后仍处 PREPARING，pause() 会记下暂停意图，首帧渲染时真正停住；
+                // 回到 onResume 只恢复「因切后台而暂停」的，用户手动暂停的不会被拉起来。
+                if (!mActivityVisible) {
+                    mPausedForBackground = true;
+                    mVideoView.pause();
+                    com.dywatch.app.util.AppLog.i("feed", "页面不可见，本次起播改为静默挂起");
+                }
                 mCurPos = position;
                 com.dywatch.app.util.AppLog.i("feed", "开始播放 #" + position + " " + playUrl.substring(0, Math.min(40, playUrl.length())));
                 return;
@@ -640,9 +723,13 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
         // 页面视图还没实例化/刚被重建 → 延时重试
         if (attempt < 6) {
             com.dywatch.app.util.AppLog.i("feed", "页视图未就绪，重试挂载 #" + position + " (第" + attempt + "次)");
-            mViewPager.postDelayed(new Runnable() {
+            final int tokenAtSchedule = mPlayToken;
+            mMainHandler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
+                    // 页面销毁 / 用户滑走 / 已有新的挂载成功 → 本次重试作废
+                    if (!isAlive() || tokenAtSchedule != mPlayToken) return;
+                    if (mViewPager == null || mViewPager.getCurrentItem() != position) return;
                     startPlay(position, attempt + 1);
                 }
             }, 250);
@@ -655,13 +742,15 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     private final java.util.Set<String> mDetailInFlight = new java.util.HashSet<>();
     private void resolveAndPlayDetail(final int position, final String awemeId) {
         if (!mDetailInFlight.add(awemeId)) return;
+        final int generation = mLifecycle.capture();
         showHint("正在取回播放地址…");
         new Thread(() -> {
+            if (!mLifecycle.isValid(generation)) return;
             try {
                 final FeedVideo full = ensureApi().fetchDetail(awemeId);
                 runOnUiThread(() -> {
+                    if (!isAlive(generation)) return;
                     mDetailInFlight.remove(awemeId);
-                    if (isFinishing() || isDestroyed()) return;
                     for (int i = 0; i < mVideoList.size(); i++) {
                         if (awemeId.equals(mVideoList.get(i).awemeId)) {
                             mVideoList.set(i, full);
@@ -670,15 +759,17 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
                     }
                     mAdapter.notifyDataSetChanged();
                     clearHint();
-                    startPlay(position);
+                    // 用户在取址期间滑走了：只更新数据，不抢当前页的播放器
+                    if (mViewPager != null && mViewPager.getCurrentItem() == position) {
+                        startPlay(position);
+                    }
                 });
             } catch (Exception e) {
                 AppLog.i("feed", "详情换址失败: " + e.getClass().getSimpleName());
                 runOnUiThread(() -> {
+                    if (!isAlive(generation)) return;
                     mDetailInFlight.remove(awemeId);
-                    if (!isFinishing() && !isDestroyed()) {
-                        showHint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
-                    }
+                    showHint(com.dywatch.app.net.DouyinApi.friendlyMessage(e));
                 });
             }
         }, "detail-resolve").start();
@@ -911,7 +1002,7 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             public void onActionResult(String action, boolean ok, String detail) {
                 mActionsInFlight.remove(key);
                 // 页面已经在关（用户在等结果的几秒里退出了）：回调和超时都别再动 UI
-                if (isFinishing() || isDestroyed()) return;
+                if (!isAlive()) return;
                 if (ok) {
                     android.widget.Toast.makeText(FeedActivity.this,
                             isLike ? (target ? "已点赞" : "已取消点赞") : (target ? "已收藏" : "已取消收藏"),
@@ -1038,7 +1129,12 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
     @Override
     protected void onResume() {
         super.onResume();
-        if (mVideoView != null) mVideoView.resume();
+        mActivityVisible = true;
+        // 只恢复「确实是切后台导致的暂停」；用户手动暂停的，回前台不能擅自播起来。
+        if (mVideoView != null && mPausedForBackground) {
+            mPausedForBackground = false;
+            mVideoView.resume();
+        }
         // 预加载跟着页面可见性走（审计 L6/L8）：后台时整队停，回来时把没预热好的补齐
         if (mPreloadManager != null) mPreloadManager.resumeAll();
         com.dywatch.app.chat.ChatEngine.attachTo(this);
@@ -1046,16 +1142,47 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
 
     @Override
     protected void onPause() {
+        mActivityVisible = false;
         super.onPause();
         com.dywatch.app.chat.ChatEngine.detachFrom(this);
         // ⚠️ 原来只停了播放器：预加载队列不管，用户按 Home 走后还在继续下（每条最多 1MB）
         if (mPreloadManager != null) mPreloadManager.pauseAll();
-        if (mVideoView != null) mVideoView.pause();
+        pauseForBackground();
+    }
+
+    @Override
+    protected void onStop() {
+        // onPause 到 onStop 之间播放器可能刚好从 PREPARING 变成 PLAYING（例如弱网首帧），
+        // 再兜一次，保证退到后台一定没有声音。
+        pauseForBackground();
+        super.onStop();
+    }
+
+    /**
+     * 切后台/锁屏时暂停。缓冲中也要 pause（老 BaseVideoView.pause 在缓冲态会 no-op，
+     * 缓冲结束后声音会继续在后台响）；PREPARING 阶段由 BaseVideoView 记为暂停意图，
+     * 首帧渲染时再真正 pause。
+     */
+    private void pauseForBackground() {
+        if (mVideoView == null) return;
+        int state = mVideoView.getCurrentPlayState();
+        if (state == VideoView.STATE_PLAYING
+                || state == VideoView.STATE_BUFFERING
+                || state == VideoView.STATE_BUFFERED
+                || state == VideoView.STATE_PREPARING
+                || state == VideoView.STATE_PREPARED) {
+            mPausedForBackground = true;
+            mVideoView.pause();
+        }
     }
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        // 先让所有代次失效 + 清空延时任务，再 release；迟到的网络/播放器回调会被 isAlive 拦住。
+        mLifecycle.destroy();
+        mMainHandler.removeCallbacksAndMessages(null);
+        mActionTimeout.removeCallbacksAndMessages(null);
+        mPlayToken++;
         // ⚠️ 2026-10-02 修（代码审计 H5）：引擎是**进程单例**，互动回调里抓着本页的
         // video/holder/this。退出刷视频页时不主动注销，回调会一直挂在引擎上，
         // 整棵信息流视图树（含每个 item 的封面、播放器容器）跟着单例活到进程结束。
@@ -1065,8 +1192,8 @@ public class FeedActivity extends UiActivity implements FeedAdapter.ActionListen
             }
         }
         mActionsInFlight.clear();
-        mActionTimeout.removeCallbacksAndMessages(null);
         if (mVideoView != null) mVideoView.release();
         if (mPreloadManager != null) mPreloadManager.removeAllPreloadTask();
+        super.onDestroy();
     }
 }

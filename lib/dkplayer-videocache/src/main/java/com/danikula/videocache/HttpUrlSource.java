@@ -31,6 +31,12 @@ import static java.net.HttpURLConnection.HTTP_SEE_OTHER;
 public class HttpUrlSource implements Source {
 
     private static final int MAX_REDIRECTS = 5;
+    /**
+     * 播放路径的有限超时（2026-11-07）：原来 open(offset) 传 -1，连接/读取都是无限等待。
+     * 源站卡住时 ProxyCache 的 SourceReader 线程会永久阻塞，播放器表现为「一直缓冲」。
+     */
+    private static final int PLAYBACK_CONNECT_TIMEOUT_MS = 10_000;
+    private static final int PLAYBACK_READ_TIMEOUT_MS = 15_000;
     private final SourceInfoStorage sourceInfoStorage;
     private final HeaderInjector headerInjector;
     private SourceInfo sourceInfo;
@@ -70,10 +76,22 @@ public class HttpUrlSource implements Source {
     @Override
     public void open(long offset) throws ProxyCacheException {
         try {
-            connection = openConnection(offset, -1);
+            connection = openConnection(offset, PLAYBACK_CONNECT_TIMEOUT_MS, PLAYBACK_READ_TIMEOUT_MS);
+            int responseCode = connection.getResponseCode();
+            String contentRange = connection.getHeaderField("Content-Range");
+            // ⚠️ 2026-11-07：服务器忽略 Range 时可能对 bytes=N- 回 200 + 整个文件。
+            // 这种响应绝不能写进偏移 N 的缓存（会把开头数据拼到后半段，缓存永久污染），
+            // 必须在这里拒绝，让 ProxyCache 抛错、上层回退直连。
+            if (!RangeResponseValidator.isAcceptable(responseCode, contentRange, offset)) {
+                connection.disconnect();
+                connection = null;
+                throw new ProxyCacheException("Unexpected HTTP " + responseCode
+                        + " for Range offset " + offset
+                        + " (Content-Range: " + contentRange + ") from " + sourceInfo.url);
+            }
             String mime = connection.getContentType();
             inputStream = new BufferedInputStream(connection.getInputStream(), DEFAULT_BUFFER_SIZE);
-            long length = readSourceAvailableBytes(connection, offset, connection.getResponseCode());
+            long length = readSourceAvailableBytes(responseCode, contentRange, offset);
             this.sourceInfo = new SourceInfo(sourceInfo.url, length, mime);
             this.sourceInfoStorage.put(sourceInfo.url, sourceInfo);
         } catch (IOException e) {
@@ -81,15 +99,23 @@ public class HttpUrlSource implements Source {
         }
     }
 
-    private long readSourceAvailableBytes(HttpURLConnection connection, long offset, int responseCode) throws IOException {
+    private long readSourceAvailableBytes(int responseCode, String contentRange, long offset) {
         long contentLength = getContentLength(connection);
-        return responseCode == HTTP_OK ? contentLength
-                : responseCode == HTTP_PARTIAL ? contentLength + offset : sourceInfo.length;
+        if (responseCode == HTTP_OK) return contentLength;
+        if (responseCode == HTTP_PARTIAL) {
+            return RangeResponseValidator.resolveTotalLength(responseCode, contentRange, contentLength, offset);
+        }
+        return sourceInfo.length;
     }
 
     private long getContentLength(HttpURLConnection connection) {
         String contentLengthValue = connection.getHeaderField("Content-Length");
-        return contentLengthValue == null ? -1 : Long.parseLong(contentLengthValue);
+        if (contentLengthValue == null) return -1;
+        try {
+            return Long.parseLong(contentLengthValue);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     @Override
@@ -130,7 +156,7 @@ public class HttpUrlSource implements Source {
         HttpURLConnection urlConnection = null;
         InputStream inputStream = null;
         try {
-            urlConnection = openConnection(0, 10000);
+            urlConnection = openConnection(0, PLAYBACK_CONNECT_TIMEOUT_MS, PLAYBACK_READ_TIMEOUT_MS);
             long length = getContentLength(urlConnection);
             String mime = urlConnection.getContentType();
             inputStream = urlConnection.getInputStream();
@@ -147,7 +173,8 @@ public class HttpUrlSource implements Source {
         }
     }
 
-    private HttpURLConnection openConnection(long offset, int timeout) throws IOException, ProxyCacheException {
+    private HttpURLConnection openConnection(long offset, int connectTimeoutMs, int readTimeoutMs)
+            throws IOException, ProxyCacheException {
         HttpURLConnection connection;
         boolean redirected;
         int redirectCount = 0;
@@ -159,9 +186,11 @@ public class HttpUrlSource implements Source {
             if (offset > 0) {
                 connection.setRequestProperty("Range", "bytes=" + offset + "-");
             }
-            if (timeout > 0) {
-                connection.setConnectTimeout(timeout);
-                connection.setReadTimeout(timeout);
+            if (connectTimeoutMs > 0) {
+                connection.setConnectTimeout(connectTimeoutMs);
+            }
+            if (readTimeoutMs > 0) {
+                connection.setReadTimeout(readTimeoutMs);
             }
             int code = connection.getResponseCode();
             redirected = code == HTTP_MOVED_PERM || code == HTTP_MOVED_TEMP || code == HTTP_SEE_OTHER;

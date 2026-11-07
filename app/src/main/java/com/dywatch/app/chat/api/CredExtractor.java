@@ -48,6 +48,48 @@ public final class CredExtractor {
     private WebView mWeb;
     private Callback mCb;
     private boolean mDone;
+    /** 同一页面只跑一条轮询，避免 onPageFinished 重入时叠加多条 */
+    private boolean mPolling;
+    private long mStartedAt;
+
+    /** 总超时：到点才给失败终态；中途的空/不完整结果一律继续等。 */
+    private final Runnable mTimeout = new Runnable() {
+        @Override
+        public void run() {
+            if (mDone) return;
+            AppLog.i(TAG, "凭证提取总超时");
+            finish(false, null, "读取凭证超时");
+        }
+    };
+
+    /**
+     * 页面就绪后的轮询：不设“尝试次数上限”，一直读到完整凭证或总超时。
+     * 旧实现 3 次就 finish(false)，而 IndexedDB 建立经常要 5~15s，重试等于白做。
+     */
+    private final Runnable mPoll = new Runnable() {
+        @Override
+        public void run() {
+            if (mDone || mWeb == null) {
+                mPolling = false;
+                return;
+            }
+            long elapsed = System.currentTimeMillis() - mStartedAt;
+            if (CredExtractionPolicy.decide(false, elapsed, TIMEOUT_MS)
+                    == CredExtractionPolicy.Decision.TIMEOUT) {
+                mPolling = false;
+                finish(false, null, "读取凭证超时");
+                return;
+            }
+            try {
+                mWeb.evaluateJavascript(JS_EXTRACT, null);
+            } catch (Throwable t) {
+                mPolling = false;
+                finish(false, null, "读取凭证失败");
+                return;
+            }
+            mMain.postDelayed(this, 2500L);
+        }
+    };
 
     public CredExtractor(Context ctx) {
         mCtx = ctx.getApplicationContext();
@@ -60,6 +102,8 @@ public final class CredExtractor {
     public void extract(final Callback cb) {
         mCb = cb;
         mDone = false;
+        mPolling = false;
+        mStartedAt = System.currentTimeMillis();
 
         mWeb = new WebView(mCtx);
         WebSettings s = mWeb.getSettings();
@@ -74,26 +118,10 @@ public final class CredExtractor {
             @Override
             public void onPageFinished(WebView view, String url) {
                 // IndexedDB 是异步建的，页面 load 完不一定已经有 secure-store。
-                // 给 1.5s 缓冲再读一次；读不到就再等一次（共 3 次机会）。
-                mMain.postDelayed(new Runnable() {
-                    int tries = 0;
-
-                    @Override
-                    public void run() {
-                        if (mDone || mWeb == null) return;
-                        if (++tries > 3) {
-                            finish(false, null, "网页里还没生成发送凭证（请先打开一次私信页）");
-                            return;
-                        }
-                        try {
-                            mWeb.evaluateJavascript(JS_EXTRACT, null);
-                        } catch (Throwable t) {
-                            finish(false, null, "读取凭证失败");
-                            return;
-                        }
-                        mMain.postDelayed(this, 2500L);
-                    }
-                }, 1500L);
+                // 给 1.5s 缓冲后开始轮询；同一文档只启动一条轮询。
+                if (mDone || mPolling) return;
+                mPolling = true;
+                mMain.postDelayed(mPoll, 1500L);
             }
         });
 
@@ -107,24 +135,25 @@ public final class CredExtractor {
             return;
         }
 
-        mMain.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (!mDone) finish(false, null, "读取凭证超时");
-            }
-        }, TIMEOUT_MS);
+        mMain.postDelayed(mTimeout, TIMEOUT_MS);
     }
 
     /** 销毁（正常路径由 finish 自动调；页面提前退出时也应调，避免泄漏） */
     public void destroy() {
         mDone = true;
         mCb = null;
+        mPolling = false;
+        mMain.removeCallbacks(mPoll);
+        mMain.removeCallbacks(mTimeout);
         destroyWeb();
     }
 
     private void finish(boolean ok, ImCreds creds, String why) {
-        if (mDone) return;
+        if (mDone) return;   // 唯一终态：重复 finish 不再回调
         mDone = true;
+        mPolling = false;
+        mMain.removeCallbacks(mPoll);
+        mMain.removeCallbacks(mTimeout);
         destroyWeb();
         Callback cb = mCb;
         mCb = null;
@@ -163,7 +192,15 @@ public final class CredExtractor {
             mMain.post(new Runnable() {
                 @Override
                 public void run() {
-                    finish(false, null, why == null ? "读取凭证失败" : why);
+                    // 页面这一轮读不到不等于永远读不到（可能 secure-store 还没建好）：
+                    // 不在这里结束，交给轮询/总超时。
+                    AppLog.i(TAG, "页面报告读取失败（继续等重试）: "
+                            + (why == null ? "" : why));
+                    if (CredExtractionPolicy.decide(false,
+                            System.currentTimeMillis() - mStartedAt, TIMEOUT_MS)
+                            == CredExtractionPolicy.Decision.TIMEOUT) {
+                        finish(false, null, why == null ? "读取凭证超时" : why);
+                    }
                 }
             });
         }
@@ -171,27 +208,37 @@ public final class CredExtractor {
 
     private void onJsResult(String json) {
         if (mDone) return;
+        ImCreds c;
         try {
-            ImCreds c = new ImCreds();
+            c = new ImCreds();
             c.ecPrivateKey = pick(json, "priv");
             c.ticket = pick(json, "ticket");
             c.tsSign = pick(json, "tssign");
             c.clientCert = pick(json, "client");
             c.serverCert = pick(json, "server");
             c.extractedAt = System.currentTimeMillis();
+        } catch (Throwable t) {
+            // 单次解析失败可能是页面还没写完，继续等下一轮，不要提前销毁 WebView。
+            AppLog.i(TAG, "凭证解析失败（继续等重试）");
+            return;
+        }
 
-            if (!c.complete()) {
-                // 不完整就别留着半套（半套既发不了消息，又会让人误以为"已就绪"）
-                AppLog.i(TAG, "凭证不完整: " + c.describe());
-                finish(false, null, "发送凭证不完整（请先打开一次私信页再试）");
-                return;
-            }
+        long elapsed = System.currentTimeMillis() - mStartedAt;
+        CredExtractionPolicy.Decision d =
+                CredExtractionPolicy.decide(c.complete(), elapsed, TIMEOUT_MS);
+        if (d == CredExtractionPolicy.Decision.COMPLETE) {
             c.save(mCtx);
             AppLog.i(TAG, "凭证已提取 " + c.describe());
             finish(true, c, "");
-        } catch (Throwable t) {
-            finish(false, null, "凭证解析失败");
+            return;
         }
+        if (d == CredExtractionPolicy.Decision.TIMEOUT) {
+            AppLog.i(TAG, "凭证不完整且已到总超时: " + c.describe());
+            finish(false, null, "读取凭证超时");
+            return;
+        }
+        // 关键修复：不完整结果只记日志，继续等 mPoll 的下一轮。
+        AppLog.i(TAG, "凭证不完整（继续重试）: " + c.describe());
     }
 
     /** 从 JS 交回来的扁平 JSON 里取字段（值本身可能含引号/换行，所以用带转义的解析） */

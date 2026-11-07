@@ -95,15 +95,16 @@ public class CollectionActivity extends UiActivity {
             try {
                 DouyinApi api = ensureApi();
                 if (isFolderMode()) {
-                    List<DouyinApi.CollectionInfo> page = api.fetchCollections(cursor);
-                    long next = api.lastCollectionCursor;
-                    boolean more = api.lastCollectionHasMore;
+                    final com.dywatch.app.net.PageResult<DouyinApi.CollectionInfo> page =
+                            api.fetchCollections(cursor);
+                    final List<DouyinApi.CollectionInfo> items = page.items();
                     runOnUiThread(() -> {
                         if (generation != mGeneration || isFinishing() || isDestroyed()) return;
                         mLoading = false;
-                        mCursor = next;
-                        mHasMore = more && !page.isEmpty();
-                        for (DouyinApi.CollectionInfo info : page) {
+                        // 服务端 cursor/has_more 只属于本次请求，迟到响应已被 generation 丢弃。
+                        mCursor = page.cursor();
+                        mHasMore = page.hasMore();
+                        for (DouyinApi.CollectionInfo info : items) {
                             if (info.name.isEmpty()) info.name = "未命名收藏夹";
                             boolean duplicate = false;
                             for (DouyinApi.CollectionInfo old : mFolders) {
@@ -114,16 +115,16 @@ public class CollectionActivity extends UiActivity {
                         showFolders();
                     });
                 } else {
-                    List<FeedVideo> page = mAllCollections ? api.fetchAllCollectionVideos(cursor)
+                    final com.dywatch.app.net.PageResult<FeedVideo> page = mAllCollections
+                            ? api.fetchAllCollectionVideos(cursor)
                             : api.fetchCollectionVideos(mCollectionId, cursor);
-                    long next = api.lastCollectionCursor;
-                    boolean more = api.lastCollectionHasMore;
+                    final List<FeedVideo> items = page.items();
                     runOnUiThread(() -> {
                         if (generation != mGeneration || isFinishing() || isDestroyed()) return;
                         mLoading = false;
-                        mCursor = next;
-                        mHasMore = more && !page.isEmpty();
-                        appendVideos(page);
+                        mCursor = page.cursor();
+                        mHasMore = page.hasMore();
+                        appendVideos(items);
                     });
                 }
             } catch (Exception e) {
@@ -189,7 +190,7 @@ public class CollectionActivity extends UiActivity {
         startActivity(it);
     }
 
-    private DouyinApi ensureApi() throws Exception {
+    private synchronized DouyinApi ensureApi() throws Exception {
         if (mApi == null) {
             mApi = new DouyinApi(new Signer(Arrays.asList(readAsset("sign/utils.js"),
                     readAsset("sign/sm3.js"), readAsset("sign/vm_decode.js"))));

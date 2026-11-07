@@ -100,7 +100,7 @@ public final class DouyinApi {
      * @param secUid 自己的 sec_uid（由 fetchSelfSecUid 取）
      * @param cursor 翻页游标，首页传 0
      */
-    public List<FeedVideo> fetchFavorite(String secUid, long cursor) throws IOException {
+    public PageResult<FeedVideo> fetchFavorite(String secUid, long cursor) throws IOException {
         ensureTtwid();
         String query = buildFavoriteQuery(secUid, cursor);
         String body;
@@ -118,17 +118,20 @@ public final class DouyinApi {
         String trimmed = body == null ? "" : body.trim();
         if (trimmed.isEmpty()) throw new IOException("喜欢列表暂时没有返回内容，请稍后再试");
         if (!trimmed.startsWith("{")) throw new IOException("喜欢列表暂时被接口拦截，请稍后再试");
+        JsonObject root = JsonParser.parseString(trimmed).getAsJsonObject();
         List<FeedVideo> list = parseFeed(trimmed);
         if (list.isEmpty()) {
             // 空也可能是真没喜欢过；用 status_code 区分"接口没通"和"确实没数据"
-            com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(trimmed);
-            int code = el.isJsonObject() ? optInt(el.getAsJsonObject(), "status_code") : -1;
+            int code = optInt(root, "status_code");
             if (code != 0) {
                 AppLog.i("api", "favorite status=" + code);
                 throw new IOException("喜欢列表暂时不可用（status=" + code + "），稍后再试");
             }
         }
-        return list;
+        // 实测接口返回 aweme_list + has_more + max_cursor；以服务端游标为准，
+        // 不再让调用方用本地 list.size() 猜下一页。若接口某天缺这两个字段，
+        // pageFromResponse 会直接给出 hasMore=false，至少不会无限重复第一页。
+        return pageFromResponse(root, cursor, list, "", "max_cursor", "cursor");
     }
 
     /** 喜欢列表单次请求；webSign=true 时追加本地签名参数与请求头。 */
@@ -304,11 +307,8 @@ public final class DouyinApi {
         public boolean isPrivate;
     }
 
-    public volatile long lastCollectionCursor = -1;
-    public volatile boolean lastCollectionHasMore;
-
     /** 全部收藏及单个收藏夹目录；读取目录不等于获取全部收藏。 */
-    public List<CollectionInfo> fetchCollections(long cursor) throws IOException {
+    public PageResult<CollectionInfo> fetchCollections(long cursor) throws IOException {
         Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
         p.put("cursor", String.valueOf(cursor));
         p.put("count", "20");
@@ -331,13 +331,11 @@ public final class DouyinApi {
                 if (!info.id.isEmpty()) out.add(info);
             }
         }
-        lastCollectionHasMore = optInt(root, "has_more") == 1;
-        lastCollectionCursor = lastCollectionHasMore ? firstLong(root, "cursor", "max_cursor") : -1;
-        return out;
+        return pageFromResponse(root, cursor, out, "", "cursor", "max_cursor");
     }
 
     /** 收藏夹内作品。集合 id 必须用 collects_id，不能传用户 id。 */
-    public List<FeedVideo> fetchCollectionVideos(String collectionId, long cursor) throws IOException {
+    public PageResult<FeedVideo> fetchCollectionVideos(String collectionId, long cursor) throws IOException {
         Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
         p.put("collects_id", collectionId == null ? "" : collectionId);
         p.put("cursor", String.valueOf(cursor));
@@ -345,13 +343,12 @@ public final class DouyinApi {
         SecSdkWebSigner.Result signed = SecSdkWebSigner.sign(joinAndSign(p), fullCookie());
         JsonObject root = getJson("/aweme/v1/web/collects/video/list/", signed.query,
                 "https://www.douyin.com/", "收藏作品", signed.headers);
-        lastCollectionHasMore = optInt(root, "has_more") == 1;
-        lastCollectionCursor = lastCollectionHasMore ? firstLong(root, "cursor", "max_cursor") : -1;
-        return parseFeed(root.toString());
+        return pageFromResponse(root, cursor, parseFeed(root.toString()), "",
+                "cursor", "max_cursor");
     }
 
     /** 全部收藏是 POST 查询（非写入）；参数放 query，空 body，不能改当 GET。 */
-    public List<FeedVideo> fetchAllCollectionVideos(long cursor) throws IOException {
+    public PageResult<FeedVideo> fetchAllCollectionVideos(long cursor) throws IOException {
         ensureTtwid();
         Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
         p.put("publish_video_strategy_type", "2");
@@ -373,18 +370,13 @@ public final class DouyinApi {
             if (!body.startsWith("{")) throw new IOException("全部收藏暂时被接口拦截，请稍后再试");
             JsonObject root = JsonParser.parseString(body).getAsJsonObject();
             if (optInt(root, "status_code") != 0) throw new IOException("全部收藏暂时不可用，请稍后重试");
-            lastCollectionHasMore = optInt(root, "has_more") == 1;
-            lastCollectionCursor = lastCollectionHasMore ? firstLong(root, "cursor", "max_cursor") : -1;
-            return parseFeed(body);
+            return pageFromResponse(root, cursor, parseFeed(body), "",
+                    "cursor", "max_cursor");
         }
     }
 
-    public volatile boolean lastSearchHasMore;
-    public volatile int lastSearchOffset;
-    public volatile String lastSearchId = "";
-
     /** 综合搜索只保留真正可播的视频条目，混合结果不产生空卡片。 */
-    public List<FeedVideo> searchVideos(String keyword, int offset, String searchId) throws IOException {
+    public PageResult<FeedVideo> searchVideos(String keyword, int offset, String searchId) throws IOException {
         Map<String, String> p = baseDeviceParams("190600", "19.6.0");
         p.put("search_channel", "aweme_general");
         p.put("enable_history", "1");
@@ -403,14 +395,14 @@ public final class DouyinApi {
         p.put("search_id", searchId == null ? "" : searchId);
         JsonObject root = getJson("/aweme/v1/web/general/search/single/", joinAndSign(p),
                 "https://www.douyin.com/search/" + urlEncode(keyword) + "?type=general", "视频搜索");
-        lastSearchHasMore = optInt(root, "has_more") == 1;
-        lastSearchOffset = offset + 15;
-        lastSearchId = optString(root, "search_id");
+        String nextSearchId = optString(root, "search_id");
         JsonObject log = objOf(root, "log_pb");
-        if (lastSearchId.isEmpty() && log != null) lastSearchId = optString(log, "impr_id");
+        if (nextSearchId.isEmpty() && log != null) nextSearchId = optString(log, "impr_id");
         List<FeedVideo> out = new ArrayList<>();
         JsonArray data = arrOf(root, "data");
-        if (data == null) return parseFeed(root.toString());
+        if (data == null) {
+            return searchPage(root, offset, 15, parseFeed(root.toString()), nextSearchId);
+        }
         for (JsonElement el : data) {
             if (!el.isJsonObject()) continue;
             JsonObject wrapper = el.getAsJsonObject();
@@ -421,16 +413,13 @@ public final class DouyinApi {
                 if (v != null) out.add(v);
             }
         }
-        return out;
+        return searchPage(root, offset, 15, out, nextSearchId);
     }
 
-    public List<UserSummary> searchUsers(String keyword, int offset) throws IOException {
+    public PageResult<UserSummary> searchUsers(String keyword, int offset) throws IOException {
         Map<String, String> p = searchParams(keyword, "aweme_user_web", offset, 15, VER_COMMON_CODE, VER_COMMON_NAME);
         JsonObject root = getJson("/aweme/v1/web/discover/search/", joinAndSign(p),
                 "https://www.douyin.com/search/" + urlEncode(keyword) + "?type=user", "用户搜索");
-        lastSearchHasMore = optInt(root, "has_more") == 1;
-        lastSearchOffset = offset + 15;
-        lastSearchId = optString(root, "search_id");
         List<UserSummary> out = new ArrayList<>();
         JsonArray arr = arrOf(root, "user_list");
         if (arr == null) arr = arrOf(root, "data");
@@ -443,7 +432,7 @@ public final class DouyinApi {
             UserSummary user = parseUserSummary(u);
             if (!user.secUid.isEmpty()) out.add(user);
         }
-        return out;
+        return searchPage(root, offset, 15, out, optString(root, "search_id"));
     }
 
     public static class LiveRoom implements java.io.Serializable {
@@ -451,15 +440,13 @@ public final class DouyinApi {
         public String webRid = "", title = "", ownerName = "", coverUrl = "", viewerText = "";
     }
 
-    public List<LiveRoom> searchLive(String keyword, int offset) throws IOException {
+    public PageResult<LiveRoom> searchLive(String keyword, int offset) throws IOException {
         Map<String, String> p = searchParams(keyword, "aweme_live", offset, 15, VER_COMMON_CODE, VER_COMMON_NAME);
         JsonObject root = getJson("/aweme/v1/web/live/search/", joinAndSign(p),
                 "https://www.douyin.com/search/" + urlEncode(keyword) + "?type=live", "直播搜索");
-        lastSearchHasMore = optInt(root, "has_more") == 1;
-        lastSearchOffset = offset + 15;
-        lastSearchId = optString(root, "search_id");
-        if (lastSearchId.isEmpty()) lastSearchId = firstString(root, "log_id", "rid");
-        return parseLiveRooms(root);
+        String searchId = optString(root, "search_id");
+        if (searchId.isEmpty()) searchId = firstString(root, "log_id", "rid");
+        return searchPage(root, offset, 15, parseLiveRooms(root), searchId);
     }
 
     private Map<String, String> searchParams(String keyword, String channel, int offset,
@@ -478,6 +465,44 @@ public final class DouyinApi {
         p.put("list_type", "single");
         p.put("pc_search_top_1_params", "{\"enable_ai_search_top_1\":1}");
         return p;
+    }
+
+    /**
+     * 把服务端 has_more + cursor 转成不可变分页结果。
+     *
+     * <p>安全闸门：条目为空、游标为负、游标与本次请求相同 → 一律 hasMore=false。
+     * 这样即使服务端恒返回 has_more=1 且游标不前进，调用方也不会无限请求同一页。</p>
+     */
+    private static <T> PageResult<T> pageFromResponse(JsonObject root, long requestCursor,
+                                                       List<T> items, String searchId,
+                                                       String... cursorKeys) {
+        if (root == null) return new PageResult<>(items, PageResult.END, false, searchId);
+        long next = firstLong(root, cursorKeys);
+        boolean more;
+        if (root.has("has_more")) {
+            more = optInt(root, "has_more") == 1;
+        } else {
+            // 接口没给 has_more 时不要盲猜“有下一页”：只有在明确给出游标字段、
+            // 且游标确实前进时才继续，否则宁可停在一页。
+            boolean hasCursorField = false;
+            for (String key : cursorKeys) {
+                if (root.has(key)) { hasCursorField = true; break; }
+            }
+            more = hasCursorField && next > 0 && next != requestCursor;
+        }
+        if (items == null || items.isEmpty() || next < 0 || next == requestCursor) {
+            more = false;
+        }
+        return new PageResult<>(items, more ? next : PageResult.END, more, searchId);
+    }
+
+    /** 搜索接口用 offset 翻页，search_id 只属于本次请求。 */
+    private static <T> PageResult<T> searchPage(JsonObject root, int requestOffset, int pageSize,
+                                                 List<T> items, String searchId) {
+        boolean more = root != null && optInt(root, "has_more") == 1
+                && items != null && !items.isEmpty();
+        long next = (long) requestOffset + pageSize;
+        return new PageResult<>(items, more ? next : PageResult.END, more, searchId);
     }
 
     static List<LiveRoom> parseLiveRooms(JsonObject root) {
@@ -602,7 +627,7 @@ public final class DouyinApi {
     }
 
     /** 只读通知：特意不传 is_mark_read，不做已读副作用，也不自动后台刷新。 */
-    public List<NoticeItem> fetchNotices(int group, long maxTime) throws IOException {
+    public PageResult<NoticeItem> fetchNotices(int group, long maxTime) throws IOException {
         Map<String, String> p = baseDeviceParams(VER_COMMON_CODE, VER_COMMON_NAME);
         p.put("is_new_notice", "1");
         p.put("notice_group", String.valueOf(group));
@@ -611,10 +636,8 @@ public final class DouyinApi {
         p.put("max_time", String.valueOf(maxTime));
         JsonObject root = getJson("/aweme/v1/web/notice/", joinAndSign(p),
                 "https://www.douyin.com/?recommend=1", "互动通知");
-        lastNoticeHasMore = optInt(root, "has_more") == 1;
-        long next = firstLong(root, "max_time", "cursor");
-        lastNoticeCursor = next > 0 ? next : -1;
-        return parseNoticesForTest(root, group);
+        return pageFromResponse(root, maxTime, parseNoticesForTest(root, group), "",
+                "max_time", "cursor");
     }
 
     /** 解析与网络解耦，便于以脱敏样本锁定真实结构。 */
@@ -671,9 +694,6 @@ public final class DouyinApi {
         }
         return out;
     }
-    public volatile boolean lastNoticeHasMore;
-    public volatile long lastNoticeCursor = -1;
-
     static String noticeText(int group) {
         switch (group) {
             case 401: return "关注了你";

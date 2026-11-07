@@ -23,6 +23,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import com.dywatch.app.R;
+import com.dywatch.app.chat.api.ConvResolver;
 import com.dywatch.app.chat.api.CredExtractor;
 import com.dywatch.app.chat.api.ImApi;
 import com.dywatch.app.chat.api.ImCreds;
@@ -46,32 +47,49 @@ final class ApiChatPort implements ChatPort {
     /** 读接口有限频：轮询间隔不能被 UI 的 5s 拉得太密（ImApi 内部还有 3s 硬节流） */
     private static final long CONV_CACHE_MS = 4000L;
 
+    /**
+     * 发送总超时：首次发送可能要等临时 WebView 提取凭证（CredExtractor 上限 20s），
+     * 再加 HTTP connect/read（10s/20s），所以给 55s。宁可慢一点，也不要提前解锁
+     * 让用户重试造成重复发送。
+     */
+    private static final long SEND_TIMEOUT_MS = 55_000L;
+
     private final Activity mActivity;
     private final ChatEngine.Listener mOuter;
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private final ExecutorService mIo = Executors.newSingleThreadExecutor();
 
     private ImApi mApi;
-    /** 当前会话（进聊天页时由 openConversation 设） */
-    private String mConvId;
-    private long mConvShortId;
-    private String mConvTicket;
+    /** 当前会话（进聊天页时由 openConversation 设；volatile：IO 线程写、主线程读） */
+    private volatile String mConvId;
+    private volatile long mConvShortId;
+    private volatile String mConvTicket;
+    /** 打开会话的代次：快速返回/重进时旧请求不能覆盖新会话 */
+    private volatile long mConvSeq;
     /** 当前会话最近一次成功拿到的消息（用于历史与去重） */
     private final List<ImModels.Msg> mMsgs = new ArrayList<>();
     /** 昵称缓存：sec_uid → 昵称（会话列表渲染用） */
     private final java.util.Map<String, String> mNick = new java.util.HashMap<>();
-    /**
-     * 会话名 → 会话 id（**静态**，跨页面共享）。
-     *
-     * 为什么必须静态：会话列表页和聊天页各自 new 一个 ApiChatPort，
-     * 列表页拿到的昵称在聊天页那个实例里看不到；而 UI 传给 openConversation 的是**名字**。
-     * 没有这张表，聊天页就只能拿 uid 去匹配名字 → "找不到会话"（2026-11-07 真机踩到）。
-     */
-    private static final java.util.Map<String, String> sNameToId = new java.util.HashMap<>();
     /** 凭证提取中的回调队列（同时只跑一个提取器） */
     private CredExtractor mExtracting;
     private final List<Runnable> mCredWaiters = new ArrayList<>();
     private boolean mDestroyed;
+
+    // ---- 发送状态机（主线程读写；IO 线程只读 volatile 快照） ----
+    private volatile boolean mSending;
+    private volatile long mSendSeq;
+    private SendCallback mSendCb;
+    private String mSendText = "";
+
+    private final Runnable mSendTimeout = new Runnable() {
+        @Override
+        public void run() {
+            if (!mSending) return;
+            long seq = mSendSeq;
+            AppLog.i(TAG, "发送超时（seq=" + seq + "）");
+            finishSend(seq, false, "发送超时（网络/凭证无回应，请重试）");
+        }
+    };
 
     ApiChatPort(Activity activity, ChatEngine.Listener listener) {
         mActivity = activity;
@@ -144,9 +162,8 @@ final class ApiChatPort implements ChatPort {
 
                     final List<Conversation> out = new ArrayList<>();
                     for (ImModels.Conv c : convs(init)) {
-                        // 会话名 → id 的映射也在这里建（聊天页要用它反查）
+                        // key 直接用 conversation_id：跨页面/跨刷新稳定，不再建 name→id 的静态表。
                         String dn = c.displayName();
-                        if (!dn.isEmpty()) sNameToId.put(dn, c.id);
                         out.add(new Conversation(
                                 c.id,
                                 dn,
@@ -176,6 +193,12 @@ final class ApiChatPort implements ChatPort {
 
     private static List<ImModels.Conv> convs(ImApi.Init init) {
         return init.convs;
+    }
+
+    @Override
+    public boolean isConvListAuthoritative() {
+        // init 成功即代表服务端权威结果：0 条就是真实 0 会话，不能再套 DOM 的“卡在会话数据”诊断。
+        return true;
     }
 
     /**
@@ -226,9 +249,11 @@ final class ApiChatPort implements ChatPort {
                 try {
                     ImApi.Init init = mApi.init();
                     if (!init.ok()) {
-                        postError("消息: " + init.error);
+                        if (convId.equals(mConvId)) postError("消息: " + init.error);
                         return;
                     }
+                    // ⚠️ 会话可能在这期间被切换：旧请求的结果绝不能投到新会话。
+                    if (!convId.equals(mConvId)) return;
                     ImModels.Conv c = init.find(convId);
                     if (c == null) {
                         // 会话不在本次列表里（可能被删/退群）：给空而不是报错
@@ -243,7 +268,7 @@ final class ApiChatPort implements ChatPort {
                     mMsgs.addAll(c.recent);
                     postMessages(toUi(c.recent, init.selfUid));
                 } catch (Throwable t) {
-                    postError("消息: " + friendly(t));
+                    if (convId.equals(mConvId)) postError("消息: " + friendly(t));
                 }
             }
         });
@@ -251,38 +276,35 @@ final class ApiChatPort implements ChatPort {
 
     @Override
     public void openConversation(final String name) {
-        // UI 传的是会话名（与 WebView 通道一致的入参）。这里按名字回查会话 id。
+        openConversation(null, name);
+    }
+
+    /**
+     * 打开会话：稳定 key（conversation_id）精确查找；name 只做唯一精确兜底。
+     *
+     * 2026-11-07 审计：原实现按 name 双向 startsWith 匹配，前缀会话会串；
+     * 静态 sNameToId 也可能被旧账号/旧列表污染。现在不再用任何名称模糊匹配。
+     */
+    @Override
+    public void openConversation(final String key, final String name) {
+        final long seq = ++mConvSeq;
         mIo.execute(new Runnable() {
             @Override
             public void run() {
                 try {
-                    // ⚠️ 先用列表页留下的映射直查（省一次请求，也避免"昵称还没补全就按名字匹配"）
-                    String known = name == null ? null : sNameToId.get(name);
                     ImApi.Init init = mApi.init();
                     if (!init.ok()) {
-                        postError("打开会话: " + init.error);
+                        if (seq == mConvSeq) postError("打开会话: " + init.error);
                         return;
                     }
+                    if (seq != mConvSeq) return;   // 已切到别的会话，旧请求作废
                     fillNicknames(init.convs);
+                    if (seq != mConvSeq) return;
 
-                    ImModels.Conv hit = null;
-                    if (known != null) hit = init.find(known);
+                    ImModels.Conv hit = ConvResolver.resolve(init.convs, key, name);
                     if (hit == null) {
-                        for (ImModels.Conv c : init.convs) {
-                            String dn = c.displayName();
-                            if (dn != null && dn.equals(name)) {
-                                hit = c;
-                                break;
-                            }
-                            // 名字可能被 UI 截断/带后缀，再做一次前缀匹配
-                            if (hit == null && dn != null && !dn.isEmpty()
-                                    && (dn.startsWith(name) || name.startsWith(dn))) {
-                                hit = c;
-                            }
-                        }
-                    }
-                    if (hit == null) {
-                        postError("找不到会话「" + name + "」");
+                        String show = name == null || name.trim().isEmpty() ? key : name;
+                        if (seq == mConvSeq) postError("找不到会话「" + show + "」");
                         return;
                     }
                     mConvId = hit.id;
@@ -294,7 +316,7 @@ final class ApiChatPort implements ChatPort {
                             + " self=" + init.selfUid);
                     postMessages(toUi(hit.recent, init.selfUid));
                 } catch (Throwable t) {
-                    postError("打开会话: " + friendly(t));
+                    if (seq == mConvSeq) postError("打开会话: " + friendly(t));
                 }
             }
         });
@@ -302,39 +324,80 @@ final class ApiChatPort implements ChatPort {
 
     @Override
     public boolean sendText(final String text, final SendCallback cb) {
+        if (mDestroyed) return false;
         if (text == null || text.trim().isEmpty()) return false;
-        if (mConvId == null || mConvId.isEmpty()) {
+        final String convId = mConvId;
+        final long shortId = mConvShortId;
+        final String ticket = mConvTicket;
+        if (convId == null || convId.isEmpty()) {
             // 还没进会话：明确告诉 UI 这次没发（不要显示气泡）
             postError("还没进入会话，无法发送");
             return false;
         }
+        // 单飞锁：重复点击/上层漏了防重时，绝不再发第二条
+        if (mSending) {
+            AppLog.i(TAG, "发送被单飞锁拒绝（上一条仍在途）");
+            if (cb != null) cb.onSendResult(false, "上一条还在发送中，请稍候", text);
+            return false;
+        }
+        mSending = true;
+        final long seq = ++mSendSeq;
+        mSendCb = cb;
+        mSendText = text;
+        mMain.removeCallbacks(mSendTimeout);
+        mMain.postDelayed(mSendTimeout, SEND_TIMEOUT_MS);
+        AppLog.i(TAG, "发送开始 seq=" + seq + " conv=" + convId);
+
         // 凭证：先用缓存，过期/缺失则临时提一次（提取要几秒，先让 UI 知道"在发"）
         ImCreds creds = ImCreds.load(mActivity);
         if (creds.fresh()) {
-            doSend(text, creds, cb);
+            doSend(seq, text, creds, convId, shortId, ticket);
             return true;
         }
         extractCredsThen(new Runnable() {
             @Override
             public void run() {
+                if (!isCurrentSend(seq)) return;   // 等凭证期间已超时/页面销毁
                 ImCreds fresh = ImCreds.load(mActivity);
                 if (!fresh.complete()) {
-                    if (cb != null) cb.onSendResult(false, "发送凭证获取失败（请打开一次私信页后重试）", text);
+                    finishSend(seq, false, "发送凭证获取失败（请打开一次私信页后重试）");
                     return;
                 }
-                doSend(text, fresh, cb);
+                doSend(seq, text, fresh, convId, shortId, ticket);
             }
         });
         return true;
     }
 
-    private void doSend(final String text, final ImCreds creds, final SendCallback cb) {
-        final String convId = mConvId;
-        final long shortId = mConvShortId;
-        final String ticket = mConvTicket;
+    private boolean isCurrentSend(long seq) {
+        return !mDestroyed && mSending && seq == mSendSeq;
+    }
+
+    /**
+     * 发送唯一终态：只有当前在途请求能结束；旧请求的迟到回调直接丢弃。
+     * 主线程调用（Handler / mMain.post / CredExtractor 回调）。
+     */
+    private void finishSend(long seq, boolean ok, String detail) {
+        if (!isCurrentSend(seq)) {
+            AppLog.i(TAG, "忽略迟到发送回调 seq=" + seq + "（当前=" + mSendSeq + "）");
+            return;
+        }
+        mSending = false;
+        mMain.removeCallbacks(mSendTimeout);
+        SendCallback cb = mSendCb;
+        String text = mSendText;
+        mSendCb = null;
+        mSendText = "";
+        if (cb != null) cb.onSendResult(ok, detail == null ? "" : detail, text);
+    }
+
+    private void doSend(final long seq, final String text, final ImCreds creds,
+                        final String convId, final long shortId, final String ticket) {
         mIo.execute(new Runnable() {
             @Override
             public void run() {
+                // 排队期间可能已超时/切换页面；不要再多发一条已作废的消息。
+                if (!isCurrentSend(seq)) return;
                 try {
                     ImSend send = new ImSend().setCookie(LoginManager.getCookies(mActivity));
                     final ImSend.Result r = send.sendText(convId, shortId, ticket, creds, text);
@@ -342,24 +405,18 @@ final class ApiChatPort implements ChatPort {
                     mMain.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (mDestroyed) return;
-                            // ⚠️ 2026-11-07 审计 H4：把真实结果回给 UI（原来只写日志，
-                            //    UI 无论成败都显示"我"的气泡，用户会以为已经发出去了）。
-                            if (cb != null) {
-                                if (r.ok) {
-                                    cb.onSendResult(true, "", text);
-                                } else if (!r.decision.isEmpty()) {
-                                    // 有风控判定：账号级信号，必须让用户看到
-                                    cb.onSendResult(false, "发送被服务端拦截（" + r.decision + "）", text);
-                                } else {
-                                    cb.onSendResult(false,
-                                            "发送失败: " + (r.message.isEmpty() ? ("code " + r.code) : r.message), text);
-                                }
-                            }
+                            if (!isCurrentSend(seq)) return;   // 迟到结果不改下一次发送状态
                             if (r.ok) {
+                                applyRotatedConvTicket(convId, r.newTicket);
+                                finishSend(seq, true, "");
                                 if (mOuter != null) mOuter.onAuth(true, "");
-                                // 立刻刷新一次，让服务端真数据替换本地回声
+                                // 立刻刷新一次，让服务端真数据替换本地回声，同时把会话 ticket 刷到最新
                                 fetchMessages();
+                            } else if (!r.decision.isEmpty()) {
+                                finishSend(seq, false, "发送被服务端拦截（" + r.decision + "）");
+                            } else {
+                                finishSend(seq, false,
+                                        "发送失败: " + (r.message.isEmpty() ? ("code " + r.code) : r.message));
                             }
                         }
                     });
@@ -369,12 +426,32 @@ final class ApiChatPort implements ChatPort {
                     mMain.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (!mDestroyed && cb != null) cb.onSendResult(false, "发送失败: " + why, text);
+                            finishSend(seq, false, "发送失败: " + why);
                         }
                     });
                 }
             }
         });
+    }
+
+    /**
+     * 采用发送响应里的轮换 ticket（f9）。
+     *
+     * 只更新本进程内当前会话的 f7 会话 ticket，不写 ImCreds：
+     * ImCreds.ticket 是 ticket-guard HMAC 的账号级材料，f9 语义未在 proto 中确认，
+     * 写错会让所有后续发送签名失败（甚至 KICK）。会话 ticket 每轮 init 都会刷新，
+     * 这里只在形态可信时短暂采用。
+     */
+    private void applyRotatedConvTicket(String convId, String candidate) {
+        if (candidate == null || candidate.isEmpty()) return;
+        if (convId == null || !convId.equals(mConvId)) return;
+        String next = ImSend.nextConvTicket(mConvTicket, candidate);
+        if (next.equals(mConvTicket)) {
+            AppLog.i(TAG, "发送响应的 f9 不像会话 ticket，忽略");
+            return;
+        }
+        mConvTicket = next;
+        AppLog.i(TAG, "会话 ticket 已按发送响应轮换（len=" + next.length() + "）");
     }
 
     @Override
@@ -392,6 +469,11 @@ final class ApiChatPort implements ChatPort {
     @Override
     public void setListenerDetached(ChatEngine.Listener listener) {
         mDestroyed = true;
+        mSending = false;
+        mSendSeq++;
+        mSendCb = null;
+        mSendText = "";
+        mMain.removeCallbacks(mSendTimeout);
         mMain.removeCallbacksAndMessages(null);
         if (mExtracting != null) {
             try {
@@ -400,6 +482,7 @@ final class ApiChatPort implements ChatPort {
             }
             mExtracting = null;
         }
+        mCredWaiters.clear();
         mIo.shutdownNow();
     }
 
@@ -414,7 +497,7 @@ final class ApiChatPort implements ChatPort {
             public void run() {
                 try {
                     List<ImModels.Msg> older = mApi.history(convId, shortId, before);
-                    if (older.isEmpty()) return;
+                    if (older.isEmpty() || !convId.equals(mConvId)) return;
                     mMsgs.addAll(0, older);
                     postMessages(toUi(mMsgs, 0));
                 } catch (Throwable t) {
@@ -445,7 +528,13 @@ final class ApiChatPort implements ChatPort {
                         if (!ok) AppLog.i(TAG, "凭证提取失败: " + why);
                         List<Runnable> todo = new ArrayList<>(mCredWaiters);
                         mCredWaiters.clear();
-                        for (Runnable r : todo) r.run();
+                        for (Runnable r : todo) {
+                            try {
+                                r.run();
+                            } catch (Throwable t) {
+                                AppLog.i(TAG, "凭证等待回调异常: " + friendly(t));
+                            }
+                        }
                     }
                 });
             }

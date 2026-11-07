@@ -76,7 +76,14 @@ public final class ImSend {
         /** 风控判定：空 = 无风控；KICK = 会话被踢 */
         public String decision = "";
         public long serverMessageId;
-        /** 解析出的新 ticket（服务端可能轮换），可回写 ImCreds */
+        /**
+         * 解析出的新 ticket（响应 f6.f100.f9）。
+         *
+         * ⚠️ 该字段在项目使用的 SendMessageResponse proto 里**没有定义**（MessageInfo 只有
+         * f1/f3/f4/f5/f6），语义未确认。不能直接写 ImCreds.ticket（ticket-guard 的 HMAC
+         * 材料，写错会让后续发送全部签名失败甚至 KICK）；只能经
+         * {@link #nextConvTicket(String, String)} 形态校验后，当作会话级 ticket 在本进程短暂使用。
+         */
         public String newTicket = "";
 
         @Override
@@ -356,6 +363,28 @@ public final class ImSend {
             r.message = "响应解析失败";
         }
         return r;
+    }
+
+    /**
+     * 谨慎采用发送响应里的轮换会话 ticket。
+     *
+     * 为什么只做“形态校验后短期采用”，不落 ImCreds：
+     *   · 会话 ticket（发送体 f7）实测约 121 字符、可见 ASCII；
+     *   · 响应 f9 不在公开 proto 的 MessageInfo 里，无法确认它一定是会话 ticket；
+     *   · ImCreds.ticket 是 ticket-guard 的账号级 HMAC 材料，写错的风险是发送全失败/KICK。
+     * 因此只在候选值看起来确实像会话 ticket 时替换**内存里的 mConvTicket**；
+     * 每轮 init 仍会用服务端最新值覆盖，进程重启不依赖这个字段。
+     */
+    public static String nextConvTicket(String current, String candidate) {
+        String cur = current == null ? "" : current;
+        if (candidate == null) return cur;
+        String c = candidate.trim();
+        if (c.length() < 100 || c.length() > 200) return cur;
+        for (int i = 0; i < c.length(); i++) {
+            char ch = c.charAt(i);
+            if (ch < 0x21 || ch > 0x7e) return cur;
+        }
+        return c;
     }
 
     // ---------- JSON 小工具（不引 Gson：这里只要读几个字符串字段） ----------

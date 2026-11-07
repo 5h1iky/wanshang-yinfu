@@ -32,6 +32,30 @@ public interface ChatPort {
     void openConversation(String name);
 
     /**
+     * 打开会话（稳定身份优先，2026-11-07 审计）。
+     *
+     * @param key  会话的稳定定位键（{@link com.dywatch.app.chat.model.Conversation#key}）：
+     *             原生 API 通道就是 conversation_id；DOM 通道是页面内定位键（可能只是行号）。
+     * @param name 会话显示名，仅用于展示 / 老通道兼容。**禁止**用名称前缀匹配来选会话。
+     *
+     * 默认实现只把 name 传给老通道（WebView / kernel 的桥只认名字）。
+     * ApiChatPort 会覆盖它，用 key 精确查 conversation_id，name 只做唯一精确兜底。
+     */
+    default void openConversation(String key, String name) {
+        openConversation(name);
+    }
+
+    /**
+     * 当前通道的“空会话列表”是否可信。
+     *
+     * 原生 API 的 init 成功返回 0 条 = 真实 0 会话，应直接显示空态；
+     * DOM / kernel 通道的 0 条可能只是页面还没渲染完，必须继续走等待/重试诊断。
+     */
+    default boolean isConvListAuthoritative() {
+        return false;
+    }
+
+    /**
      * 发一条文本。
      *
      * @param cb 可为 null。非 null 时通道在**服务端给出结果**后回调；

@@ -72,6 +72,15 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
     protected AssetFileDescriptor mAssetFileDescriptor;//assets文件
 
     protected long mCurrentPosition;//当前正在播放视频的位置
+    protected long mDuration;//已知的视频总时长（ERROR/PREPARED 时仍可用于进度条/seek 目标计算）
+    /**
+     * 是否由用户/页面生命周期主动暂停。
+     *
+     * <p>缓冲中（STATE_BUFFERING）isPlaying() 可能为 false，老 pause() 会直接 no-op，
+     * 缓冲结束后声音继续在后台播。现在缓冲中也会真正 pause，并用此标记阻止迟到的
+     * BUFFERING_END / RENDERING_START 回调把状态改回 PLAYING。</p>
+     */
+    protected boolean mPauseRequested;
 
     //播放器的各种状态
     public static final int STATE_ERROR = -1;
@@ -178,12 +187,35 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
      */
     @Override
     public void start() {
-        if (isInIdleState()
+        if (mCurrentPlayState == STATE_ERROR) {
+            // 错误态下按钮/外部 start() 必须有确定行为：保留当前位置重建播放器续播，
+            // 而不是像老实现那样直接把 STATE_ERROR 忽略掉（点了没反应）。
+            retry();
+        } else if (isInIdleState()
                 || isInStartAbortState()) {
             startPlay();
+        } else if (mCurrentPlayState == STATE_PREPARED) {
+            // 某些播放内核不会在 onPrepared 后自动 start；显式补一拍。
+            startInPlaybackState();
         } else if (isInPlaybackState()) {
             startInPlaybackState();
         }
+    }
+
+    /**
+     * 错误恢复：保留 {@link #mCurrentPosition}，释放旧播放核心后重新 prepare。
+     *
+     * <p>这是向后兼容的新增 API：非 ERROR 状态调用返回 false，不会误触发重播。
+     * 播放器内部 {@link #start()} 在 STATE_ERROR 时也会自动走这里；页面层还可以在
+     * 重建 URL（如代理失败→直连）后调用，确保从原位置继续。</p>
+     */
+    public boolean retry() {
+        if (mCurrentPlayState != STATE_ERROR) return false;
+        long position = mCurrentPosition;
+        release();               // release 不再清零 mCurrentPosition（见 release 注释）
+        mCurrentPosition = position;
+        startPlay();
+        return true;
     }
 
     /**
@@ -201,10 +233,11 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
         if (mEnableAudioFocus) {
             mAudioFocusHelper = new AudioFocusHelper(this);
         }
-        //读取播放进度
-        if (mProgressManager != null) {
+        //读取播放进度（只有尚未指定续播位置时才读；错误重试/seek 后的位置优先）
+        if (mProgressManager != null && mCurrentPosition <= 0) {
             mCurrentPosition = mProgressManager.getSavedProgress(mUrl);
         }
+        mPauseRequested = false;
         initPlayer();
         addDisplay();
         startPrepare(false);
@@ -313,6 +346,7 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
      * 播放状态下开始播放
      */
     protected void startInPlaybackState() {
+        mPauseRequested = false;
         mMediaPlayer.start();
         setPlayState(STATE_PLAYING);
         if (mAudioFocusHelper != null && !isMute()) {
@@ -326,23 +360,54 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
      */
     @Override
     public void pause() {
-        if (isInPlaybackState()
-                && mMediaPlayer.isPlaying()) {
-            mMediaPlayer.pause();
-            setPlayState(STATE_PAUSED);
-            if (mAudioFocusHelper != null && !isMute()) {
-                mAudioFocusHelper.abandonFocus();
-            }
-            mPlayerContainer.setKeepScreenOn(false);
+        if (mMediaPlayer == null) return;
+        if (mCurrentPlayState == STATE_ERROR
+                || mCurrentPlayState == STATE_IDLE
+                || mCurrentPlayState == STATE_PLAYBACK_COMPLETED) {
+            return;
         }
+        // 还在 prepareAsync：不能对 MediaPlayer 调 pause（会抛 IllegalStateException），
+        // 先记下意图；onInfo(RENDERING_START) 时会立即补 pause，避免后台出声。
+        if (mCurrentPlayState == STATE_PREPARING) {
+            mPauseRequested = true;
+            return;
+        }
+        try {
+            if (mMediaPlayer.isPlaying()
+                    || mCurrentPlayState == STATE_BUFFERING
+                    || mCurrentPlayState == STATE_BUFFERED) {
+                // ⚠️ 2026-11-07：缓冲中 isPlaying() 可能为 false，老实现因此 no-op，
+                // 缓冲结束后的音频就在后台继续播。这里对缓冲态也显式 pause。
+                mMediaPlayer.pause();
+            } else {
+                return;
+            }
+        } catch (IllegalStateException e) {
+            // 播放核心状态已变化（例如刚好 error），交给它的错误回调处理；
+            // 不把 pause 失败升级成新的 ERROR。
+            return;
+        }
+        mPauseRequested = true;
+        setPlayState(STATE_PAUSED);
+        if (mAudioFocusHelper != null && !isMute()) {
+            mAudioFocusHelper.abandonFocus();
+        }
+        mPlayerContainer.setKeepScreenOn(false);
     }
 
     /**
      * 继续播放
      */
     public void resume() {
-        if (isInPlaybackState()
-                && !mMediaPlayer.isPlaying()) {
+        if (mMediaPlayer == null) return;
+        if (mCurrentPlayState == STATE_PREPARING) {
+            // 还在 prepareAsync：清掉切后台时记下的暂停意图，准备好后正常起播。
+            mPauseRequested = false;
+            return;
+        }
+        if (!isInPlaybackState() && mCurrentPlayState != STATE_PREPARED) return;
+        if (!mMediaPlayer.isPlaying()) {
+            mPauseRequested = false;
             mMediaPlayer.start();
             setPlayState(STATE_PLAYING);
             if (mAudioFocusHelper != null && !isMute()) {
@@ -385,8 +450,10 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
             mPlayerContainer.setKeepScreenOn(false);
             //保存播放进度
             saveProgress();
-            //重置播放进度
-            mCurrentPosition = 0;
+            // ⚠️ 2026-11-07：不再把 mCurrentPosition 清零。
+            // 错误恢复/换 URL 重播（release → setUrl → start）需要靠它恢复原位置；
+            // setUrl()/setAssetFileDescriptor() 会在换源时显式归零，不会串到下一个视频。
+            mPauseRequested = false;
             //切换转态
             setPlayState(STATE_IDLE);
         }
@@ -448,9 +515,14 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
     @Override
     public long getDuration() {
         if (isInPlaybackState()) {
-            return mMediaPlayer.getDuration();
+            try {
+                mDuration = mMediaPlayer.getDuration();
+                return mDuration;
+            } catch (IllegalStateException ignored) {
+                // 状态刚好切换（如 buffer→error），返回最后一次已知时长。
+            }
         }
-        return 0;
+        return mDuration;
     }
 
     /**
@@ -458,21 +530,43 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
      */
     @Override
     public long getCurrentPosition() {
+        // 只有真正处于播放态才向内核取位置；PREPARED 阶段内核还是 0，
+        // 取了会把 skipPosition/seek 的目标覆盖掉。ERROR 时返回最后记录的位置。
         if (isInPlaybackState()) {
-            mCurrentPosition = mMediaPlayer.getCurrentPosition();
-            return mCurrentPosition;
+            try {
+                mCurrentPosition = mMediaPlayer.getCurrentPosition();
+            } catch (IllegalStateException ignored) {
+                // 保留最后一次已知位置
+            }
         }
-        return 0;
+        return mCurrentPosition;
     }
 
     /**
-     * 调整播放进度
+     * 调整播放进度。
+     *
+     * <p>2026-11-07：老实现只在 isInPlaybackState() 时 seek，ERROR/PREPARED 直接 no-op，
+     * 于是错误后拖进度条完全没有反馈。现在所有状态都确定性地记住目标位置：
+     * 可 seek 时立即 seek，PREPARING/ERROR/IDLE 时等 start()/onPrepared() 生效。</p>
      */
     @Override
     public void seekTo(long pos) {
-        if (isInPlaybackState()) {
+        if (pos < 0) pos = 0;
+        long duration = getDuration();
+        if (duration > 0 && pos > duration) pos = duration;
+        mCurrentPosition = pos;
+        if (canSeekNow()) {
             mMediaPlayer.seekTo(pos);
         }
+    }
+
+    /** 当前内核是否处于可安全调用 seekTo 的状态（PREPARED 也算，onPrepared 恢复进度要用）。 */
+    private boolean canSeekNow() {
+        return mMediaPlayer != null
+                && mCurrentPlayState != STATE_ERROR
+                && mCurrentPlayState != STATE_IDLE
+                && mCurrentPlayState != STATE_PREPARING
+                && mCurrentPlayState != STATE_START_ABORT;
     }
 
     /**
@@ -516,6 +610,11 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
      */
     @Override
     public void onPrepared() {
+        try {
+            if (mMediaPlayer != null) mDuration = mMediaPlayer.getDuration();
+        } catch (IllegalStateException ignored) {
+            // 保留上一次已知时长
+        }
         setPlayState(STATE_PREPARED);
         if (!isMute() && mAudioFocusHelper != null) {
             mAudioFocusHelper.requestFocus();
@@ -532,14 +631,26 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
     public void onInfo(int what, int extra) {
         switch (what) {
             case AbstractPlayer.MEDIA_INFO_BUFFERING_START:
-                setPlayState(STATE_BUFFERING);
+                if (!mPauseRequested) setPlayState(STATE_BUFFERING);
                 break;
             case AbstractPlayer.MEDIA_INFO_BUFFERING_END:
-                setPlayState(STATE_BUFFERED);
+                // 已经请求过暂停（例如页面切后台时正在缓冲）：不能把状态改回 BUFFERED，
+                // 否则控制器/UI 会以为还在播放，缓冲结束后的音频也会继续。
+                setPlayState(mPauseRequested ? STATE_PAUSED : STATE_BUFFERED);
                 break;
             case AbstractPlayer.MEDIA_INFO_RENDERING_START: // 视频/音频开始渲染
-                setPlayState(STATE_PLAYING);
-                mPlayerContainer.setKeepScreenOn(true);
+                if (mPauseRequested) {
+                    // prepare 阶段收到的 pause 意图，到这里才有机会真正生效。
+                    try {
+                        if (mMediaPlayer != null) mMediaPlayer.pause();
+                    } catch (IllegalStateException ignored) {
+                    }
+                    setPlayState(STATE_PAUSED);
+                    mPlayerContainer.setKeepScreenOn(false);
+                } else {
+                    setPlayState(STATE_PLAYING);
+                    mPlayerContainer.setKeepScreenOn(true);
+                }
                 break;
             case AbstractPlayer.MEDIA_INFO_VIDEO_ROTATION_CHANGED:
                 if (mRenderView != null) mRenderView.setVideoRotation(extra);
@@ -552,6 +663,15 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
      */
     @Override
     public void onError() {
+        // 先尽力抓住错误瞬间的真实位置：之后 isInPlaybackState() 为 false，
+        // getCurrentPosition() 只能返回这个缓存值。长视频恢复必须靠它。
+        if (mMediaPlayer != null) {
+            try {
+                mCurrentPosition = mMediaPlayer.getCurrentPosition();
+            } catch (IllegalStateException ignored) {
+                // 用最后一次进度回调记录的位置
+            }
+        }
         mPlayerContainer.setKeepScreenOn(false);
         setPlayState(STATE_ERROR);
     }
@@ -627,6 +747,10 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
         mAssetFileDescriptor = null;
         mUrl = url;
         mHeaders = headers;
+        // 换源必须清掉上一支视频的续播位置/时长，避免串片；
+        // 同一支视频要恢复位置时，调用方在 setUrl 之后用 skipPositionWhenPlay 指定。
+        mCurrentPosition = 0;
+        mDuration = 0;
     }
 
     /**
@@ -635,6 +759,8 @@ public class BaseVideoView<P extends AbstractPlayer> extends FrameLayout
     public void setAssetFileDescriptor(AssetFileDescriptor fd) {
         mUrl = null;
         this.mAssetFileDescriptor = fd;
+        mCurrentPosition = 0;
+        mDuration = 0;
     }
 
     /**

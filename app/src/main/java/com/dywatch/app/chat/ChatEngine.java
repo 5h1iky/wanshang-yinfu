@@ -51,6 +51,16 @@ public class ChatEngine {
     }
 
     /**
+     * 文本发送结果（2026-11-07 私信链路修复）。
+     *
+     * WebView 桥的 `sent` 事件证据是"编辑器被清空/未清空"，不是服务端回执；
+     * 但对 UI 来说必须有一个**确定终态**（成功/失败/超时），不能永远 pending。
+     */
+    public interface SendListener {
+        void onSendResult(boolean ok, String detail, String text);
+    }
+
+    /**
      * 动作回调登记表：reqId → 发起方。
      *
      * ⚠️ 2026-10-02 修（代码审计 M17）：原来这里是一个**单槽** `mActionListener`，
@@ -128,6 +138,27 @@ public class ChatEngine {
      * 现在排队，按发起顺序补发。
      */
     private final java.util.ArrayDeque<String> mPendingJs = new java.util.ArrayDeque<>();
+
+    /** 文本发送只允许一个在途（UI 侧还有一层 ChatSendGuard，这里是通道层兜底） */
+    private static final long SEND_TIMEOUT_MS = 20_000L;
+    private SendListener mSendListener;
+    private String mSendText = "";
+    private String mSendReqId = "";
+    private int mSendSeq;
+
+    /**
+     * 发送超时兜底：桥事件丢了/页面没响应时，上层也必须拿到一个终态。
+     * reqId 不匹配的迟到事件在 dispatchBridgeEvent 里直接丢弃。
+     */
+    private final Runnable mSendTimeout = new Runnable() {
+        @Override
+        public void run() {
+            SendListener cb = mSendListener;
+            String text = mSendText;
+            clearPendingSend();
+            if (cb != null) cb.onSendResult(false, "发送超时（页面无回应）", text);
+        }
+    };
 
     @SuppressLint("SetJavaScriptEnabled")
     private ChatEngine(android.content.Context ctx, Listener listener, String homeUrl) {
@@ -431,7 +462,35 @@ public class ChatEngine {
 
     /** 发送文本消息（经 JS 桥驱动页面输入并发送） */
     public void sendText(final String text) {
-        runJs("ChatBridge.sendText(" + org.json.JSONObject.quote(text) + ");");
+        sendText(text, null);
+    }
+
+    /**
+     * 发送文本并等待桥的 `sent` 结果（2026-11-07 私信链路修复）。
+     *
+     * @param cb 可为 null；非 null 时**必定**收到一次终态（sent / error / 20s 超时）。
+     *           每次发送带独立 reqId，桥原样回传；旧 reqId 的迟到事件不会投给下一次发送。
+     */
+    public void sendText(final String text, final SendListener cb) {
+        if (cb == null) {
+            runJs("ChatBridge.sendText(" + org.json.JSONObject.quote(text) + ");");
+            return;
+        }
+        final String reqId = "s" + (++mSendSeq);
+        mSendListener = cb;
+        mSendText = text == null ? "" : text;
+        mSendReqId = reqId;
+        mHandler.removeCallbacks(mSendTimeout);
+        mHandler.postDelayed(mSendTimeout, SEND_TIMEOUT_MS);
+        runJs("ChatBridge.sendText(" + org.json.JSONObject.quote(text)
+                + "," + org.json.JSONObject.quote(reqId) + ");");
+    }
+
+    private void clearPendingSend() {
+        mHandler.removeCallbacks(mSendTimeout);
+        mSendListener = null;
+        mSendText = "";
+        mSendReqId = "";
     }
 
     /**
@@ -779,8 +838,19 @@ public class ChatEngine {
                 String msg = ok ? ("已登录 " + o.optString("user", "")) : o.optString("message", "");
                 if (mListener != null) mListener.onAuth(ok, msg);
             } else if ("sent".equals(type)) {
-                // 发送结果（仅记日志；页面消息流为准）
-                AppLog.i("engine", "发送结果: ok=" + o.optBoolean("ok") + " " + o.optString("note", ""));
+                // 发送结果：按 reqId 精确投递，迟到/旧请求一律忽略（审计：不能污染下一次发送）
+                boolean ok = o.optBoolean("ok", false);
+                String note = o.optString("note", "");
+                String reqId = o.optString("reqId", "");
+                AppLog.i("engine", "发送结果: ok=" + ok + " " + note);
+                if (!reqId.isEmpty() && reqId.equals(mSendReqId)) {
+                    SendListener cb = mSendListener;
+                    String text = mSendText;
+                    clearPendingSend();
+                    if (cb != null) cb.onSendResult(ok, note, text);
+                } else if (mSendListener != null) {
+                    AppLog.i("engine", "发送结果 reqId 不匹配，已忽略（迟到回调）");
+                }
             } else if ("action".equals(type)) {
                 String phase = o.optString("phase", "");
                 // 过程事件（navigating=跳页、submitting=正在试提交钮）不是结果，
@@ -806,6 +876,16 @@ public class ChatEngine {
             } else if ("home".equals(type)) {
                 AppLog.i("engine", o.optBoolean("ok") ? "引擎已在私信页" : "引擎归位：导航回 /chat");
             } else if ("error".equals(type)) {
+                // 发送过程中的桥错误（如找不到输入框）要立刻给本次发送一个失败终态；
+                // 只认 reqId，避免把别的轮询错误算到当前发送头上。
+                String reqId = o.optString("reqId", "");
+                if (!reqId.isEmpty() && reqId.equals(mSendReqId)) {
+                    SendListener cb = mSendListener;
+                    String text = mSendText;
+                    String why = o.optString("message");
+                    clearPendingSend();
+                    if (cb != null) cb.onSendResult(false, why, text);
+                }
                 if (mListener != null) mListener.onEngineError(o.optString("message"));
             }
         } catch (Exception e) {
@@ -863,6 +943,7 @@ public class ChatEngine {
     public void destroy() {
         mReady = false;
         mDocToken = "";
+        clearPendingSend();
         mListener = null;
         detachFromView();
         mHost = null;

@@ -51,13 +51,18 @@ final class WebViewChatPort implements ChatPort {
     }
 
     @Override
-    public boolean sendText(String text, SendCallback cb) {
+    public boolean sendText(String text, final SendCallback cb) {
         // ⚠️ 2026-11-07 审计 H4：只有"引擎真的就绪"才可能发得出去。
         //    没就绪时返回 false，让 UI 不要显示乐观气泡（原来一律返回 void，UI 无条件追加）。
         if (mEngine == null || !mEngine.isReady()) return false;
-        mEngine.sendText(text);
-        // WebView 通道的 `sent` 结果目前只进日志（桥的 ok 判据是"编辑器被清空"，不是服务端确认），
-        // 拿它当"发送成功"会骗人，所以这里**不回调** cb，由 UI 的超时兜底。
+        // 私信链路修复：WebView 通道也要有确定回调（桥的 sent / error / 20s 超时三选一），
+        // 否则 ChatActivity 的发送锁只能靠 UI 超时兜底，状态会一直 pending。
+        mEngine.sendText(text, cb == null ? null : new ChatEngine.SendListener() {
+            @Override
+            public void onSendResult(boolean ok, String detail, String text2) {
+                cb.onSendResult(ok, detail, text2);
+            }
+        });
         return true;
     }
 
