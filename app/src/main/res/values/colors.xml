@@ -77,4 +77,6 @@
     <!-- 自绘弹窗底（2026-09-30）：比 bg_card 更实一档——弹窗压在内容之上，
          半透明会让底下的文字透出来干扰阅读；AMOLED 上仍接近纯黑。 -->
     <color name="bg_dialog">#F21C1C1C</color>
+    <!-- 启动图标底色（2026-11-07 新图标：白色圆角底 + 渐变音符） -->
+    <color name="ic_launcher_background">#FFFFFFFF</color>
 </resources>
